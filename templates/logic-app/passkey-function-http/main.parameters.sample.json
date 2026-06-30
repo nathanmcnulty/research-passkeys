@@ -1,0 +1,18 @@
+{
+  "$schema": "https://schema.management.azure.com/schemas/2019-04-01/deploymentParameters.json#",
+  "contentVersion": "1.0.0.0",
+  "parameters": {
+    "location": {
+      "value": "westus2"
+    },
+    "environmentName": {
+      "value": "sample"
+    },
+    "functionBaseUrl": {
+      "value": "https://func-kvpk-example.azurewebsites.net"
+    },
+    "functionKey": {
+      "value": "replace-with-function-key"
+    }
+  }
+}

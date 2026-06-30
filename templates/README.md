@@ -6,6 +6,7 @@ Current templates:
 
 - `function-app\powershell-keyvault-passkey-http`
 - `function-app\python-keyvault-passkey-http`
+- `logic-app\passkey-function-http`
 
 Planned next templates:
 

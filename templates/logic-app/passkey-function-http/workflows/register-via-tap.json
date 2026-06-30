@@ -1,0 +1,77 @@
+{
+  "$schema": "https://schema.management.azure.com/providers/Microsoft.Logic/schemas/2016-06-01/workflowdefinition.json#",
+  "contentVersion": "1.0.0.0",
+  "parameters": {
+    "functionBaseUrl": {
+      "type": "String"
+    },
+    "functionKey": {
+      "type": "SecureString"
+    }
+  },
+  "triggers": {
+    "manual": {
+      "type": "Request",
+      "kind": "Http",
+      "inputs": {
+        "schema": {
+          "type": "object",
+          "properties": {
+            "userPrincipalName": {
+              "type": "string"
+            },
+            "email": {
+              "type": "string"
+            },
+            "tap": {
+              "type": "string"
+            },
+            "temporaryAccessPass": {
+              "type": "string"
+            },
+            "displayName": {
+              "type": "string"
+            },
+            "keyVaultKeyName": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "tap"
+          ]
+        }
+      }
+    }
+  },
+  "actions": {
+    "Invoke_function": {
+      "type": "Http",
+      "runAfter": {},
+      "inputs": {
+        "method": "POST",
+        "uri": "@{concat(parameters('functionBaseUrl'), '/api/passkeys/register/tap')}",
+        "headers": {
+          "x-functions-key": "@parameters('functionKey')",
+          "Content-Type": "application/json"
+        },
+        "body": "@triggerBody()"
+      }
+    },
+    "Return_result": {
+      "type": "Response",
+      "kind": "Http",
+      "runAfter": {
+        "Invoke_function": [
+          "Succeeded",
+          "Failed",
+          "TimedOut"
+        ]
+      },
+      "inputs": {
+        "statusCode": "@outputs('Invoke_function')?['statusCode']",
+        "body": "@body('Invoke_function')"
+      }
+    }
+  },
+  "outputs": {}
+}

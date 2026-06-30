@@ -1,0 +1,103 @@
+{
+  "$schema": "https://schema.management.azure.com/providers/Microsoft.Logic/schemas/2016-06-01/workflowdefinition.json#",
+  "contentVersion": "1.0.0.0",
+  "parameters": {
+    "functionBaseUrl": {
+      "type": "String"
+    },
+    "functionKey": {
+      "type": "SecureString"
+    }
+  },
+  "triggers": {
+    "manual": {
+      "type": "Request",
+      "kind": "Http",
+      "inputs": {
+        "schema": {
+          "type": "object",
+          "properties": {
+            "credential": {
+              "type": "object",
+              "properties": {
+                "credentialId": {
+                  "type": "string"
+                },
+                "relyingParty": {
+                  "type": "string"
+                },
+                "url": {
+                  "type": "string"
+                },
+                "userName": {
+                  "type": "string"
+                },
+                "userHandle": {
+                  "type": "string"
+                },
+                "keyVault": {
+                  "type": "object",
+                  "properties": {
+                    "vaultName": {
+                      "type": "string"
+                    },
+                    "keyName": {
+                      "type": "string"
+                    }
+                  }
+                }
+              },
+              "required": [
+                "credentialId",
+                "userHandle"
+              ]
+            },
+            "authUrl": {
+              "type": "string"
+            },
+            "keyVaultName": {
+              "type": "string"
+            },
+            "keyVaultKeyName": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "credential"
+          ]
+        }
+      }
+    }
+  },
+  "actions": {
+    "Invoke_function": {
+      "type": "Http",
+      "runAfter": {},
+      "inputs": {
+        "method": "POST",
+        "uri": "@{concat(parameters('functionBaseUrl'), '/api/passkeys/login')}",
+        "headers": {
+          "x-functions-key": "@parameters('functionKey')",
+          "Content-Type": "application/json"
+        },
+        "body": "@triggerBody()"
+      }
+    },
+    "Return_result": {
+      "type": "Response",
+      "kind": "Http",
+      "runAfter": {
+        "Invoke_function": [
+          "Succeeded",
+          "Failed",
+          "TimedOut"
+        ]
+      },
+      "inputs": {
+        "statusCode": "@outputs('Invoke_function')?['statusCode']",
+        "body": "@body('Invoke_function')"
+      }
+    }
+  },
+  "outputs": {}
+}

@@ -8,5 +8,6 @@ Examples that belong here:
 - passkey login
 - Conditional Access handling
 - metadata recovery
+- Azure Automation orchestration
 
 Samples can be opinionated. Templates should stay thinner and more reusable.

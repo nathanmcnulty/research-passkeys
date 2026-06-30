@@ -83,3 +83,12 @@ For repeatable local validation, use:
 - `scripts\validation\Invoke-PasskeySmokeTest.ps1`
 - `powershell\samples\device-code-bootstrap\Invoke-DeviceCodeBootstrap.ps1`
 - `python\samples\device-code-bootstrap\device_code_bootstrap.py`
+
+### Automation and Logic App starters
+
+For Azure-hosted orchestration layers, start from:
+
+- `samples\azure-automation\function-passkey-runbooks`
+- `templates\logic-app\passkey-function-http`
+
+These assets intentionally call the Function surfaces instead of re-embedding passkey protocol logic in each orchestration host.
