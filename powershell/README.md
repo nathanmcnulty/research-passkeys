@@ -8,6 +8,7 @@ Current shape:
 - `modules/Passkey.EntraAuth/`: ESTS/TAP login helpers and browser-parity headers
 - `scripts/reference/`: copied reference scripts from the original PowerShell repo
 - `scripts/Register-KeyVaultPasskey.ps1`: curated registration wrapper that folds in proven fixes without copying the custom variant verbatim
+- `samples/device-code-bootstrap/`: CA-friendly delegated-auth bootstrap using Azure CLI device code flow
 
 Real fixes intentionally carried forward into the curated script include:
 

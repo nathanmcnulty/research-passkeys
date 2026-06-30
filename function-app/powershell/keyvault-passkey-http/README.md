@@ -76,3 +76,12 @@ az deployment group create --resource-group rg-passkey-func-sample-wus2 --templa
 ```
 
 After infra deployment, deploy the function code from `src/` with your preferred Functions deployment workflow.
+
+For a one-command path from this repo, use:
+
+```powershell
+.\scripts\deployment\Deploy-FunctionSample.ps1 `
+  -TemplateId powershell-keyvault-passkey-http `
+  -ResourceGroupName rg-passkey-func-sample-wus2 `
+  -EnvironmentName sample
+```

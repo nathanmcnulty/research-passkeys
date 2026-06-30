@@ -27,6 +27,14 @@ This repo is meant to be the place where shared contracts, reusable helpers, tem
 - `python/`: future Python libraries and samples
 - `templates/`: publishable starters
 - `samples/`: end-to-end scenarios and walkthroughs
+- `scripts/`: packaging, deployment, and validation automation
+
+## Current starter assets
+
+- `powershell\samples\device-code-bootstrap`: CA-friendly PowerShell bootstrap using Azure CLI device code flow
+- `scripts\deployment\Deploy-FunctionSample.ps1`: one-command infra + code deployment helper for the PowerShell and Python Function starters
+- `scripts\validation\Invoke-PasskeySmokeTest.ps1`: repeatable registration + login smoke-test harness for direct and Function-hosted flows
+- `contracts\passkey-login-credential.schema.json`: canonical login credential contract shared by PowerShell and Python login consumers
 
 ## Source material being consolidated
 

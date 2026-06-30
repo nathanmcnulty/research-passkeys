@@ -56,6 +56,7 @@ or from the publishable starter layer:
 - `templates\function-app\python-keyvault-passkey-http`
 
 Use `scripts\packaging\Export-FunctionTemplate.ps1` to copy one of these starters into a downstream repo without importing the full repository structure.
+Use `scripts\deployment\Deploy-FunctionSample.ps1` when you want the same starter to remain in this repo but still be provisioned and deployed with one command.
 
 ### Shared Python code
 
@@ -66,3 +67,19 @@ Downstream Python repos should prefer `python\libraries\passkey` as the canonica
 - Key Vault-backed signing helpers
 
 Function-host repos that need a deployable in-repo copy can sync from the canonical library into host-specific folders, following the same pattern used by `function-app\python\keyvault-passkey-http\scripts\Sync-PasskeyLibrary.ps1`.
+
+### Shared login credential contract
+
+Downstream login consumers should target `contracts\passkey-login-credential.schema.json` so one stored credential record can be shared across:
+
+- PowerShell passkey login
+- Python passkey login
+- future host wrappers that only need to load and pass through the stored credential
+
+### Validation automation
+
+For repeatable local validation, use:
+
+- `scripts\validation\Invoke-PasskeySmokeTest.ps1`
+- `powershell\samples\device-code-bootstrap\Invoke-DeviceCodeBootstrap.ps1`
+- `python\samples\device-code-bootstrap\device_code_bootstrap.py`

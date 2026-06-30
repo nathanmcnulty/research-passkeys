@@ -71,3 +71,12 @@ az deployment group create --resource-group rg-passkey-func-python-sample-wus2 -
 ```
 
 After infrastructure deployment, deploy the function code from `src/`.
+
+For a one-command path from this repo, use:
+
+```powershell
+.\scripts\deployment\Deploy-FunctionSample.ps1 `
+  -TemplateId python-keyvault-passkey-http `
+  -ResourceGroupName rg-passkey-func-python-sample-wus2 `
+  -EnvironmentName sample
+```
