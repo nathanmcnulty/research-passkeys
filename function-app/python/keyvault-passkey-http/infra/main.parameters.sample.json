@@ -1,0 +1,15 @@
+{
+  "$schema": "https://schema.management.azure.com/schemas/2019-04-01/deploymentParameters.json#",
+  "contentVersion": "1.0.0.0",
+  "parameters": {
+    "location": {
+      "value": "westus2"
+    },
+    "tenantId": {
+      "value": "847b5907-ca15-40f4-b171-eb18619dbfab"
+    },
+    "environmentName": {
+      "value": "sample"
+    }
+  }
+}

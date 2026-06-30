@@ -1,0 +1,25 @@
+- generic [ref=f2e5]:
+  - img "Organization background image" [ref=f2e6]
+  - generic [ref=f2e8]:
+    - generic [ref=f2e10]:
+      - img "Organization header logo"
+    - generic [ref=f2e16]:
+      - img "Organization banner logo" [ref=f2e34]
+      - main [ref=f2e19]:
+        - generic [ref=f2e20]:
+          - generic [ref=f2e72]:
+            - button "Back" [ref=f2e73] [cursor=pointer]
+            - generic "user@tenant.onmicrosoft.com" [ref=f2e74]
+          - generic [ref=f2e75]:
+            - heading "Enter Temporary Access Pass" [level=1] [ref=f2e76]
+            - generic [ref=f2e78]:
+              - alert
+              - textbox "Temporary Access Pass" [active] [ref=f2e80]
+              - generic [ref=f2e82] [cursor=pointer]:
+                - checkbox "Show Temporary Access Pass" [ref=f2e83]
+                - text: Show Temporary Access Pass
+            - link "Sign in another way" [ref=f2e89] [cursor=pointer]:
+              - /url: "#"
+            - button "Sign in" [ref=f2e92] [cursor=pointer]
+    - contentinfo [ref=f2e31]:
+      - button "Click here for troubleshooting information" [ref=f2e33] [cursor=pointer]: ...

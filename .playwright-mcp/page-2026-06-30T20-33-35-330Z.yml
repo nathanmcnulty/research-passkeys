@@ -1,0 +1,14 @@
+- generic [active] [ref=f7e1]:
+  - generic:
+    - generic:
+      - generic:
+        - img "Organization background image" [ref=f7e2]
+        - generic [ref=f7e4]:
+          - generic [ref=f7e6]:
+            - img "Organization header logo"
+          - generic [ref=f7e12]:
+            - img "Organization banner logo" [ref=f7e14]
+            - heading "Microsoft Azure Cross-platform Command Line Interface" [level=1] [ref=f7e15]
+            - paragraph [ref=f7e17]: You have signed in to the Microsoft Azure Cross-platform Command Line Interface application on your device. You may now close this window.
+          - contentinfo [ref=f7e18]:
+            - button "Click here for troubleshooting information" [ref=f7e20] [cursor=pointer]: ...

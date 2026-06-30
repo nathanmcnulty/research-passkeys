@@ -1,0 +1,38 @@
+- generic [ref=f3e1]:
+  - generic:
+    - generic:
+      - generic:
+        - generic:
+          - img "Organization background image" [ref=f3e2]
+          - generic [ref=f3e4]:
+            - generic [ref=f3e6]:
+              - img "Organization header logo"
+            - generic [ref=f3e11]:
+              - generic [ref=f3e12]:
+                - img "Organization banner logo" [ref=f3e15]
+                - main [ref=f3e16]:
+                  - generic [ref=f3e19]:
+                    - heading "Microsoft Azure CLI" [level=1] [ref=f3e20]
+                    - paragraph [ref=f3e22]: Sorry, but we’re having trouble signing you in.
+                    - generic [ref=f3e23]: "AADSTS50105: Your administrator has configured the application Microsoft Azure CLI ('04b07795-8ddb-461a-bbee-02f9e1bf7b46') to block users unless they are specifically granted ('assigned') access to the application. The signed in user 'user@tenant.onmicrosoft.com' is blocked because they are not a direct member of a group with access, nor had access directly assigned by an administrator. Please contact your administrator to assign access to this application."
+                    - paragraph [ref=f3e25]: Are you sure?
+              - generic [ref=f3e28]:
+                - generic [ref=f3e29]:
+                  - generic [ref=f3e30]:
+                    - heading "Troubleshooting details" [level=2] [ref=f3e31]
+                    - generic [ref=f3e32]: If you contact your administrator, send this info to them.
+                    - button "Copy info to clipboard" [ref=f3e33] [cursor=pointer]
+                  - generic [ref=f3e34]:
+                    - generic [ref=f3e35]: "Request Id: a3091140-a6b0-4192-99cf-3597e6660800"
+                    - generic [ref=f3e36]: "Correlation Id: e247a2de-d4ed-4a10-b3c3-5709ed8e424b"
+                    - generic [ref=f3e37]: "Timestamp: 2026-06-30T20:18:25Z"
+                    - generic [ref=f3e38]: "Message: AADSTS50105: Your administrator has configured the application Microsoft Azure CLI ('04b07795-8ddb-461a-bbee-02f9e1bf7b46') to block users unless they are specifically granted ('assigned') access to the application. The signed in user 'user@tenant.onmicrosoft.com' is blocked because they are not a direct member of a group with access, nor had access directly assigned by an administrator. Please contact your administrator to assign access to this application."
+                  - generic [ref=f3e39]:
+                    - generic [ref=f3e40]:
+                      - text: "Flag sign-in errors for review:"
+                      - button "Enable flagging" [ref=f3e41] [cursor=pointer]
+                    - generic [ref=f3e42]: If you plan on getting help for this problem, enable flagging and try to reproduce the error within 20 minutes. Flagged events make diagnostics available and are raised to admin attention.
+                - button "Close troubleshooting details" [ref=f3e43] [cursor=pointer]
+            - contentinfo [ref=f3e44]:
+              - button "Click here for troubleshooting information" [ref=f3e46] [cursor=pointer]: ...
+  - textbox [ref=f3e47]: "Request Id: a3091140-a6b0-4192-99cf-3597e6660800 Correlation Id: e247a2de-d4ed-4a10-b3c3-5709ed8e424b Timestamp: 2026-06-30T20:18:25Z Message: AADSTS50105: Your administrator has configured the application Microsoft Azure CLI ('04b07795-8ddb-461a-bbee-02f9e1bf7b46') to block users unless they are specifically granted ('assigned') access to the application. The signed in user 'user@tenant.onmicrosoft.com' is blocked because they are not a direct member of a group with access, nor had access directly assigned by an administrator. Please contact your administrator to assign access to this application."

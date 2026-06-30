@@ -1,0 +1,11 @@
+{
+  "IsEncrypted": false,
+  "Values": {
+    "FUNCTIONS_WORKER_RUNTIME": "python",
+    "AzureWebJobsStorage": "UseDevelopmentStorage=true",
+    "PASSKEY_TENANT_ID": "847b5907-ca15-40f4-b171-eb18619dbfab",
+    "PASSKEY_KEYVAULT_NAME": "replace-with-your-key-vault-name",
+    "PASSKEY_MANAGED_IDENTITY_CLIENT_ID": "",
+    "PASSKEY_KEYVAULT_ACCESS_TOKEN": ""
+  }
+}

@@ -1,0 +1,63 @@
+using namespace System.Net
+
+param($Request, $TriggerMetadata)
+
+. (Join-Path $PSScriptRoot '..\shared\PasskeyFunctionHelpers.ps1')
+
+try {
+    $body = Get-RequestBodyObject -Request $Request
+    $userPrincipalName = Get-RequestValue -Body $body -Request $Request -Names @('userPrincipalName', 'email')
+    $tap = Get-RequestValue -Body $body -Request $Request -Names @('tap', 'temporaryAccessPass')
+    $displayName = Get-RequestValue -Body $body -Request $Request -Names @('displayName')
+    $keyVaultKeyName = Get-RequestValue -Body $body -Request $Request -Names @('keyVaultKeyName')
+
+    if ([string]::IsNullOrWhiteSpace($userPrincipalName)) {
+        throw [System.ArgumentException]::new("Missing required field 'userPrincipalName' or 'email'.")
+    }
+
+    if ([string]::IsNullOrWhiteSpace($tap)) {
+        throw [System.ArgumentException]::new("Missing required field 'tap' or 'temporaryAccessPass'.")
+    }
+
+    $configuration = Get-PasskeyFunctionConfiguration
+    $keyVaultAccessToken = Get-KeyVaultAccessToken -Configuration $configuration
+    $scriptPath = Join-Path $PSScriptRoot '..\shared\passkey-assets\scripts\Register-KeyVaultPasskey.ps1'
+    $outputPath = New-TempOutputPath -UserPrincipalName $userPrincipalName -AuthMethod 'tap'
+
+    $scriptParameters = @{
+        TAP = $tap
+        UserPrincipalName = $userPrincipalName
+        TenantId = $configuration.TenantId
+        KeyVaultName = $configuration.KeyVaultName
+        KeyVaultAccessToken = $keyVaultAccessToken
+        OutputPath = $outputPath
+    }
+
+    if (-not [string]::IsNullOrWhiteSpace($displayName)) {
+        $scriptParameters.DisplayName = $displayName
+    }
+
+    if (-not [string]::IsNullOrWhiteSpace($keyVaultKeyName)) {
+        $scriptParameters.KeyVaultKeyName = $keyVaultKeyName
+    }
+
+    $credential = Invoke-PasskeyRegistrationScript -ScriptPath $scriptPath -Parameters $scriptParameters
+
+    Push-OutputBinding -Name Response -Value (New-JsonHttpResponse -StatusCode ([HttpStatusCode]::OK) -Body ([ordered]@{
+        success = $true
+        authMethod = 'tap'
+        tenantId = $configuration.TenantId
+        keyVaultName = $configuration.KeyVaultName
+        credential = $credential
+    }))
+} catch [System.ArgumentException] {
+    Push-OutputBinding -Name Response -Value (New-JsonHttpResponse -StatusCode ([HttpStatusCode]::BadRequest) -Body ([ordered]@{
+        success = $false
+        error = $_.Exception.Message
+    }))
+} catch {
+    Push-OutputBinding -Name Response -Value (New-JsonHttpResponse -StatusCode ([HttpStatusCode]::InternalServerError) -Body ([ordered]@{
+        success = $false
+        error = $_.Exception.Message
+    }))
+}

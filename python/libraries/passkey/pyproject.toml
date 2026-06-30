@@ -1,0 +1,22 @@
+[build-system]
+requires = ["setuptools>=68", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "research-passkeys-passkey"
+version = "0.1.0"
+description = "Canonical Python passkey helpers for research-passkeys."
+readme = "README.md"
+requires-python = ">=3.11"
+dependencies = [
+  "azure-identity>=1.17.1",
+  "cbor2>=5.6.4",
+  "cryptography>=42.0.8",
+  "requests>=2.32.3",
+]
+
+[tool.setuptools]
+package-dir = {"" = "src"}
+
+[tool.setuptools.packages.find]
+where = ["src"]

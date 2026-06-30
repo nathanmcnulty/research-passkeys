@@ -1,0 +1,23 @@
+- generic [ref=f6e1]:
+  - generic:
+    - generic:
+      - generic:
+        - generic:
+          - img "Organization background image" [ref=f6e2]
+          - generic [ref=f6e4]:
+            - generic [ref=f6e6]:
+              - img "Organization header logo"
+            - generic [ref=f6e12]:
+              - img "Organization banner logo" [ref=f6e14]
+              - main [ref=f6e15]:
+                - generic [ref=f6e16]:
+                  - generic "user@tenant.onmicrosoft.com" [ref=f6e20]
+                  - generic [ref=f6e22]:
+                    - heading "Are you trying to sign in to Microsoft Azure CLI?" [level=1] [ref=f6e23]
+                    - generic [ref=f6e25]: Only continue if you downloaded the app from a store or website that you trust.
+                    - generic [ref=f6e26]:
+                      - button "Cancel" [ref=f6e28] [cursor=pointer]
+                      - button "Continue" [active] [ref=f6e30] [cursor=pointer]
+                    - paragraph [ref=f6e32]: Are you sure?
+            - contentinfo [ref=f6e33]:
+              - button "Click here for troubleshooting information" [ref=f6e35] [cursor=pointer]: ...

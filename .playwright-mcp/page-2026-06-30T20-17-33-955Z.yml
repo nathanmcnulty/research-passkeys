@@ -1,0 +1,21 @@
+- generic [ref=e1]:
+  - generic:
+    - img "Organization background image" [ref=e2]
+    - generic [ref=e4]:
+      - generic [ref=e5]:
+        - generic [ref=e7]:
+          - img "Microsoft"
+        - main [ref=e8]:
+          - generic [ref=e11]:
+            - heading "Enter code to allow access" [level=1] [ref=e12]
+            - generic [ref=e14]: Once you enter the code displayed on your app or device, it will have access to your account.
+            - generic [ref=e16]: Do not enter codes from sources you don't trust.
+            - textbox "Code" [active] [ref=e19]
+            - button "Next" [ref=e23] [cursor=pointer]
+      - contentinfo [ref=e24]:
+        - generic [ref=e25]:
+          - link "Terms of use" [ref=e26] [cursor=pointer]:
+            - /url: https://www.microsoft.com/en-US/servicesagreement/
+          - link "Privacy & cookies" [ref=e27] [cursor=pointer]:
+            - /url: https://privacy.microsoft.com/en-US/privacystatement
+          - button "Click here for troubleshooting information" [ref=e28] [cursor=pointer]: ...
