@@ -61,3 +61,17 @@ When pulling code from existing repos:
 - mixing raw host glue with shared contracts
 - burying Conditional Access handling inside random scripts
 - assuming downstream repos can move into this repo
+
+## Surface parity rule
+
+When a new flow is promoted beyond one-off research, the preferred shape is:
+
+1. shared core logic in a canonical library or module
+2. a local CLI or sample that exercises that shared core directly
+3. a Function host adapter only when the scenario benefits from HTTP-triggered or hosted execution
+
+This keeps host glue thin and makes parity gaps obvious.
+
+### Current exception: device code bootstrap
+
+Device code stays **local-first** by default. It is intentionally a CLI/bootstrap surface in both Python and PowerShell because it maps naturally to an interactive delegated-auth prompt. It should only grow a hosted variant if the design explicitly introduces a brokered callback or another server-side completion model.

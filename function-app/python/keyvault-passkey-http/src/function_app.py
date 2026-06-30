@@ -13,6 +13,7 @@ if _CANONICAL_LIBRARY_ROOT.exists():
 from passkey import (
     PasskeySecurityError,
     PasskeyValidationError,
+    authenticate_with_passkey,
     load_config_from_environment,
     register_passkey_via_ests_auth,
     register_passkey_via_tap,
@@ -55,6 +56,18 @@ def _json_response(status_code: int, payload: dict[str, object]) -> func.HttpRes
         status_code=status_code,
         mimetype="application/json",
     )
+
+
+def _get_credential_payload(body: dict[str, object]) -> dict[str, object]:
+    credential = body.get("credential")
+    if isinstance(credential, dict):
+        return dict(credential)
+
+    return {
+        key: value
+        for key, value in body.items()
+        if key not in {"credential", "authUrl", "keyVaultName", "keyVaultKeyName"}
+    }
 
 
 @app.function_name(name="RegisterPasskeyViaTap")
@@ -119,6 +132,59 @@ def register_passkey_via_ests_auth_http(req: func.HttpRequest) -> func.HttpRespo
                 "tenantId": config.tenant_id,
                 "keyVaultName": config.key_vault_name,
                 "credential": credential,
+            },
+        )
+    except PasskeyValidationError as exc:
+        return _json_response(400, {"success": False, "error": str(exc)})
+    except PasskeySecurityError as exc:
+        return _json_response(500, {"success": False, "error": str(exc)})
+    except Exception as exc:  # noqa: BLE001
+        return _json_response(500, {"success": False, "error": str(exc)})
+
+
+@app.function_name(name="LoginWithPasskey")
+@app.route(route="passkeys/login", methods=["POST"], auth_level=func.AuthLevel.FUNCTION)
+def login_with_passkey_http(req: func.HttpRequest) -> func.HttpResponse:
+    try:
+        config = load_config_from_environment()
+        body = _get_request_body(req)
+        auth_url = _get_request_value(body, req, "authUrl")
+        key_vault_name = _get_request_value(body, req, "keyVaultName")
+        key_vault_key_name = _get_request_value(body, req, "keyVaultKeyName")
+        credential = _get_credential_payload(body)
+        if not credential:
+            raise PasskeyValidationError(
+                "Request body must include a credential object or passkey login credential fields."
+            )
+        if key_vault_name or key_vault_key_name:
+            existing_key_vault = credential.get("keyVault")
+            credential["keyVault"] = dict(existing_key_vault) if isinstance(existing_key_vault, dict) else {}
+            if key_vault_name:
+                credential["keyVault"]["vaultName"] = key_vault_name
+            if key_vault_key_name:
+                credential["keyVault"]["keyName"] = key_vault_key_name
+
+        login_kwargs = {
+            "credential": credential,
+            "key_vault_access_token": config.key_vault_access_token,
+            "key_vault_managed_identity_client_id": config.managed_identity_client_id,
+            "key_vault_tenant_id": config.tenant_id,
+        }
+        if auth_url:
+            login_kwargs["auth_url"] = auth_url
+
+        result = authenticate_with_passkey(**login_kwargs)
+        return _json_response(
+            200 if result.success else 401,
+            {
+                "success": result.success,
+                "authMethod": "passkey",
+                "userPrincipalName": result.user_principal_name,
+                "signatureMethod": result.signature_method,
+                "cookieType": result.cookie_type,
+                "estsAuth": result.cookie_value,
+                "estsAuthCookie": result.cookie_value,
+                "keyVaultName": result.key_vault_name,
             },
         )
     except PasskeyValidationError as exc:

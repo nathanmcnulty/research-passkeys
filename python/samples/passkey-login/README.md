@@ -30,4 +30,4 @@ Optional parameters:
 - `--keyvault-client-secret`
 - `--auth-url`
 
-On success, the sample prints the ESTS cookie type that was issued.
+On success, the sample prints the ESTS cookie type and cookie value that were issued.

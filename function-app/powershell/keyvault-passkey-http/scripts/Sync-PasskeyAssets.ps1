@@ -15,6 +15,7 @@ New-Item -ItemType Directory -Force -Path (Join-Path $assetRoot 'scripts\referen
 Copy-Item (Join-Path $sourceRoot 'modules\Passkey.Common\Passkey.Common.psm1') (Join-Path $assetRoot 'modules\Passkey.Common\Passkey.Common.psm1') -Force
 Copy-Item (Join-Path $sourceRoot 'modules\Passkey.EntraAuth\Passkey.EntraAuth.psm1') (Join-Path $assetRoot 'modules\Passkey.EntraAuth\Passkey.EntraAuth.psm1') -Force
 Copy-Item (Join-Path $sourceRoot 'scripts\Register-KeyVaultPasskey.ps1') (Join-Path $assetRoot 'scripts\Register-KeyVaultPasskey.ps1') -Force
+Copy-Item (Join-Path $sourceRoot 'scripts\reference\PasskeyLogin.ps1') (Join-Path $assetRoot 'scripts\reference\PasskeyLogin.ps1') -Force
 Copy-Item (Join-Path $sourceRoot 'scripts\reference\Register-KeyVaultPasskeyViaESTSAuth.ps1') (Join-Path $assetRoot 'scripts\reference\Register-KeyVaultPasskeyViaESTSAuth.ps1') -Force
 
 Write-Host "Passkey Function sample assets refreshed from $sourceRoot" -ForegroundColor Green

@@ -4,8 +4,8 @@ This folder is for Function App-specific samples and templates.
 
 The current sample is:
 
-- `powershell\keyvault-passkey-http`: PowerShell HTTP-triggered Functions + Bicep + Key Vault for TAP and ESTSAUTH passkey registration
-- `python\keyvault-passkey-http`: Python HTTP-triggered Functions + Bicep + Key Vault for TAP and ESTSAUTH passkey registration
+- `powershell\keyvault-passkey-http`: PowerShell HTTP-triggered Functions + Bicep + Key Vault for TAP and ESTSAUTH passkey registration plus passkey login
+- `python\keyvault-passkey-http`: Python HTTP-triggered Functions + Bicep + Key Vault for TAP and ESTSAUTH passkey registration plus passkey login
 
 The goal is to keep Functions as a host surface, not as the owner of shared business logic:
 

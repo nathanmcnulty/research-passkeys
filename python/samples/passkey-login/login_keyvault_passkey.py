@@ -46,6 +46,7 @@ def main() -> int:
                 "userPrincipalName": result.user_principal_name,
                 "signatureMethod": result.signature_method,
                 "cookieType": result.cookie_type,
+                "estsAuthCookie": result.cookie_value,
                 "keyVaultName": result.key_vault_name,
             },
             separators=(",", ":"),

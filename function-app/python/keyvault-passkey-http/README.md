@@ -4,6 +4,7 @@ This sample hosts two Python HTTP-triggered Azure Functions that register passke
 
 - `RegisterPasskeyViaTap`: accepts `userPrincipalName` or `email` plus `tap`
 - `RegisterPasskeyViaEstsAuth`: accepts `userPrincipalName` or `email` plus `estsAuth` or `estsAuthCookie`
+- `LoginWithPasskey`: accepts a stored credential record and returns an ESTSAUTH cookie when passkey login succeeds
 
 Unlike the PowerShell sample, this version is **Python-native**. The function host and the TAP and ESTSAUTH registration flows run in Python instead of shelling out to PowerShell.
 
@@ -58,6 +59,24 @@ ESTSAUTH registration:
 ```
 
 The ESTSAUTH function rejects requests when the cookie resolves to a different user than the requested `userPrincipalName`.
+
+Passkey login:
+
+```json
+{
+  "credential": {
+    "credentialId": "replace-with-credential-id",
+    "relyingParty": "login.microsoft.com",
+    "url": "https://login.microsoft.com",
+    "userName": "user@tenant.onmicrosoft.com",
+    "userHandle": "replace-with-user-handle",
+    "keyVault": {
+      "vaultName": "replace-with-vault-name",
+      "keyName": "replace-with-key-name"
+    }
+  }
+}
+```
 
 ## Deploy with Bicep
 

@@ -4,6 +4,7 @@ This sample hosts two PowerShell HTTP-triggered Azure Functions that create pass
 
 - `RegisterPasskeyViaTap`: accepts `userPrincipalName`/`email` + `tap`
 - `RegisterPasskeyViaEstsAuth`: accepts `userPrincipalName`/`email` + `estsAuth`/`estsAuthCookie`
+- `LoginWithPasskey`: accepts a stored credential record and returns an ESTSAUTH cookie when passkey login succeeds
 
 The Function App uses:
 
@@ -61,6 +62,24 @@ ESTSAUTH registration:
 ```
 
 The ESTSAUTH function rejects requests when the cookie resolves to a different user than the requested `userPrincipalName`.
+
+Passkey login:
+
+```json
+{
+  "credential": {
+    "credentialId": "replace-with-credential-id",
+    "relyingParty": "login.microsoft.com",
+    "url": "https://login.microsoft.com",
+    "userName": "user@tenant.onmicrosoft.com",
+    "userHandle": "replace-with-user-handle",
+    "keyVault": {
+      "vaultName": "replace-with-vault-name",
+      "keyName": "replace-with-key-name"
+    }
+  }
+}
+```
 
 ## Deploy with Bicep
 

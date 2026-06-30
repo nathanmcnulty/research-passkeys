@@ -11,6 +11,7 @@ This repo is meant to be the place where shared contracts, reusable helpers, tem
 - **Explicit tracks**: browser-extension and Windows provider work live in named folders instead of defining the whole repo shape.
 - **Conditional Access aware**: the standard auth path should handle claims challenges and KMSI consistently.
 - **Downstream-friendly**: this repo should be easy for private and organization-owned repos to consume without moving into it.
+- **Surface parity by default**: promote new flows as shared core plus local CLI/sample and add a Function adapter only when hosted execution materially helps.
 
 ## Repository layout
 
@@ -32,6 +33,7 @@ This repo is meant to be the place where shared contracts, reusable helpers, tem
 ## Current starter assets
 
 - `powershell\samples\device-code-bootstrap`: CA-friendly PowerShell bootstrap using Azure CLI device code flow
+- `python\samples\passkey-register`: local Python TAP and ESTSAUTH registration wrapper over the canonical library
 - `scripts\deployment\Deploy-FunctionSample.ps1`: one-command infra + code deployment helper for the PowerShell and Python Function starters
 - `scripts\validation\Invoke-PasskeySmokeTest.ps1`: repeatable registration + login smoke-test harness for direct and Function-hosted flows
 - `contracts\passkey-login-credential.schema.json`: canonical login credential contract shared by PowerShell and Python login consumers

@@ -164,6 +164,79 @@ function Invoke-PasskeyRegistrationScript {
     }
 }
 
+function Get-CredentialPayload {
+    param(
+        [Parameter(Mandatory)]
+        [hashtable]$Body
+    )
+
+    if ($Body.ContainsKey('credential')) {
+        $credential = $Body['credential']
+        if ($credential -is [System.Collections.IDictionary]) {
+            return [hashtable]$credential
+        }
+
+        return ($credential | ConvertTo-Json -Depth 20 | ConvertFrom-Json -AsHashtable)
+    }
+
+    $payload = [ordered]@{}
+    foreach ($entry in $Body.GetEnumerator()) {
+        if ($entry.Key -in @('authUrl', 'keyVaultName', 'keyVaultKeyName')) {
+            continue
+        }
+
+        $payload[$entry.Key] = $entry.Value
+    }
+
+    return [hashtable]$payload
+}
+
+function Invoke-PasskeyLoginScript {
+    param(
+        [Parameter(Mandatory)]
+        [string]$ScriptPath,
+
+        [Parameter(Mandatory)]
+        [object]$Credential,
+
+        [Parameter()]
+        [hashtable]$Parameters = @{}
+    )
+
+    if (-not (Test-Path -LiteralPath $ScriptPath)) {
+        throw "Script not found: $ScriptPath"
+    }
+
+    $userPrincipalName = [string]($Credential.userName ?? $Credential.username ?? $Credential.userPrincipalName ?? 'user')
+    $credentialPath = New-TempOutputPath -UserPrincipalName $userPrincipalName -AuthMethod 'login'
+
+    try {
+        $Credential | ConvertTo-Json -Depth 20 | Set-Content -LiteralPath $credentialPath -Encoding UTF8
+        Remove-Variable -Name ESTSAUTH -Scope Global -ErrorAction SilentlyContinue
+
+        $loginParameters = @{
+            KeyFilePath = $credentialPath
+            PassThru    = $true
+        } + $Parameters
+
+        $result = & $ScriptPath @loginParameters
+        $estsAuthCookie = $null
+        $estsVariable = Get-Variable -Name ESTSAUTH -Scope Global -ErrorAction SilentlyContinue
+        if ($estsVariable) {
+            $estsAuthCookie = [string]$estsVariable.Value
+        }
+
+        return [ordered]@{
+            Result         = $result
+            ESTSAuthCookie = $estsAuthCookie
+        }
+    } finally {
+        if (Test-Path -LiteralPath $credentialPath) {
+            Remove-Item -LiteralPath $credentialPath -Force -ErrorAction SilentlyContinue
+        }
+    }
+}
+
 function New-JsonHttpResponse {
     param(
         [Parameter(Mandatory)]
@@ -173,11 +246,17 @@ function New-JsonHttpResponse {
         $Body
     )
 
-    return [HttpResponseContext]@{
+    $response = @{
         StatusCode = $StatusCode
         Headers = @{
             'Content-Type' = 'application/json'
         }
         Body = ($Body | ConvertTo-Json -Depth 20)
     }
+
+    if ('HttpResponseContext' -as [type]) {
+        return [HttpResponseContext]$response
+    }
+
+    return [pscustomobject]$response
 }

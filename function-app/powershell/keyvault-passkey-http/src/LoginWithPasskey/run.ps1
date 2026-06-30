@@ -1,0 +1,74 @@
+using namespace System.Net
+
+param($Request, $TriggerMetadata)
+
+. (Join-Path $PSScriptRoot '..\shared\PasskeyFunctionHelpers.ps1')
+
+try {
+    $body = Get-RequestBodyObject -Request $Request
+    $authUrl = Get-RequestValue -Body $body -Request $Request -Names @('authUrl')
+    $keyVaultName = Get-RequestValue -Body $body -Request $Request -Names @('keyVaultName')
+    $keyVaultKeyName = Get-RequestValue -Body $body -Request $Request -Names @('keyVaultKeyName')
+    $credential = Get-CredentialPayload -Body $body
+
+    if ($credential.Count -eq 0) {
+        throw [System.ArgumentException]::new("Request body must include a credential object or passkey login credential fields.")
+    }
+
+    if (-not $credential.ContainsKey('credentialId')) {
+        throw [System.ArgumentException]::new("Credential is missing required field 'credentialId'.")
+    }
+
+    if (-not $credential.ContainsKey('userHandle')) {
+        throw [System.ArgumentException]::new("Credential is missing required field 'userHandle'.")
+    }
+
+    if (-not [string]::IsNullOrWhiteSpace($keyVaultName) -or -not [string]::IsNullOrWhiteSpace($keyVaultKeyName)) {
+        if (-not $credential.ContainsKey('keyVault') -or $credential.keyVault -isnot [System.Collections.IDictionary]) {
+            $credential.keyVault = @{}
+        }
+        if (-not [string]::IsNullOrWhiteSpace($keyVaultName)) {
+            $credential.keyVault.vaultName = $keyVaultName
+        }
+        if (-not [string]::IsNullOrWhiteSpace($keyVaultKeyName)) {
+            $credential.keyVault.keyName = $keyVaultKeyName
+        }
+    }
+
+    $configuration = Get-PasskeyFunctionConfiguration
+    $keyVaultAccessToken = Get-KeyVaultAccessToken -Configuration $configuration
+    $scriptPath = Join-Path $PSScriptRoot '..\shared\passkey-assets\scripts\reference\PasskeyLogin.ps1'
+
+    $loginParameters = @{
+        KeyVaultAccessToken = $keyVaultAccessToken
+        KeyVaultTenantId    = $configuration.TenantId
+    }
+    if (-not [string]::IsNullOrWhiteSpace($authUrl)) {
+        $loginParameters.AuthUrl = $authUrl
+    }
+
+    $login = Invoke-PasskeyLoginScript -ScriptPath $scriptPath -Credential $credential -Parameters $loginParameters
+    $result = $login.Result
+    $statusCode = if ($result.Success) { [HttpStatusCode]::OK } else { [HttpStatusCode]::Unauthorized }
+
+    Push-OutputBinding -Name Response -Value (New-JsonHttpResponse -StatusCode $statusCode -Body ([ordered]@{
+        success = [bool]$result.Success
+        authMethod = 'passkey'
+        userPrincipalName = $result.UserPrincipalName
+        signatureMethod = $result.SignatureMethod
+        keyVaultName = $result.KeyVaultName
+        cookieType = $result.CookieType
+        estsAuth = $login.ESTSAuthCookie
+        estsAuthCookie = $login.ESTSAuthCookie
+    }))
+} catch [System.ArgumentException] {
+    Push-OutputBinding -Name Response -Value (New-JsonHttpResponse -StatusCode ([HttpStatusCode]::BadRequest) -Body ([ordered]@{
+        success = $false
+        error = $_.Exception.Message
+    }))
+} catch {
+    Push-OutputBinding -Name Response -Value (New-JsonHttpResponse -StatusCode ([HttpStatusCode]::InternalServerError) -Body ([ordered]@{
+        success = $false
+        error = $_.Exception.Message
+    }))
+}
