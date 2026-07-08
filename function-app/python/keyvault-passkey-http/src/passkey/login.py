@@ -7,7 +7,7 @@ import time
 from collections import OrderedDict
 from dataclasses import dataclass
 from typing import Any
-from urllib.parse import urlencode, urlparse
+from urllib.parse import urlencode, urljoin, urlparse
 
 import requests
 from cryptography.hazmat.primitives import hashes, serialization
@@ -20,6 +20,8 @@ from .common import (
     USER_AGENT,
     b64url_decode,
     b64url_encode,
+    configure_requests_session,
+    normalize_user_agent,
     parse_ests_config,
 )
 from .keyvault import get_key_vault_access_token
@@ -93,8 +95,8 @@ def authenticate_with_passkey(
             )
         private_key_pem = _normalize_private_key_pem(raw_key)
 
-    session = requests.Session()
-    session.headers["User-Agent"] = user_agent
+    normalized_user_agent = normalize_user_agent(user_agent)
+    session = configure_requests_session(requests.Session(), normalized_user_agent)
     if proxy:
         session.proxies.update({"http": proxy, "https": proxy})
 
@@ -145,6 +147,7 @@ def authenticate_with_passkey(
         key_vault_info=key_vault_info,
         key_vault_token=kv_token,
         private_key_pem=private_key_pem,
+        user_agent=normalized_user_agent,
     )
 
     fido_payload = OrderedDict(
@@ -223,10 +226,14 @@ def authenticate_with_passkey(
     current_page_id = debug.get("pgid") if isinstance(debug, dict) else None
     last_page_id = None
     loop_count = 0
+    last_response = login_response
 
     while isinstance(debug, dict) and debug.get("pgid") in {"CmsiInterrupt", "KmsiInterrupt", "ConvergedSignIn"}:
-        if current_page_id == last_page_id or loop_count >= 10:
-            raise PasskeyProtocolError("Authentication failed: stuck in interrupt loop during FIDO2 validation.")
+        if (current_page_id == last_page_id and current_page_id != "ConvergedSignIn") or loop_count >= 10:
+            raise PasskeyProtocolError(
+                "Authentication failed: stuck in interrupt loop during FIDO2 validation. "
+                f"currentPageId={current_page_id!r}; lastPageId={last_page_id!r}; loopCount={loop_count}."
+            )
 
         last_page_id = current_page_id
         loop_count += 1
@@ -272,9 +279,11 @@ def authenticate_with_passkey(
                 timeout=60,
             )
 
+        last_response = response
         time.sleep(0.3)
         location = response.headers.get("Location")
-        if response.status_code in (301, 302, 303, 307, 308) and location and not location.startswith("http"):
+        if response.status_code in (301, 302, 303, 307, 308) and location:
+            last_response = _follow_completion_redirects(session, response)
             break
         debug = _try_extract_json_payload(response.text)
         current_page_id = debug.get("pgid") if isinstance(debug, dict) else None
@@ -282,6 +291,7 @@ def authenticate_with_passkey(
     if use_key_vault:
         time.sleep(0.5)
 
+    _follow_completion_redirects(session, last_response)
     ests_cookies = [cookie for cookie in session.cookies if cookie.name.startswith("ESTS")]
     if not ests_cookies:
         return PasskeyLoginResult(
@@ -350,6 +360,22 @@ def _ensure_query_parameter(auth_url: str, name: str, value: str) -> str:
     return f"{auth_url}{delimiter}{urlencode({name: value})}"
 
 
+def _follow_completion_redirects(session: requests.Session, response: requests.Response | None, max_hops: int = 10) -> requests.Response | None:
+    current = response
+    hops = 0
+    while current is not None and current.status_code in (301, 302, 303, 307, 308) and hops < max_hops:
+        location = current.headers.get("Location")
+        if not location:
+            break
+        next_url = urljoin(current.url, location)
+        parsed = urlparse(next_url)
+        if parsed.scheme not in {"http", "https"}:
+            break
+        current = session.get(next_url, allow_redirects=False, timeout=60)
+        hops += 1
+    return current
+
+
 def _extract_json_payload(content: str, label: str) -> dict[str, Any]:
     payload = _try_extract_json_payload(content)
     if not isinstance(payload, dict):
@@ -386,6 +412,7 @@ def _new_fido_signature(
     key_vault_info: dict[str, Any] | None,
     key_vault_token: str | None,
     private_key_pem: str | None,
+    user_agent: str,
 ) -> bytes:
     del challenge
     del origin
@@ -406,6 +433,7 @@ def _new_fido_signature(
             headers={
                 "Authorization": f"Bearer {key_vault_token}",
                 "Content-Type": "application/json",
+                "User-Agent": normalize_user_agent(user_agent),
             },
             json={
                 "alg": "ES256",

@@ -6,13 +6,15 @@ param($Request, $TriggerMetadata)
 
 try {
     $body = Get-RequestBodyObject -Request $Request
-    $userPrincipalName = Get-RequestValue -Body $body -Request $Request -Names @('userPrincipalName', 'email')
+    $userPrincipalName = Get-RequestValue -Body $body -Request $Request -Names @('userPrincipalName', 'username', 'email')
     $tap = Get-RequestValue -Body $body -Request $Request -Names @('tap', 'temporaryAccessPass')
     $displayName = Get-RequestValue -Body $body -Request $Request -Names @('displayName')
     $keyVaultKeyName = Get-RequestValue -Body $body -Request $Request -Names @('keyVaultKeyName')
+    $userAgent = Resolve-RequestUserAgent -Body $body -Request $Request
+    $redirectUri = Resolve-RequestRedirectUri -Body $body -Request $Request
 
     if ([string]::IsNullOrWhiteSpace($userPrincipalName)) {
-        throw [System.ArgumentException]::new("Missing required field 'userPrincipalName' or 'email'.")
+        throw [System.ArgumentException]::new("Missing required field 'userPrincipalName', 'username', or 'email'.")
     }
 
     if ([string]::IsNullOrWhiteSpace($tap)) {
@@ -41,6 +43,14 @@ try {
         $scriptParameters.KeyVaultKeyName = $keyVaultKeyName
     }
 
+    if (-not [string]::IsNullOrWhiteSpace($userAgent)) {
+        $scriptParameters.UserAgent = $userAgent
+    }
+
+    if (-not [string]::IsNullOrWhiteSpace($redirectUri)) {
+        $scriptParameters.RedirectUri = $redirectUri
+    }
+
     $credential = Invoke-PasskeyRegistrationScript -ScriptPath $scriptPath -Parameters $scriptParameters
 
     Push-OutputBinding -Name Response -Value (New-JsonHttpResponse -StatusCode ([HttpStatusCode]::OK) -Body ([ordered]@{
@@ -49,6 +59,7 @@ try {
         tenantId = $configuration.TenantId
         keyVaultName = $configuration.KeyVaultName
         credential = $credential
+        loginPropagation = Get-PostRegistrationLoginHint
     }))
 } catch [System.ArgumentException] {
     Push-OutputBinding -Name Response -Value (New-JsonHttpResponse -StatusCode ([HttpStatusCode]::BadRequest) -Body ([ordered]@{

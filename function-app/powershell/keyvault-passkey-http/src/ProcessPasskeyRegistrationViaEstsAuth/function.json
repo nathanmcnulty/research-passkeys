@@ -1,0 +1,11 @@
+{
+  "bindings": [
+    {
+      "type": "queueTrigger",
+      "direction": "in",
+      "name": "QueueItem",
+      "queueName": "%PASSKEY_REGISTRATION_QUEUE_NAME%",
+      "connection": "AzureWebJobsStorage"
+    }
+  ]
+}

@@ -1,12 +1,16 @@
 # Key Vault passkey HTTP Function sample (Python)
 
-This sample hosts two Python HTTP-triggered Azure Functions that register passkeys with Azure Key Vault-backed credential keys:
+This sample hosts Python Azure Functions that register passkeys with Azure Key Vault-backed credential keys:
 
 - `RegisterPasskeyViaTap`: accepts `userPrincipalName` or `email` plus `tap`
-- `RegisterPasskeyViaEstsAuth`: accepts `userPrincipalName` or `email` plus `estsAuth` or `estsAuthCookie`
+- `RegisterPasskeyViaEstsAuth`: accepts `userPrincipalName` or `email` plus `estsAuth`, `estsAuthCookie`, or a browser-exported cookie JSON blob containing `ESTSAUTH`
+- `QueuePasskeyRegistrationViaEstsAuth`: accepts the same ESTSAUTH inputs and enqueues registration work for async processing
+- `ProcessPasskeyRegistrationViaEstsAuth`: queue-triggered worker that runs the ESTSAUTH registration flow
 - `LoginWithPasskey`: accepts a stored credential record and returns an ESTSAUTH cookie when passkey login succeeds
 
 Unlike the PowerShell sample, this version is **Python-native**. The function host and the TAP and ESTSAUTH registration flows run in Python instead of shelling out to PowerShell.
+
+This sample uses the Azure Functions Python v2 decorator model, so the functions live in [src/function_app.py](/home/nathan/GitHub/research-passkeys/function-app/python/keyvault-passkey-http/src/function_app.py) instead of one folder per function. The runtime still exposes the same named functions as the PowerShell app.
 
 ## Layout
 
@@ -22,6 +26,8 @@ These app settings are expected:
 - `PASSKEY_KEYVAULT_NAME`
 - `PASSKEY_MANAGED_IDENTITY_CLIENT_ID`
 - `PASSKEY_KEYVAULT_ACCESS_TOKEN` (optional local override; not used in Azure when managed identity is available)
+- `PASSKEY_REGISTRATION_QUEUE_NAME` (required for the async ESTSAUTH route; defaults to `passkey-registration` in the samples)
+- `AzureWebJobsFeatureFlags=EnableWorkerIndexing` (required for the Python v2 decorator model to index functions consistently)
 
 ## Local development
 
@@ -59,6 +65,18 @@ ESTSAUTH registration:
 ```
 
 The ESTSAUTH function rejects requests when the cookie resolves to a different user than the requested `userPrincipalName`.
+
+Queued ESTSAUTH registration from a browser cookie export:
+
+```json
+{
+  "userPrincipalName": "user@tenant.onmicrosoft.com",
+  "cookieExport": "[{\"path\":\"/\",\"domain\":\".login.microsoftonline.com\",\"value\":\"replace-with-estsauth-cookie\",\"name\":\"ESTSAUTH\"}]",
+  "displayName": "Python Function App Passkey"
+}
+```
+
+Post that payload to `/api/passkeys/register/estsauth/queue` to return `202 Accepted` immediately and let the queue worker process registrations one at a time.
 
 Passkey login:
 

@@ -9,6 +9,7 @@ try {
     $authUrl = Get-RequestValue -Body $body -Request $Request -Names @('authUrl')
     $keyVaultName = Get-RequestValue -Body $body -Request $Request -Names @('keyVaultName')
     $keyVaultKeyName = Get-RequestValue -Body $body -Request $Request -Names @('keyVaultKeyName')
+    $userAgent = Resolve-RequestUserAgent -Body $body -Request $Request
     $credential = Get-CredentialPayload -Body $body
 
     if ($credential.Count -eq 0) {
@@ -45,6 +46,9 @@ try {
     }
     if (-not [string]::IsNullOrWhiteSpace($authUrl)) {
         $loginParameters.AuthUrl = $authUrl
+    }
+    if (-not [string]::IsNullOrWhiteSpace($userAgent)) {
+        $loginParameters.UserAgent = $userAgent
     }
 
     $login = Invoke-PasskeyLoginScript -ScriptPath $scriptPath -Credential $credential -Parameters $loginParameters

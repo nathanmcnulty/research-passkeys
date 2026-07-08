@@ -41,6 +41,12 @@ param(
     [string]$EstsAuthCookie,
 
     [Parameter()]
+    [int]$PostRegistrationLoginDelaySeconds = 10,
+
+    [Parameter()]
+    [int]$PostRegistrationLoginRetryCount = 2,
+
+    [Parameter()]
     [switch]$SkipDirectRegistration,
 
     [Parameter()]
@@ -199,6 +205,39 @@ function Resolve-PreferredCredentialPath {
     return $Paths | Where-Object { Test-Path -LiteralPath $_ } | Select-Object -First 1
 }
 
+function Invoke-WithRetry {
+    param(
+        [Parameter(Mandatory)]
+        [scriptblock]$Action,
+
+        [Parameter(Mandatory)]
+        [string]$Label,
+
+        [Parameter()]
+        [int]$RetryCount = 1,
+
+        [Parameter()]
+        [int]$DelaySeconds = 0
+    )
+
+    $attempt = 0
+    while ($true) {
+        $attempt++
+        try {
+            return & $Action
+        } catch {
+            if ($attempt -ge $RetryCount) {
+                throw
+            }
+
+            Write-Verbose "$Label attempt $attempt failed: $($_.Exception.Message)"
+            if ($DelaySeconds -gt 0) {
+                Start-Sleep -Seconds $DelaySeconds
+            }
+        }
+    }
+}
+
 $tapPlainText = ConvertTo-PlainTextSecret -Value $Tap
 $repoRoot = Split-Path -Parent (Split-Path -Parent $PSScriptRoot)
 
@@ -288,6 +327,33 @@ $preferredCredentialPath = Resolve-PreferredCredentialPath -Paths @(
     $pythonFunctionCredentialPath
 )
 
+$hasFreshRegistration = @(
+    $surfaceMatrix.powerShellLocalRegistration.success
+    $surfaceMatrix.pythonLocalRegistration.success
+    $surfaceMatrix.powerShellFunctionRegistration.success
+    $surfaceMatrix.pythonFunctionRegistration.success
+) -contains $true
+$script:hasWaitedForPropagation = $false
+
+function Wait-ForPostRegistrationPropagation {
+    param(
+        [Parameter(Mandatory)]
+        [bool]$HasFreshRegistration,
+
+        [Parameter(Mandatory)]
+        [int]$DelaySeconds
+    )
+
+    if (-not $HasFreshRegistration -or $script:hasWaitedForPropagation -or $DelaySeconds -le 0) {
+        return
+    }
+
+    # Newly registered passkeys can take a few seconds before Entra accepts them for login.
+    # When this script performs login right after registration, wait briefly before the first attempt.
+    Start-Sleep -Seconds $DelaySeconds
+    $script:hasWaitedForPropagation = $true
+}
+
 $powerShellLoginResult = $null
 if (-not $SkipPowerShellLogin) {
     if (-not $preferredCredentialPath) {
@@ -305,7 +371,11 @@ if (-not $SkipPowerShellLogin) {
         $loginParams.KeyVaultAccessToken = $KeyVaultAccessToken
     }
 
-    $powerShellLoginResult = & $powerShellLoginScript @loginParams
+    Wait-ForPostRegistrationPropagation -HasFreshRegistration $hasFreshRegistration -DelaySeconds $PostRegistrationLoginDelaySeconds
+
+    $powerShellLoginResult = Invoke-WithRetry -Label 'PowerShell local login' -RetryCount $PostRegistrationLoginRetryCount -DelaySeconds $PostRegistrationLoginDelaySeconds -Action {
+        & $powerShellLoginScript @loginParams
+    }
     $surfaceMatrix.powerShellLocalLogin.success = [bool]$powerShellLoginResult.Success
     $surfaceMatrix.powerShellLocalLogin.detail = $powerShellLoginResult.CookieType
     if ($powerShellLoginResult.Success -and -not $EstsAuthCookie -and (Get-Variable -Name ESTSAUTH -Scope Global -ErrorAction SilentlyContinue)) {
@@ -322,7 +392,11 @@ if (-not $SkipPythonLogin) {
     }
 
     $surfaceMatrix.pythonLocalLogin.attempted = $true
-    $pythonLoginResult = Invoke-PythonLogin -CredentialPath $preferredCredentialPath
+    Wait-ForPostRegistrationPropagation -HasFreshRegistration $hasFreshRegistration -DelaySeconds $PostRegistrationLoginDelaySeconds
+
+    $pythonLoginResult = Invoke-WithRetry -Label 'Python local login' -RetryCount $PostRegistrationLoginRetryCount -DelaySeconds $PostRegistrationLoginDelaySeconds -Action {
+        Invoke-PythonLogin -CredentialPath $preferredCredentialPath
+    }
     $surfaceMatrix.pythonLocalLogin.success = [bool]$pythonLoginResult.success
     $surfaceMatrix.pythonLocalLogin.detail = $pythonLoginResult.cookieType
     if ($pythonLoginResult.success -and -not $EstsAuthCookie -and $pythonLoginResult.PSObject.Properties.Name -contains 'estsAuthCookie' -and $pythonLoginResult.estsAuthCookie) {
@@ -340,7 +414,11 @@ if ($PowerShellFunctionLoginUrl) {
 
     $surfaceMatrix.powerShellFunctionLogin.attempted = $true
     $credential = Get-Content -LiteralPath $preferredCredentialPath -Raw | ConvertFrom-Json
-    $powerShellFunctionLoginResult = Invoke-FunctionPasskeyLogin -Uri $PowerShellFunctionLoginUrl -Credential $credential
+    Wait-ForPostRegistrationPropagation -HasFreshRegistration $hasFreshRegistration -DelaySeconds $PostRegistrationLoginDelaySeconds
+
+    $powerShellFunctionLoginResult = Invoke-WithRetry -Label 'PowerShell Function login' -RetryCount $PostRegistrationLoginRetryCount -DelaySeconds $PostRegistrationLoginDelaySeconds -Action {
+        Invoke-FunctionPasskeyLogin -Uri $PowerShellFunctionLoginUrl -Credential $credential
+    }
     $surfaceMatrix.powerShellFunctionLogin.success = [bool]$powerShellFunctionLoginResult.success
     $surfaceMatrix.powerShellFunctionLogin.detail = $powerShellFunctionLoginResult.cookieType
     if ($powerShellFunctionLoginResult.success -and -not $EstsAuthCookie -and $powerShellFunctionLoginResult.estsAuthCookie) {
@@ -358,7 +436,11 @@ if ($PythonFunctionLoginUrl) {
 
     $surfaceMatrix.pythonFunctionLogin.attempted = $true
     $credential = Get-Content -LiteralPath $preferredCredentialPath -Raw | ConvertFrom-Json
-    $pythonFunctionLoginResult = Invoke-FunctionPasskeyLogin -Uri $PythonFunctionLoginUrl -Credential $credential
+    Wait-ForPostRegistrationPropagation -HasFreshRegistration $hasFreshRegistration -DelaySeconds $PostRegistrationLoginDelaySeconds
+
+    $pythonFunctionLoginResult = Invoke-WithRetry -Label 'Python Function login' -RetryCount $PostRegistrationLoginRetryCount -DelaySeconds $PostRegistrationLoginDelaySeconds -Action {
+        Invoke-FunctionPasskeyLogin -Uri $PythonFunctionLoginUrl -Credential $credential
+    }
     $surfaceMatrix.pythonFunctionLogin.success = [bool]$pythonFunctionLoginResult.success
     $surfaceMatrix.pythonFunctionLogin.detail = $pythonFunctionLoginResult.cookieType
     if ($pythonFunctionLoginResult.success -and -not $EstsAuthCookie -and $pythonFunctionLoginResult.estsAuthCookie) {

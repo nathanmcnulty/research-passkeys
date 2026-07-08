@@ -1,0 +1,26 @@
+{
+  "bindings": [
+    {
+      "authLevel": "function",
+      "type": "httpTrigger",
+      "direction": "in",
+      "name": "Request",
+      "methods": [
+        "post"
+      ],
+      "route": "passkeys/register/estsauth/queue"
+    },
+    {
+      "type": "http",
+      "direction": "out",
+      "name": "Response"
+    },
+    {
+      "type": "queue",
+      "direction": "out",
+      "name": "RegistrationMessage",
+      "queueName": "%PASSKEY_REGISTRATION_QUEUE_NAME%",
+      "connection": "AzureWebJobsStorage"
+    }
+  ]
+}

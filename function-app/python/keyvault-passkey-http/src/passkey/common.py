@@ -10,7 +10,7 @@ import uuid
 from collections import OrderedDict
 from dataclasses import dataclass
 from datetime import UTC, datetime
-from urllib.parse import quote, urlencode, urljoin
+from urllib.parse import quote, urlencode, urljoin, urlparse
 
 CLIENT_ID = "19db86c3-b2b9-44cc-b339-36da233a3be2"
 REDIRECT_URI = "https://mysignins.microsoft.com"
@@ -18,9 +18,10 @@ RP_ID = "login.microsoft.com"
 TOKEN_SCOPE = f"{CLIENT_ID}/.default openid profile offline_access"
 USER_AGENT = (
     "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 "
-    "(KHTML, like Gecko) Chrome/148.0.0.0 Safari/537.36 Edg/148.0.0.0"
+    "(KHTML, like Gecko) Chrome/149.0.0.0 Safari/537.36 Edg/149.0.0.0"
 )
-SEC_CH_UA = '"Chromium";v="148", "Microsoft Edge";v="148", "Not_A Brand";v="99"'
+SEC_CH_UA = '"Chromium";v="149", "Microsoft Edge";v="149", "Not_A Brand";v="99"'
+ESTS_COOKIE_NAMES = ("ESTSAUTH", "ESTSAUTHPERSISTENT", "ESTSAUTHLIGHT")
 VERIFY_FEATURE_FLAGS = (
     "tff,cpfaudit,enslfmg,fwdIam,pKoe,drmm,myAccSi,saap,mregph,mysigninsfido,"
     "mysigninsauthappnotification,mysigninsauthappotp,migaam,mrp,hoaref,mregextauth,"
@@ -158,9 +159,145 @@ def sanitize_upn_prefix(user_principal_name: str) -> str:
     return sanitized or "user"
 
 
+def _coerce_non_empty_string(value: object) -> str | None:
+    if isinstance(value, str):
+        trimmed = value.strip()
+        if trimmed:
+            return trimmed
+    return None
+
+
+def _extract_ests_cookie_from_mapping(mapping: dict[object, object]) -> tuple[str | None, str | None]:
+    name = _coerce_non_empty_string(mapping.get("name"))
+    value = _coerce_non_empty_string(mapping.get("value"))
+    if not name or not value:
+        return None, None
+
+    normalized_name = name.upper()
+    if normalized_name not in ESTS_COOKIE_NAMES:
+        return None, None
+
+    return normalized_name, value
+
+
+def _extract_ests_cookie_from_collection(items: list[object] | tuple[object, ...]) -> str | None:
+    candidates: dict[str, str] = {}
+
+    for item in items:
+        if isinstance(item, dict):
+            cookie_name, cookie_value = _extract_ests_cookie_from_mapping(item)
+            if cookie_name and cookie_value:
+                candidates[cookie_name] = cookie_value
+                continue
+
+        nested_cookie = extract_ests_auth_cookie_value(item)
+        if nested_cookie and "ESTSAUTH" not in candidates:
+            candidates["ESTSAUTH"] = nested_cookie
+
+    for cookie_name in ESTS_COOKIE_NAMES:
+        if cookie_name in candidates:
+            return candidates[cookie_name]
+
+    return None
+
+
+def _extract_ests_cookie_from_header(cookie_header: str) -> str | None:
+    for cookie_name in ESTS_COOKIE_NAMES:
+        match = re.search(rf"(?:^|;\s*){cookie_name}=([^;]+)", cookie_header, flags=re.IGNORECASE)
+        if match:
+            value = match.group(1).strip()
+            if value:
+                return value
+    return None
+
+
+def extract_ests_auth_cookie_value(cookie_source: object) -> str | None:
+    if cookie_source is None:
+        return None
+
+    if isinstance(cookie_source, bytes):
+        cookie_source = cookie_source.decode("utf-8", errors="ignore")
+
+    if isinstance(cookie_source, dict):
+        for key in ("estsAuth", "estsAuthCookie", "ESTSAUTH"):
+            direct_value = _coerce_non_empty_string(cookie_source.get(key))
+            if direct_value:
+                return direct_value
+
+        for key in ("cookies", "cookieExport", "cookieJson", "cookieData", "browserCookies", "tokens", "items"):
+            if key in cookie_source:
+                nested_value = extract_ests_auth_cookie_value(cookie_source.get(key))
+                if nested_value:
+                    return nested_value
+
+        _, cookie_value = _extract_ests_cookie_from_mapping(cookie_source)
+        return cookie_value
+
+    if isinstance(cookie_source, (list, tuple)):
+        return _extract_ests_cookie_from_collection(cookie_source)
+
+    if isinstance(cookie_source, str):
+        text = cookie_source.strip()
+        if not text:
+            return None
+
+        if text[0] in "[{\"":
+            try:
+                parsed = json.loads(text)
+            except json.JSONDecodeError:
+                parsed = None
+            if parsed is not None:
+                nested_value = extract_ests_auth_cookie_value(parsed)
+                if nested_value:
+                    return nested_value
+
+        header_value = _extract_ests_cookie_from_header(text)
+        if header_value:
+            return header_value
+
+        return text
+
+    return None
+
+
+def build_display_name() -> str:
+    return f"pk{secrets.randbelow(9000) + 1000}"
+
+
 def build_key_name(user_principal_name: str) -> str:
-    timestamp = datetime.now(UTC).strftime("%Y%m%d-%H%M%S")
-    return f"passkey-{sanitize_upn_prefix(user_principal_name)}-{timestamp}"
+    prefix = sanitize_upn_prefix(user_principal_name)[:12] or "user"
+    suffix = f"{secrets.randbelow(900000) + 100000}"
+    return f"pk-{prefix}-{suffix}"
+
+
+def normalize_user_agent(value: object | None) -> str:
+    if isinstance(value, str):
+        normalized = value.replace("\x00", "").replace("\r", " ").replace("\n", " ").strip()
+        if normalized:
+            return normalized
+    return USER_AGENT
+
+
+def normalize_redirect_uri(value: object | None) -> str:
+    if isinstance(value, str):
+        normalized = value.replace("\x00", "").replace("\r", " ").replace("\n", " ").strip()
+        if normalized:
+            parsed = urlparse(normalized)
+            if parsed.scheme not in {"http", "https"} or not parsed.netloc:
+                raise PasskeyValidationError(
+                    f"The redirectUri value '{normalized}' is not a valid absolute http/https URI."
+                )
+            if parsed.query or parsed.fragment:
+                raise PasskeyValidationError(
+                    f"The redirectUri value '{normalized}' must not include a query string or fragment."
+                )
+            return normalized
+    return REDIRECT_URI
+
+
+def configure_requests_session(session, user_agent: object | None):
+    session.headers["User-Agent"] = normalize_user_agent(user_agent)
+    return session
 
 
 def add_browser_headers(headers: dict[str, str], fetch_site: str = "same-origin") -> dict[str, str]:
@@ -176,10 +313,11 @@ def add_browser_headers(headers: dict[str, str], fetch_site: str = "same-origin"
     return headers
 
 
-def build_spa_headers() -> dict[str, str]:
+def build_spa_headers(redirect_uri: str = REDIRECT_URI) -> dict[str, str]:
+    redirect_uri = normalize_redirect_uri(redirect_uri)
     return {
-        "Origin": REDIRECT_URI,
-        "Referer": f"{REDIRECT_URI}/",
+        "Origin": redirect_uri,
+        "Referer": f"{redirect_uri}/",
         "Sec-Fetch-Mode": "cors",
         "Sec-Fetch-Site": "cross-site",
         "Sec-Fetch-Dest": "empty",
@@ -191,11 +329,13 @@ def build_session_headers(
     client_session_id: str,
     *,
     session_ctx_v2: str | None = None,
+    redirect_uri: str = REDIRECT_URI,
 ) -> dict[str, str]:
+    redirect_uri = normalize_redirect_uri(redirect_uri)
     headers = {
         "Authorization": f"Bearer {access_token}",
-        "Origin": REDIRECT_URI,
-        "Referer": f"{REDIRECT_URI}/security-info",
+        "Origin": redirect_uri,
+        "Referer": f"{redirect_uri}/security-info",
         "AjaxRequest": "true",
         "x-ms-mysignins-region": "westus2",
         "x-ms-client-session-id": client_session_id,

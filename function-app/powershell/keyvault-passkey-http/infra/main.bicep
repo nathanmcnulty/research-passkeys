@@ -255,10 +255,12 @@ resource functionAppSettings 'Microsoft.Web/sites/config@2024-11-01' = {
     AzureWebJobsStorage__tableServiceUri: storage.properties.primaryEndpoints.table
     AzureWebJobsStorage__credential: 'managedidentity'
     AzureWebJobsStorage__clientId: userAssignedIdentity.properties.clientId
-    FUNCTIONS_WORKER_RUNTIME: 'powershell'
     PASSKEY_TENANT_ID: tenantId
     PASSKEY_KEYVAULT_NAME: keyVault.name
     PASSKEY_MANAGED_IDENTITY_CLIENT_ID: userAssignedIdentity.properties.clientId
+    PASSKEY_REGISTRATION_QUEUE_NAME: 'passkey-registration'
+    PASSKEY_REGISTRATION_STATUS_CONTAINER_NAME: 'passkey-registration-status'
+    PASSKEY_POST_REGISTRATION_LOGIN_DELAY_SECONDS: '10'
     APPLICATIONINSIGHTS_CONNECTION_STRING: applicationInsights.properties.ConnectionString
     APPLICATIONINSIGHTS_AUTHENTICATION_STRING: 'ClientId=${userAssignedIdentity.properties.clientId};Authorization=AAD'
   }

@@ -77,7 +77,7 @@ function Add-PasskeyBrowserHeaders {
     )
 
     if (-not $Headers.ContainsKey('User-Agent')) {
-        $Headers['User-Agent'] = 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/148.0.0.0 Safari/537.36 Edg/148.0.0.0'
+        $Headers['User-Agent'] = 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/149.0.0.0 Safari/537.36 Edg/149.0.0.0'
     }
 
     if (-not $Headers.ContainsKey('Accept')) {
@@ -89,7 +89,7 @@ function Add-PasskeyBrowserHeaders {
     }
 
     if (-not $Headers.ContainsKey('sec-ch-ua')) {
-        $Headers['sec-ch-ua'] = '"Chromium";v="148", "Microsoft Edge";v="148", "Not_A Brand";v="99"'
+        $Headers['sec-ch-ua'] = '"Chromium";v="149", "Microsoft Edge";v="149", "Not_A Brand";v="99"'
     }
 
     if (-not $Headers.ContainsKey('sec-ch-ua-mobile')) {
@@ -140,8 +140,16 @@ function Invoke-PasskeyTapPkceLogin {
         [Parameter(Mandatory)]
         [Microsoft.PowerShell.Commands.WebRequestSession]$WebSession,
 
+        [Parameter()]
+        [string]$UserAgent = 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/149.0.0.0 Safari/537.36 Edg/149.0.0.0',
+
         [int]$MaxRedirects = 15
     )
+
+    $UserAgent = $UserAgent.Replace([string][char]0, '').Replace("`r", ' ').Replace("`n", ' ').Trim()
+    if (-not [string]::IsNullOrWhiteSpace($UserAgent)) {
+        $WebSession.UserAgent = $UserAgent
+    }
 
     Write-Host "  ✓ PKCE generated" -ForegroundColor Green
 

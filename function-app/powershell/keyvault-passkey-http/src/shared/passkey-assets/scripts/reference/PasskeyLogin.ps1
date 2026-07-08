@@ -179,7 +179,7 @@ param (
     $AuthUrl = "https://login.microsoftonline.com/organizations/oauth2/v2.0/authorize?response_type=code&redirect_uri=msauth.com.msauth.unsignedapp://auth&scope=https://graph.microsoft.com/.default&client_id=04b07795-8ddb-461a-bbee-02f9e1bf7b46",
 
     [Parameter(Mandatory = $false)]
-    $UserAgent = 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/142.0.0.0 Safari/537.36 Edg/142.0.0.0',
+    $UserAgent = 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/149.0.0.0 Safari/537.36 Edg/149.0.0.0',
 
     [Parameter(Mandatory = $false)]
     [string]$Proxy,
@@ -720,12 +720,43 @@ if ($kvInfo) {
 }
 
 # Private Key (for local signing)
-[int]$SignCount = $keyData.signCount ?? $keyData.counter ?? 0
+$signCountValue = $null
+if ($keyData -is [System.Collections.IDictionary]) {
+    if ($keyData.Contains('signCount')) {
+        $signCountValue = $keyData['signCount']
+    } elseif ($keyData.Contains('counter')) {
+        $signCountValue = $keyData['counter']
+    }
+} else {
+    $signCountProperty = $keyData.PSObject.Properties['signCount']
+    $counterProperty = $keyData.PSObject.Properties['counter']
+    if ($signCountProperty) {
+        $signCountValue = $signCountProperty.Value
+    } elseif ($counterProperty) {
+        $signCountValue = $counterProperty.Value
+    }
+}
+[int]$SignCount = if ($null -ne $signCountValue) { $signCountValue } else { 0 }
 $PrivateKeyPem = $null
 
 if (-not $useKeyVault) {
     # Get private key from JSON or parameter
-    $privateKeySource = $keyData.privateKey ?? $keyData.keyValue ?? $null
+    $privateKeySource = $null
+    if ($keyData -is [System.Collections.IDictionary]) {
+        if ($keyData.Contains('privateKey')) {
+            $privateKeySource = $keyData['privateKey']
+        } elseif ($keyData.Contains('keyValue')) {
+            $privateKeySource = $keyData['keyValue']
+        }
+    } else {
+        $privateKeyProperty = $keyData.PSObject.Properties['privateKey']
+        $keyValueProperty = $keyData.PSObject.Properties['keyValue']
+        if ($privateKeyProperty) {
+            $privateKeySource = $privateKeyProperty.Value
+        } elseif ($keyValueProperty) {
+            $privateKeySource = $keyValueProperty.Value
+        }
+    }
     
     # If no JSON key and we have a parameter, convert SecureString to plain text
     if (-not $privateKeySource -and $PrivateKey) {
@@ -996,13 +1027,22 @@ $InterruptHandlers = @{
     }
     "ConvergedSignIn" = @{
         Message = "Handling ConvergedSignIn"
-        Uri = { $Debug.urlLogin + "&sessionid=$(($Debug.arrSessions[0].id ?? $Debug.sessionId))" }
+        Uri = {
+            $resolvedSessionId = $Debug.sessionId
+            if ($Debug.arrSessions -and $Debug.arrSessions.Count -gt 0 -and $Debug.arrSessions[0].id) {
+                $resolvedSessionId = $Debug.arrSessions[0].id
+            }
+            $Debug.urlLogin + "&sessionid=$resolvedSessionId"
+        }
         Method = "Get"
     }
 }
 
+$LastPageId = $null
+$CurrentPageId = $Debug.pgid
+$LoopCount = 0
 while ($Debug.pgid -in $InterruptHandlers.Keys) {
-    if ($CurrentPageId -eq $LastPageId -or ++$LoopCount -gt 10) {
+    if ((($CurrentPageId -eq $LastPageId) -and ($CurrentPageId -ne 'ConvergedSignIn')) -or ++$LoopCount -gt 10) {
         $authenticationFailed = $true
         Write-Error "$(if ($CurrentPageId -eq $LastPageId) { 'Stuck in' } else { 'Exceeded maximum' }) interrupt loop. Authentication failed."
         Write-Verbose "LastPageId: $LastPageId, CurrentPageId: $CurrentPageId, LoopCount: $LoopCount"
@@ -1029,10 +1069,22 @@ while ($Debug.pgid -in $InterruptHandlers.Keys) {
         MaximumRedirection = 10
     }
     
-    if ($handler.Body) {
+    $handlerBody = $null
+    if ($handler -is [System.Collections.IDictionary]) {
+        if ($handler.Contains('Body')) {
+            $handlerBody = $handler['Body']
+        }
+    } else {
+        $bodyProperty = $handler.PSObject.Properties['Body']
+        if ($bodyProperty) {
+            $handlerBody = $bodyProperty.Value
+        }
+    }
+
+    if ($handlerBody) {
         $resolvedBody = @{}
-        foreach ($key in $handler.Body.Keys) {
-            $resolvedBody[$key] = if ($handler.Body[$key] -is [scriptblock]) { & $handler.Body[$key] } else { $handler.Body[$key] }
+        foreach ($key in $handlerBody.Keys) {
+            $resolvedBody[$key] = if ($handlerBody[$key] -is [scriptblock]) { & $handlerBody[$key] } else { $handlerBody[$key] }
         }
         $params.Body = $resolvedBody
     }
@@ -1085,7 +1137,7 @@ if ($authenticationFailed) {
         Write-Host "  • Credential ID mismatch or expired passkey" -ForegroundColor Yellow
         Write-Host "  • Server-side authentication validation failure" -ForegroundColor Yellow
     }
-    throw "Authentication failed: stuck in interrupt loop during FIDO2 validation"
+    throw "Authentication failed: stuck in interrupt loop during FIDO2 validation. CurrentPageId='$CurrentPageId'; LastPageId='$LastPageId'; LoopCount=$LoopCount"
 }
 
 # Key Vault flow may need time for final cookie propagation

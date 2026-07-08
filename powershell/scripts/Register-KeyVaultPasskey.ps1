@@ -92,13 +92,19 @@ param(
     [string]$KeyVaultKeyName,
 
     [Parameter()]
-    [string]$DisplayName = "Software Passkey",
+    [string]$DisplayName = "",
 
     [Parameter()]
     [string]$OutputPath,
 
     [Parameter()]
-    [string]$KeyVaultAccessToken
+    [string]$KeyVaultAccessToken,
+
+    [Parameter()]
+    [string]$UserAgent = 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/149.0.0.0 Safari/537.36 Edg/149.0.0.0',
+
+    [Parameter()]
+    [string]$RedirectUri = 'https://mysignins.microsoft.com'
 )
 
 $ErrorActionPreference = "Stop"
@@ -113,8 +119,27 @@ if ($TAP -is [securestring]) {
 } elseif ($TAP -isnot [string]) {
     $TAP = [string]$TAP
 }
+$UserAgent = $UserAgent.Replace([string][char]0, '').Replace("`r", ' ').Replace("`n", ' ').Trim()
+if ([string]::IsNullOrWhiteSpace($UserAgent)) {
+    $UserAgent = 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/149.0.0.0 Safari/537.36 Edg/149.0.0.0'
+}
+$PSDefaultParameterValues['Invoke-WebRequest:UserAgent'] = $UserAgent
+$PSDefaultParameterValues['Invoke-RestMethod:UserAgent'] = $UserAgent
 $ClientId = "19db86c3-b2b9-44cc-b339-36da233a3be2"  # My Signins SPA
-$RedirectUri = "https://mysignins.microsoft.com"
+$RedirectUri = $RedirectUri.Replace([string][char]0, '').Replace("`r", ' ').Replace("`n", ' ').Trim()
+if ([string]::IsNullOrWhiteSpace($RedirectUri)) {
+    $RedirectUri = 'https://mysignins.microsoft.com'
+}
+$parsedRedirectUri = $null
+if (-not [System.Uri]::TryCreate($RedirectUri, [System.UriKind]::Absolute, [ref]$parsedRedirectUri)) {
+    throw "RedirectUri '$RedirectUri' is not a valid absolute URI."
+}
+if ($parsedRedirectUri.Scheme -notin @('http', 'https')) {
+    throw "RedirectUri '$RedirectUri' must use http or https."
+}
+if (-not [string]::IsNullOrWhiteSpace($parsedRedirectUri.Query) -or -not [string]::IsNullOrWhiteSpace($parsedRedirectUri.Fragment)) {
+    throw "RedirectUri '$RedirectUri' must not include a query string or fragment."
+}
 
 Write-Host "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━" -ForegroundColor Cyan
 Write-Host "  FIDO2 Passkey Registration via TAP → Azure Key Vault" -ForegroundColor Cyan
@@ -125,6 +150,7 @@ Write-Host ""
 #endregion
 
 $spaHeaders = @{
+    'User-Agent'    = $UserAgent
     'Origin'         = $RedirectUri
     'Referer'        = "$RedirectUri/"
     'Sec-Fetch-Mode' = 'cors'
@@ -133,6 +159,7 @@ $spaHeaders = @{
 }
 
 $webSession = [Microsoft.PowerShell.Commands.WebRequestSession]::new()
+$webSession.UserAgent = $UserAgent
 $tokenScope = "$ClientId/.default openid profile offline_access"
 
 # Generate PKCE
@@ -214,7 +241,13 @@ if (-not $KeyVaultKeyName) {
         $sanitizedUpnPrefix = 'user'
     }
 
-    $KeyVaultKeyName = "passkey-$sanitizedUpnPrefix-$(Get-Date -Format 'yyyyMMdd-HHmmss')"
+    $prefix = if ($sanitizedUpnPrefix.Length -gt 12) { $sanitizedUpnPrefix.Substring(0, 12) } else { $sanitizedUpnPrefix }
+    $randomSuffix = Get-Random -Minimum 100000 -Maximum 1000000
+    $KeyVaultKeyName = "pk-$prefix-$randomSuffix"
+}
+
+if ([string]::IsNullOrWhiteSpace($DisplayName)) {
+    $DisplayName = "pk$(Get-Random -Minimum 1000 -Maximum 10000)"
 }
 
 # Create EC P-256 key in Key Vault
@@ -258,7 +291,8 @@ $authCode = Invoke-PasskeyTapPkceLogin `
     -UserPrincipalName $UserPrincipalName `
     -Tap $TAP `
     -CodeChallenge $codeChallenge `
-    -WebSession $webSession
+    -WebSession $webSession `
+    -UserAgent $UserAgent
 
 Write-Host ""
 
@@ -632,8 +666,10 @@ if ($fidoResp.Content -match '\$Config=(\{.+\});') {
         $respCfg = $matches[1] | ConvertFrom-Json
         if ($respCfg.iErrorCode -and $respCfg.iErrorCode -ne 0) {
             Write-Host "  ✗ newfido error: code=$($respCfg.iErrorCode)" -ForegroundColor Red
-            if ($respCfg.strServiceExceptionMessage) {
-                Write-Host "    $($respCfg.strServiceExceptionMessage)" -ForegroundColor Red
+            $newFidoErrMsgProperty = $respCfg.PSObject.Properties['strServiceExceptionMessage']
+            $newFidoErrMsg = if ($newFidoErrMsgProperty) { [string]$newFidoErrMsgProperty.Value } else { '' }
+            if ($newFidoErrMsg) {
+                Write-Host "    $newFidoErrMsg" -ForegroundColor Red
             }
             throw "newfido returned error code $($respCfg.iErrorCode)"
         }
@@ -645,22 +681,81 @@ Write-Host "  Step 1b: Parsing newfido response..." -ForegroundColor Yellow
 
 $newfidoContext = $null
 $newfidoRedirectUrl = $null
+$postInfo = ''
 
-if ($fidoResp.Content -match '<div\s+id="context"\s+data-content="([^"]*)"') {
-    $newfidoContext = [System.Web.HttpUtility]::HtmlDecode($matches[1])
-    Write-Host "    ✓ Extracted context from newfido ($($newfidoContext.Length) chars)" -ForegroundColor Green
+function Update-PasskeyContextState {
+    param(
+        [Parameter(Mandatory)]
+        [AllowEmptyString()]
+        [string]$ContextJson
+    )
+
+    if ([string]::IsNullOrWhiteSpace($ContextJson)) {
+        return
+    }
 
     try {
-        $contextObj = $newfidoContext | ConvertFrom-Json
+        $contextObj = $ContextJson | ConvertFrom-Json
         if ($contextObj.Canary) {
-            $fidoCanary = $contextObj.Canary
-            Write-Host "    ✓ Canary confirmed from newfido context" -ForegroundColor Green
+            $script:fidoCanary = $contextObj.Canary
+            Write-Host "    ✓ Canary confirmed from context" -ForegroundColor Green
+        }
+        if ($contextObj.PostInfo) {
+            $script:postInfo = [string]$contextObj.PostInfo
+            Write-Host "    ✓ PostInfo extracted from context" -ForegroundColor Green
         }
         if ($contextObj.AttestationObject) { Write-Host "    ✓ AttestationObject present" -ForegroundColor Green }
         if ($contextObj.ClientDataJson) { Write-Host "    ✓ ClientDataJson present" -ForegroundColor Green }
     } catch {
         Write-Host "    ⚠ Could not parse context JSON: $_" -ForegroundColor DarkYellow
     }
+}
+
+function Get-PasskeyRedirectFragmentValues {
+    param(
+        [Parameter(Mandatory)]
+        [AllowEmptyString()]
+        [string]$Url
+    )
+
+    $fragmentValues = [ordered]@{}
+    if ([string]::IsNullOrWhiteSpace($Url)) {
+        return $fragmentValues
+    }
+
+    $fragmentStartIndex = $Url.IndexOf('#')
+    if ($fragmentStartIndex -lt 0 -or $fragmentStartIndex -ge ($Url.Length - 1)) {
+        return $fragmentValues
+    }
+
+    $fragmentText = $Url.Substring($fragmentStartIndex + 1)
+    foreach ($fragmentSegment in ($fragmentText -split '&')) {
+        if ([string]::IsNullOrWhiteSpace($fragmentSegment)) {
+            continue
+        }
+
+        $segmentParts = $fragmentSegment -split '=', 2
+        $decodedName = [System.Uri]::UnescapeDataString([string]$segmentParts[0])
+        if ([string]::IsNullOrWhiteSpace($decodedName)) {
+            continue
+        }
+
+        $decodedValue = if ($segmentParts.Count -gt 1) {
+            [System.Uri]::UnescapeDataString([string]$segmentParts[1])
+        } else {
+            ''
+        }
+
+        $fragmentValues[$decodedName] = $decodedValue
+    }
+
+    return $fragmentValues
+}
+
+if ($fidoResp.Content -match '<div\s+id="context"\s+data-content="([^"]*)"') {
+    $newfidoContext = [System.Web.HttpUtility]::HtmlDecode($matches[1])
+    Write-Host "    ✓ Extracted context from newfido ($($newfidoContext.Length) chars)" -ForegroundColor Green
+    Update-PasskeyContextState -ContextJson $newfidoContext
 } else {
     Write-Host "    ⚠ Could not extract context div from newfido HTML" -ForegroundColor DarkYellow
 }
@@ -669,6 +764,16 @@ if ($fidoResp.Content -match '<div\s+id="redirectUrl"\s+data-content="([^"]*)"')
     $newfidoRedirectUrl = [System.Web.HttpUtility]::HtmlDecode($matches[1])
     $truncUrl = if ($newfidoRedirectUrl.Length -gt 80) { "$($newfidoRedirectUrl.Substring(0,80))..." } else { $newfidoRedirectUrl }
     Write-Host "    ✓ Redirect URL: $truncUrl" -ForegroundColor Green
+
+    $redirectFragmentValues = Get-PasskeyRedirectFragmentValues -Url $newfidoRedirectUrl
+    if (-not [string]::IsNullOrWhiteSpace([string]$redirectFragmentValues['fidoProvisionSuccess'])) {
+        $script:fidoCanary = [string]$redirectFragmentValues['fidoProvisionSuccess']
+        Write-Host "    ✓ Canary refreshed from redirect fragment" -ForegroundColor Green
+    }
+    if (-not [string]::IsNullOrWhiteSpace([string]$redirectFragmentValues['postinfo'])) {
+        $script:postInfo = [string]$redirectFragmentValues['postinfo']
+        Write-Host "    ✓ PostInfo extracted from redirect fragment" -ForegroundColor Green
+    }
 } else {
     Write-Host "    ⚠ Could not extract redirectUrl div from newfido HTML" -ForegroundColor DarkYellow
 }
@@ -679,6 +784,13 @@ if ($newfidoRedirectUrl) {
     try {
         $navResp = Invoke-WebRequest -Uri $navUrl -Method GET -UseBasicParsing -WebSession $webSession
         Write-Host "    ✓ Security-info page loaded: $($navResp.StatusCode)" -ForegroundColor Green
+        if ([string]::IsNullOrWhiteSpace($postInfo) -and $navResp.Content -match '<div\s+id="context"\s+data-content="([^"]*)"') {
+            $securityInfoContext = [System.Web.HttpUtility]::HtmlDecode($matches[1])
+            if (-not [string]::IsNullOrWhiteSpace($securityInfoContext)) {
+                Write-Host "    ✓ Extracted context from security-info page ($($securityInfoContext.Length) chars)" -ForegroundColor Green
+                Update-PasskeyContextState -ContextJson $securityInfoContext
+            }
+        }
     } catch {
         Write-Host "    ⚠ Navigation to redirect URL failed (continuing): $_" -ForegroundColor DarkYellow
     }
@@ -686,6 +798,30 @@ if ($newfidoRedirectUrl) {
 
 Write-Host ""
 Write-Host "  Step 2: Finalizing registration (authenticationmethods/verify)..." -ForegroundColor Yellow
+
+$methodsResponse = $null
+$methodsHeaders = @{
+    'Authorization'          = "Bearer $selfToken"
+    'SessionCtxV2'           = $sessionCtxV2
+    'Origin'                 = $RedirectUri
+    'Referer'                = "$RedirectUri/security-info"
+    'AjaxRequest'            = 'true'
+    'x-ms-mysignins-region'  = 'westus2'
+    'x-ms-client-session-id' = $clientSessionId
+}
+Add-PasskeyBrowserHeaders -Headers $methodsHeaders
+foreach ($methodsUri in @(
+    "$RedirectUri/api/authenticationmethods/availablemethods"
+    "$RedirectUri/api/authenticationmethods"
+)) {
+    try {
+        $methodsResponse = Invoke-WebRequest -Uri $methodsUri -Method GET -Headers $methodsHeaders -UseBasicParsing -WebSession $webSession
+        Write-Host "    ✓ Methods context fetched from $methodsUri ($($methodsResponse.Content.Length) bytes)" -ForegroundColor Gray
+        break
+    } catch {
+        continue
+    }
+}
 
 Write-Host "    Re-authorizing session..." -ForegroundColor Gray
 $reAuthHeaders = @{
@@ -709,7 +845,40 @@ try {
     Write-Host "    ⚠ Session re-auth failed (continuing with existing session): $_" -ForegroundColor DarkYellow
 }
 
-$verificationData = @{
+function New-PasskeyVerificationDataJson {
+    param(
+        [Parameter(Mandatory)]
+        [System.Collections.IDictionary]$Template,
+
+        [Parameter(Mandatory)]
+        [ValidateSet('empty', 'context')]
+        [string]$PostInfoMode,
+
+        [Parameter()]
+        [AllowEmptyString()]
+        [string]$PostInfo
+    )
+
+    $verificationDataObject = [ordered]@{
+        Name                   = [string]$Template.Name
+        Canary                 = [string]$Template.Canary
+        AttestationObject      = [string]$Template.AttestationObject
+        ClientDataJson         = [string]$Template.ClientDataJson
+        CredentialId           = [string]$Template.CredentialId
+        ClientExtensionResults = [string]$Template.ClientExtensionResults
+        PostInfo               = ''
+        AAGuid                 = [string]$Template.AAGuid
+        CredentialDeviceType   = [string]$Template.CredentialDeviceType
+    }
+
+    if ($PostInfoMode -eq 'context') {
+        $verificationDataObject.PostInfo = [string]$PostInfo
+    }
+
+    return ($verificationDataObject | ConvertTo-Json -Compress)
+}
+
+$verificationTemplate = [ordered]@{
     Name                   = $DisplayName
     Canary                 = $fidoCanary
     AttestationObject      = $attestationObjB64Url
@@ -719,12 +888,19 @@ $verificationData = @{
     PostInfo               = ""
     AAGuid                 = "00000000-0000-0000-0000-000000000000"
     CredentialDeviceType   = "singleDevice"
-} | ConvertTo-Json -Compress
+}
 
-$verifyBody = @{
-    Type             = 18
-    VerificationData = $verificationData
-} | ConvertTo-Json -Compress
+$verifyStrategies = [System.Collections.Generic.List[object]]::new()
+$verifyStrategies.Add([ordered]@{
+    Name = 'auto-empty'
+    VerificationData = New-PasskeyVerificationDataJson -Template $verificationTemplate -PostInfoMode 'empty' -PostInfo $postInfo
+}) | Out-Null
+if (-not [string]::IsNullOrWhiteSpace($postInfo)) {
+    $verifyStrategies.Add([ordered]@{
+        Name = 'auto-context'
+        VerificationData = New-PasskeyVerificationDataJson -Template $verificationTemplate -PostInfoMode 'context' -PostInfo $postInfo
+    }) | Out-Null
+}
 
 $verifyHeaders = @{
     'SessionCtxV2'           = $sessionCtxV2
@@ -739,60 +915,102 @@ Add-PasskeyBrowserHeaders -Headers $verifyHeaders
 
 $verifyUrl = "$RedirectUri/api/authenticationmethods/verify"
 Write-Host "  URL: $verifyUrl" -ForegroundColor Gray
-Write-Host "  Body length: $($verifyBody.Length) chars" -ForegroundColor Gray
 
 $registrationSuccess = $false
 $verifyJson = $null
-try {
-    $verifyResp = Invoke-WebRequest -Uri $verifyUrl -Method POST -Body $verifyBody `
-        -ContentType "application/json" -Headers $verifyHeaders -UseBasicParsing -WebSession $webSession
+$verifyAttemptCount = 5
+$verifyRetryDelaySeconds = 2
+$activeVerifyStrategyIndex = 0
 
-    $verifyJson = $verifyResp.Content | ConvertFrom-Json
-    Write-Host "  Response: $($verifyResp.StatusCode) ($($verifyResp.Content.Length) bytes)" -ForegroundColor Gray
-} catch {
-    $errResp = $_.Exception.Response
-    $errBody = $null
-    if ($_.ErrorDetails.Message) {
-        $errBody = $_.ErrorDetails.Message
-    } elseif ($errResp) {
-        try {
-            $errStream = $errResp.GetResponseStream()
-            $reader = [System.IO.StreamReader]::new($errStream)
-            $errBody = $reader.ReadToEnd()
-            $reader.Close()
-        } catch {}
-    }
-    Write-Host "  HTTP Error: $($errResp.StatusCode) $($errResp.StatusCode.value__)" -ForegroundColor Red
-    if ($errBody) {
-        Write-Host "  Error body: $errBody" -ForegroundColor Red
-        try { $verifyJson = $errBody | ConvertFrom-Json } catch {}
-    } else {
-        Write-Host "  Exception: $_" -ForegroundColor Red
-    }
-}
+for ($verifyAttempt = 1; $verifyAttempt -le $verifyAttemptCount -and -not $registrationSuccess; $verifyAttempt++) {
+    $activeVerifyStrategy = $verifyStrategies[$activeVerifyStrategyIndex]
+    $activeVerifyStrategyName = [string]$activeVerifyStrategy.Name
+    $verifyBody = @{
+        Type             = 18
+        VerificationData = [string]$activeVerifyStrategy.VerificationData
+    } | ConvertTo-Json -Compress
 
-if ($verifyJson) {
-    if ($verifyJson.ErrorCode -and $verifyJson.ErrorCode -ne 0) {
-        Write-Host "  ✗ verify error: ErrorCode=$($verifyJson.ErrorCode), VerificationState=$($verifyJson.VerificationState), ErrorType=$($verifyJson.ErrorType)" -ForegroundColor Red
+    Write-Host "  Verify attempt $verifyAttempt/$verifyAttemptCount (strategy=$activeVerifyStrategyName)..." -ForegroundColor Gray
+    Write-Host "  Body length: $($verifyBody.Length) chars" -ForegroundColor Gray
+    $verifyJson = $null
+
+    try {
+        $verifyResp = Invoke-WebRequest -Uri $verifyUrl -Method POST -Body $verifyBody `
+            -ContentType "application/json" -Headers $verifyHeaders -UseBasicParsing -WebSession $webSession
+
+        $verifyJson = $verifyResp.Content | ConvertFrom-Json
+        Write-Host "    Response: $($verifyResp.StatusCode) ($($verifyResp.Content.Length) bytes)" -ForegroundColor Gray
+    } catch {
+        $errResp = $_.Exception.Response
+        $errBody = $null
+        if ($_.ErrorDetails.Message) {
+            $errBody = $_.ErrorDetails.Message
+        } elseif ($errResp) {
+            try {
+                $errStream = $errResp.GetResponseStream()
+                $reader = [System.IO.StreamReader]::new($errStream)
+                $errBody = $reader.ReadToEnd()
+                $reader.Close()
+            } catch {}
+        }
+        Write-Host "    HTTP Error: $($errResp.StatusCode) $($errResp.StatusCode.value__)" -ForegroundColor Red
+        if ($errBody) {
+            Write-Host "    Error body: $errBody" -ForegroundColor Red
+            try { $verifyJson = $errBody | ConvertFrom-Json } catch {}
+        } else {
+            Write-Host "    Exception: $_" -ForegroundColor Red
+        }
     }
 
-    if ($verifyJson.VerificationState -eq 2) {
-        $registrationSuccess = $true
-        $regCredId = $verifyJson.DataUpdates.FidoDevices.CredentialId
-        $regDisplayName = $verifyJson.DataUpdates.FidoDevices.DisplayName
-        $regCreated = $verifyJson.DataUpdates.FidoDevices.CreationTime
-        Write-Host "  ✓ Passkey registered successfully!" -ForegroundColor Green
-        Write-Host "    CredentialId: $regCredId" -ForegroundColor Gray
-        Write-Host "    DisplayName:  $regDisplayName" -ForegroundColor Gray
-        Write-Host "    Created:      $regCreated" -ForegroundColor Gray
-    } elseif (-not $registrationSuccess) {
+    if ($verifyJson) {
+        if ($verifyJson.ErrorCode -and $verifyJson.ErrorCode -ne 0) {
+            Write-Host "    ✗ verify error: ErrorCode=$($verifyJson.ErrorCode), VerificationState=$($verifyJson.VerificationState), ErrorType=$($verifyJson.ErrorType)" -ForegroundColor Red
+        }
+
+        if ($verifyJson.VerificationState -eq 2) {
+            $registrationSuccess = $true
+            $regCredId = $verifyJson.DataUpdates.FidoDevices.CredentialId
+            $regDisplayName = $verifyJson.DataUpdates.FidoDevices.DisplayName
+            $regCreated = $verifyJson.DataUpdates.FidoDevices.CreationTime
+            Write-Host "  ✓ Passkey registered successfully!" -ForegroundColor Green
+            Write-Host "    CredentialId: $regCredId" -ForegroundColor Gray
+            Write-Host "    DisplayName:  $regDisplayName" -ForegroundColor Gray
+            Write-Host "    Created:      $regCreated" -ForegroundColor Gray
+            break
+        }
+
+        $shouldTryAlternateStrategy = (
+            $verifyJson.ErrorCode -eq 20 -and
+            $verifyJson.VerificationState -eq 3 -and
+            $activeVerifyStrategyIndex -lt ($verifyStrategies.Count - 1)
+        )
+        if ($shouldTryAlternateStrategy) {
+            $activeVerifyStrategyIndex++
+            $nextVerifyStrategy = $verifyStrategies[$activeVerifyStrategyIndex]
+            Write-Host "    ⚠ verify returned ErrorCode=20 / VerificationState=3; switching strategy to $([string]$nextVerifyStrategy.Name)." -ForegroundColor DarkYellow
+            continue
+        }
+
+        if ($verifyAttempt -lt $verifyAttemptCount) {
+            Write-Host "    ⚠ VerificationState=$($verifyJson.VerificationState); retrying in $verifyRetryDelaySeconds second(s)..." -ForegroundColor DarkYellow
+            Start-Sleep -Seconds $verifyRetryDelaySeconds
+            continue
+        }
+
         Write-Host "  ⚠ VerificationState: $($verifyJson.VerificationState) (expected 2)" -ForegroundColor DarkYellow
         Write-Host "  Full response:" -ForegroundColor Gray
         Write-Host ($verifyJson | ConvertTo-Json -Depth 5) -ForegroundColor Gray
+    } elseif ($verifyAttempt -lt $verifyAttemptCount) {
+        Write-Host "    ⚠ No verification payload returned; retrying in $verifyRetryDelaySeconds second(s)..." -ForegroundColor DarkYellow
+        Start-Sleep -Seconds $verifyRetryDelaySeconds
     }
 }
 
 if (-not $registrationSuccess) {
+    if ($verifyJson) {
+        $detail = "VerificationState=$($verifyJson.VerificationState); ErrorCode=$($verifyJson.ErrorCode); ErrorType=$($verifyJson.ErrorType)"
+        throw "Registration failed - could not confirm success. $detail"
+    }
     throw "Registration failed - could not confirm success. Check mysignins.microsoft.com"
 }
 Write-Host ""

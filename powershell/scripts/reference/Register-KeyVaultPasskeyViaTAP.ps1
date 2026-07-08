@@ -98,7 +98,13 @@ param(
     [string]$OutputPath,
 
     [Parameter()]
-    [string]$KeyVaultAccessToken
+    [string]$KeyVaultAccessToken,
+
+    [Parameter()]
+    [string]$UserAgent = 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/149.0.0.0 Safari/537.36 Edg/149.0.0.0',
+
+    [Parameter()]
+    [string]$RedirectUri = 'https://mysignins.microsoft.com'
 )
 
 $ErrorActionPreference = "Stop"
@@ -109,8 +115,27 @@ if ($TAP -is [securestring]) {
 } elseif ($TAP -isnot [string]) {
     $TAP = [string]$TAP
 }
+$UserAgent = $UserAgent.Replace([string][char]0, '').Replace("`r", ' ').Replace("`n", ' ').Trim()
+if ([string]::IsNullOrWhiteSpace($UserAgent)) {
+    $UserAgent = 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/149.0.0.0 Safari/537.36 Edg/149.0.0.0'
+}
+$PSDefaultParameterValues['Invoke-WebRequest:UserAgent'] = $UserAgent
+$PSDefaultParameterValues['Invoke-RestMethod:UserAgent'] = $UserAgent
 $ClientId = "19db86c3-b2b9-44cc-b339-36da233a3be2"  # My Signins SPA
-$RedirectUri = "https://mysignins.microsoft.com"
+$RedirectUri = $RedirectUri.Replace([string][char]0, '').Replace("`r", ' ').Replace("`n", ' ').Trim()
+if ([string]::IsNullOrWhiteSpace($RedirectUri)) {
+    $RedirectUri = 'https://mysignins.microsoft.com'
+}
+$parsedRedirectUri = $null
+if (-not [System.Uri]::TryCreate($RedirectUri, [System.UriKind]::Absolute, [ref]$parsedRedirectUri)) {
+    throw "RedirectUri '$RedirectUri' is not a valid absolute URI."
+}
+if ($parsedRedirectUri.Scheme -notin @('http', 'https')) {
+    throw "RedirectUri '$RedirectUri' must use http or https."
+}
+if (-not [string]::IsNullOrWhiteSpace($parsedRedirectUri.Query) -or -not [string]::IsNullOrWhiteSpace($parsedRedirectUri.Fragment)) {
+    throw "RedirectUri '$RedirectUri' must not include a query string or fragment."
+}
 
 Write-Host "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━" -ForegroundColor Cyan
 Write-Host "  FIDO2 Passkey Registration via TAP → Azure Key Vault" -ForegroundColor Cyan
@@ -225,6 +250,7 @@ function New-CBOREncoded {
 #endregion
 
 $spaHeaders = @{
+    'User-Agent'    = $UserAgent
     'Origin'         = $RedirectUri
     'Referer'        = "$RedirectUri/"
     'Sec-Fetch-Mode' = 'cors'
@@ -233,6 +259,7 @@ $spaHeaders = @{
 }
 
 $webSession = [Microsoft.PowerShell.Commands.WebRequestSession]::new()
+$webSession.UserAgent = $UserAgent
 $tokenScope = "$ClientId/.default openid profile offline_access"
 
 # Generate PKCE

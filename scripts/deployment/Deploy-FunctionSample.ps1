@@ -20,6 +20,9 @@ param(
     [string]$EnvironmentName = 'sample',
 
     [Parameter()]
+    [string]$AzConfigDir,
+
+    [Parameter()]
     [switch]$SkipWhatIf,
 
     [Parameter()]
@@ -34,6 +37,13 @@ $ErrorActionPreference = 'Stop'
 if (-not (Get-Command az -ErrorAction SilentlyContinue)) {
     throw 'Azure CLI was not found. Install Azure CLI before using this deployment helper.'
 }
+
+if ([string]::IsNullOrWhiteSpace($AzConfigDir)) {
+    $tempRoot = if (-not [string]::IsNullOrWhiteSpace($env:TEMP)) { $env:TEMP } else { [System.IO.Path]::GetTempPath() }
+    $AzConfigDir = Join-Path $tempRoot 'azcfg-research-passkeys'
+}
+New-Item -ItemType Directory -Path $AzConfigDir -Force | Out-Null
+$env:AZURE_CONFIG_DIR = $AzConfigDir
 
 $repoRoot = Split-Path -Parent (Split-Path -Parent $PSScriptRoot)
 $sampleMap = @{
@@ -113,7 +123,8 @@ $functionAppDefaultHostname = [string]$deploymentOutputs.functionAppDefaultHostn
 $keyVaultName = [string]$deploymentOutputs.keyVaultName.value
 $managedIdentityClientId = [string]$deploymentOutputs.managedIdentityClientId.value
 
-$zipPath = Join-Path $env:TEMP "$TemplateId-$(Get-Date -Format 'yyyyMMdd-HHmmss').zip"
+$tempRoot = if (-not [string]::IsNullOrWhiteSpace($env:TEMP)) { $env:TEMP } else { [System.IO.Path]::GetTempPath() }
+$zipPath = Join-Path $tempRoot "$TemplateId-$(Get-Date -Format 'yyyyMMdd-HHmmss').zip"
 try {
     if (-not $SkipCodeDeploy) {
         Compress-Archive -Path (Join-Path $sourceRoot '*') -DestinationPath $zipPath -Force
@@ -145,6 +156,7 @@ $result = [PSCustomObject]@{
     subscriptionId            = $SubscriptionId
     location                  = $Location
     environmentName           = $EnvironmentName
+    azConfigDir               = $AzConfigDir
     functionAppName           = $functionAppName
     functionAppDefaultHostname = $functionAppDefaultHostname
     keyVaultName              = $keyVaultName

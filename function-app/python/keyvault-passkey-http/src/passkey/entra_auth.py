@@ -20,6 +20,7 @@ from .common import (
     decode_jwt_payload,
     extract_hidden_form,
     extract_user_principal_name,
+    normalize_redirect_uri,
     new_state,
     parse_ests_config,
     quoted,
@@ -59,13 +60,15 @@ def exchange_auth_code_for_tokens(
     auth_code: str,
     code_verifier: str,
     include_ngcmfa_claims: bool,
+    redirect_uri: str = REDIRECT_URI,
 ) -> TokenBundle:
+    redirect_uri = normalize_redirect_uri(redirect_uri)
     fields = {
         "client_id": CLIENT_ID,
         "scope": TOKEN_SCOPE,
         "grant_type": "authorization_code",
         "code": auth_code,
-        "redirect_uri": REDIRECT_URI,
+        "redirect_uri": redirect_uri,
         "code_verifier": code_verifier,
     }
     if include_ngcmfa_claims:
@@ -75,7 +78,7 @@ def exchange_auth_code_for_tokens(
         f"https://login.microsoftonline.com/{authority}/oauth2/v2.0/token",
         data=build_form_body(fields),
         headers={
-            **build_spa_headers(),
+            **build_spa_headers(redirect_uri),
             "Content-Type": "application/x-www-form-urlencoded",
         },
         timeout=60,
@@ -107,7 +110,9 @@ def refresh_tokens_with_ngcmfa(
     session: requests.Session,
     tenant_id: str,
     refresh_token: str,
+    redirect_uri: str = REDIRECT_URI,
 ) -> TokenBundle:
+    redirect_uri = normalize_redirect_uri(redirect_uri)
     response = session.post(
         f"https://login.microsoftonline.com/{tenant_id}/oauth2/v2.0/token",
         data=build_form_body(
@@ -120,7 +125,7 @@ def refresh_tokens_with_ngcmfa(
             }
         ),
         headers={
-            **build_spa_headers(),
+            **build_spa_headers(redirect_uri),
             "Content-Type": "application/x-www-form-urlencoded",
         },
         timeout=60,
@@ -151,15 +156,18 @@ def authorize_mysignins_session(
     client_session_id: str,
     session_ctx_v2: str | None = None,
     body: str = "",
+    redirect_uri: str = REDIRECT_URI,
 ) -> SessionAuthorization:
+    redirect_uri = normalize_redirect_uri(redirect_uri)
     response = session.post(
-        f"{REDIRECT_URI}/api/session/authorize",
+        f"{redirect_uri}/api/session/authorize",
         data=body,
         headers={
             **build_session_headers(
                 access_token,
                 client_session_id,
                 session_ctx_v2=session_ctx_v2,
+                redirect_uri=redirect_uri,
             ),
             "Content-Type": "application/json",
         },
@@ -191,13 +199,15 @@ def tap_pkce_login(
     user_principal_name: str,
     tap: str,
     code_challenge: str,
+    redirect_uri: str = REDIRECT_URI,
     max_redirects: int = 15,
 ) -> str:
+    redirect_uri = normalize_redirect_uri(redirect_uri)
     state = new_state()
     auth_url = (
         f"https://login.microsoftonline.com/{authority}/oauth2/v2.0/authorize?"
         f"client_id={CLIENT_ID}"
-        f"&redirect_uri={quoted(REDIRECT_URI)}"
+        f"&redirect_uri={quoted(redirect_uri)}"
         f"&scope={quoted(TOKEN_SCOPE)}"
         f"&response_type=code"
         f"&response_mode=fragment"
@@ -359,15 +369,17 @@ def silent_auth_with_ests_cookie(
     authority: str,
     ests_auth_cookie: str,
     code_challenge: str,
+    redirect_uri: str = REDIRECT_URI,
     max_redirects: int = 10,
 ) -> str:
+    redirect_uri = normalize_redirect_uri(redirect_uri)
     inject_ests_auth_cookie(session, ests_auth_cookie)
 
     state = new_state()
     current_url = (
         f"https://login.microsoftonline.com/{authority}/oauth2/v2.0/authorize?"
         f"client_id={CLIENT_ID}"
-        f"&redirect_uri={quoted(REDIRECT_URI)}"
+        f"&redirect_uri={quoted(redirect_uri)}"
         f"&scope={quoted(TOKEN_SCOPE)}"
         f"&response_type=code"
         f"&response_mode=fragment"

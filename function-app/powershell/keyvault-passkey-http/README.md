@@ -1,9 +1,11 @@
 # Key Vault passkey HTTP Function sample
 
-This sample hosts two PowerShell HTTP-triggered Azure Functions that create passkeys by invoking the repo's PowerShell passkey scripts:
+This sample hosts PowerShell Azure Functions that create passkeys by invoking the repo's PowerShell passkey scripts:
 
 - `RegisterPasskeyViaTap`: accepts `userPrincipalName`/`email` + `tap`
-- `RegisterPasskeyViaEstsAuth`: accepts `userPrincipalName`/`email` + `estsAuth`/`estsAuthCookie`
+- `RegisterPasskeyViaEstsAuth`: accepts `userPrincipalName`/`email` + `estsAuth`, `estsAuthCookie`, or a browser-exported cookie JSON blob containing `ESTSAUTH`
+- `QueuePasskeyRegistrationViaEstsAuth`: accepts the same ESTSAUTH inputs and enqueues registration work for async processing
+- `ProcessPasskeyRegistrationViaEstsAuth`: queue-triggered worker that runs the ESTSAUTH registration flow
 - `LoginWithPasskey`: accepts a stored credential record and returns an ESTSAUTH cookie when passkey login succeeds
 
 The Function App uses:
@@ -27,6 +29,7 @@ These app settings are expected:
 - `PASSKEY_KEYVAULT_NAME`
 - `PASSKEY_MANAGED_IDENTITY_CLIENT_ID`
 - `PASSKEY_KEYVAULT_ACCESS_TOKEN` (optional local override; not used in Azure when managed identity is available)
+- `PASSKEY_REGISTRATION_QUEUE_NAME` (required for the async ESTSAUTH route; defaults to `passkey-registration` in the samples)
 
 ## Local development
 
@@ -62,6 +65,18 @@ ESTSAUTH registration:
 ```
 
 The ESTSAUTH function rejects requests when the cookie resolves to a different user than the requested `userPrincipalName`.
+
+Queued ESTSAUTH registration from a browser cookie export:
+
+```json
+{
+  "userPrincipalName": "user@tenant.onmicrosoft.com",
+  "cookieExport": "[{\"path\":\"/\",\"domain\":\".login.microsoftonline.com\",\"value\":\"replace-with-estsauth-cookie\",\"name\":\"ESTSAUTH\"}]",
+  "displayName": "Function App Passkey"
+}
+```
+
+Post that payload to `/api/passkeys/register/estsauth/queue` to return `202 Accepted` immediately and let the queue worker process registrations one at a time.
 
 Passkey login:
 

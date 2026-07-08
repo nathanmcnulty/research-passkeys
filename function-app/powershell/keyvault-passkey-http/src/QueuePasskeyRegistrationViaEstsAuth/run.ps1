@@ -21,22 +21,45 @@ try {
         throw [System.ArgumentException]::new("Missing required field 'estsAuth', 'estsAuthCookie', or a cookie export containing ESTSAUTH.")
     }
 
-    $registration = Invoke-EstsAuthPasskeyRegistration `
-        -UserPrincipalName $userPrincipalName `
-        -EstsAuthCookie $estsAuthCookie `
-        -DisplayName $displayName `
-        -KeyVaultKeyName $keyVaultKeyName `
-        -UserAgent $userAgent `
-        -RedirectUri $redirectUri
-    $configuration = $registration.Configuration
-    $credential = $registration.Credential
+    if ([string]::IsNullOrWhiteSpace($displayName)) {
+        $displayName = New-DefaultPasskeyDisplayName
+    }
 
-    Push-OutputBinding -Name Response -Value (New-JsonHttpResponse -StatusCode ([HttpStatusCode]::OK) -Body ([ordered]@{
-        success = $true
+    $requestId = [guid]::NewGuid().Guid
+    $queueMessage = [ordered]@{
+        requestId = $requestId
+        queuedAtUtc = (Get-Date).ToUniversalTime().ToString('o')
         authMethod = 'estsauth'
-        tenantId = $configuration.TenantId
-        keyVaultName = $configuration.KeyVaultName
-        credential = $credential
+        userPrincipalName = $userPrincipalName
+        displayName = $displayName
+        keyVaultKeyName = $keyVaultKeyName
+        estsAuth = $estsAuthCookie
+        userAgent = $userAgent
+        redirectUri = $redirectUri
+    }
+
+    Set-RegistrationStatus -RequestId $requestId -Status ([ordered]@{
+        requestId = $requestId
+        status = 'queued'
+        authMethod = 'estsauth'
+        queueName = Get-RegistrationQueueName
+        userPrincipalName = $userPrincipalName
+        displayName = $displayName
+        keyVaultKeyName = $keyVaultKeyName
+        queuedAtUtc = $queueMessage.queuedAtUtc
+        userAgent = $userAgent
+        redirectUri = $redirectUri
+    })
+
+    Push-OutputBinding -Name RegistrationMessage -Value ($queueMessage | ConvertTo-Json -Depth 10 -Compress)
+    Push-OutputBinding -Name Response -Value (New-JsonHttpResponse -StatusCode ([HttpStatusCode]::Accepted) -Body ([ordered]@{
+        success = $true
+        queued = $true
+        authMethod = 'estsauth'
+        requestId = $requestId
+        queueName = Get-RegistrationQueueName
+        userPrincipalName = $userPrincipalName
+        statusUrl = Get-RegistrationStatusUrl -Request $Request -RequestId $requestId
         loginPropagation = Get-PostRegistrationLoginHint
     }))
 } catch [System.ArgumentException] {
