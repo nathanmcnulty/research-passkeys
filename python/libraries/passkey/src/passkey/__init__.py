@@ -1,4 +1,4 @@
-from .registration import (
+from .entra_registration import (
     PasskeyAppConfig,
     PasskeySecurityError,
     PasskeyValidationError,
@@ -6,12 +6,20 @@ from .registration import (
     register_passkey_via_ests_auth,
     register_passkey_via_tap,
 )
-from .login import (
+from .entra_login import (
     PasskeyLoginResult,
     authenticate_with_passkey,
     load_credential_record,
 )
 from .common import USER_AGENT, build_display_name, extract_ests_auth_cookie_value, normalize_redirect_uri, normalize_user_agent
+from .okta import (
+    DEFAULT_OKTA_CLIENT_ID,
+    login_okta_idx_session,
+    login_okta_passkey,
+    normalize_okta_origin,
+    register_okta_idx_session,
+    start_myaccount_registration,
+)
 
 __all__ = [
     "PasskeyAppConfig",
@@ -28,4 +36,10 @@ __all__ = [
     "normalize_user_agent",
     "register_passkey_via_ests_auth",
     "register_passkey_via_tap",
+    "DEFAULT_OKTA_CLIENT_ID",
+    "login_okta_idx_session",
+    "login_okta_passkey",
+    "normalize_okta_origin",
+    "register_okta_idx_session",
+    "start_myaccount_registration",
 ]

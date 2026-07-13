@@ -8,9 +8,9 @@ These runbooks are thin PowerShell adapters over the HTTP Function surfaces in t
 
 ## Included runbooks
 
-- `RegisterPasskeyViaTap.Runbook.ps1`
-- `RegisterPasskeyViaEstsAuth.Runbook.ps1`
-- `LoginWithPasskey.Runbook.ps1`
+- `RegisterEntraPasskeyViaTap.Runbook.ps1`
+- `RegisterEntraPasskeyViaEstsAuth.Runbook.ps1`
+- `LoginWithEntraPasskey.Runbook.ps1`
 
 ## Suggested Automation assets
 

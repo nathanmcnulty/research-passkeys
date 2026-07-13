@@ -17,6 +17,9 @@ param(
     [string]$TenantId = '847b5907-ca15-40f4-b171-eb18619dbfab',
 
     [Parameter()]
+    [string]$OktaDomain,
+
+    [Parameter()]
     [string]$EnvironmentName = 'sample',
 
     [Parameter()]
@@ -96,6 +99,9 @@ $parameterArgs = @(
     '--parameters', "tenantId=$TenantId",
     '--parameters', "environmentName=$EnvironmentName"
 )
+if (-not [string]::IsNullOrWhiteSpace($OktaDomain)) {
+    $parameterArgs += @('--parameters', "oktaDomain=$OktaDomain")
+}
 
 if (-not $SkipWhatIf) {
     & az deployment group what-if `
@@ -156,6 +162,7 @@ $result = [PSCustomObject]@{
     subscriptionId            = $SubscriptionId
     location                  = $Location
     environmentName           = $EnvironmentName
+    oktaDomain                = $OktaDomain
     azConfigDir               = $AzConfigDir
     functionAppName           = $functionAppName
     functionAppDefaultHostname = $functionAppDefaultHostname

@@ -8,6 +8,9 @@
     "tenantId": {
       "value": "847b5907-ca15-40f4-b171-eb18619dbfab"
     },
+    "oktaDomain": {
+      "value": "replace-with-your-okta-domain"
+    },
     "environmentName": {
       "value": "sample"
     }

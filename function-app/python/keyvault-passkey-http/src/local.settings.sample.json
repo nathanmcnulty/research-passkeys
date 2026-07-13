@@ -8,7 +8,9 @@
     "PASSKEY_KEYVAULT_NAME": "replace-with-your-key-vault-name",
     "PASSKEY_MANAGED_IDENTITY_CLIENT_ID": "",
     "PASSKEY_KEYVAULT_ACCESS_TOKEN": "",
+    "PASSKEY_OKTA_DOMAIN": "replace-with-your-okta-domain",
     "PASSKEY_REGISTRATION_QUEUE_NAME": "passkey-registration",
+    "PASSKEY_OKTA_REGISTRATION_QUEUE_NAME": "okta-passkey-registration",
     "PASSKEY_REGISTRATION_STATUS_CONTAINER_NAME": "passkey-registration-status",
     "PASSKEY_POST_REGISTRATION_LOGIN_DELAY_SECONDS": "10"
   }

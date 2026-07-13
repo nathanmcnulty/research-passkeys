@@ -49,7 +49,7 @@
       "runAfter": {},
       "inputs": {
         "method": "POST",
-        "uri": "@{concat(parameters('functionBaseUrl'), '/api/passkeys/register/tap')}",
+        "uri": "@{concat(parameters('functionBaseUrl'), '/api/entra/passkeys/register/tap')}",
         "headers": {
           "x-functions-key": "@parameters('functionKey')",
           "Content-Type": "application/json"

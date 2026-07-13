@@ -2,8 +2,7 @@
 
 Current Python samples:
 
-- `passkey-register`: local CLI for TAP and ESTSAUTH registration over the canonical `passkey` library
-- `passkey-login`: uses the canonical `passkey` library to authenticate with a stored passkey credential
-- `device-code-bootstrap`: acquires delegated tokens with device code flow for CA-friendly local research
+- `entra`: local Entra registration, login, and device-code examples over the canonical `passkey` library
+- `okta`: Okta MyAccount and IDX browser-session registration/login examples
 
 Both the Python and PowerShell device-code samples are intended to establish a cleaner delegated bootstrap path before adding more brittle auth automation.

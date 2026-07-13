@@ -19,6 +19,7 @@ This repo is meant to be the place where shared contracts, reusable helpers, tem
 - `docs/auth/`: Conditional Access, KMSI, and auth-flow guidance
 - `docs/security/`: security baselines and guardrails
 - `docs/migration/`: downstream consumption and sync guidance
+- `docs/examples-matrix.md`: PowerShell/Python × Entra/Okta parity matrix and rename map
 - `contracts/`: canonical JSON schemas and cross-language contracts
 - `shared/`: host-agnostic helpers and design notes that multiple tracks should consume
 - `powershell/`: PowerShell modules and thin command/script wrappers
@@ -32,12 +33,13 @@ This repo is meant to be the place where shared contracts, reusable helpers, tem
 
 ## Current starter assets
 
-- `powershell\samples\device-code-bootstrap`: CA-friendly PowerShell bootstrap using Azure CLI device code flow
-- `python\samples\passkey-register`: local Python TAP and ESTSAUTH registration wrapper over the canonical library
-- `samples\azure-automation\function-passkey-runbooks`: Azure Automation runbook samples that call the passkey Function endpoints
+- `powershell\samples\entra\device-code-bootstrap`: CA-friendly PowerShell bootstrap using Azure CLI device code flow
+- `python\samples\entra`: local Python Entra registration, login, and device-code examples over the canonical library
+- `python\samples\okta`: Python Okta examples (IDX and MyAccount flows)
+- `azure-automation\function-passkey-runbooks`: Azure Automation runbook samples that call the passkey Function endpoints
 - `templates\logic-app\passkey-function-http`: Logic App templates that proxy webhook requests into the passkey Function endpoints
 - `scripts\deployment\Deploy-FunctionSample.ps1`: one-command infra + code deployment helper for the PowerShell and Python Function starters
-- `scripts\validation\Invoke-PasskeySmokeTest.ps1`: repeatable registration + login smoke-test harness for direct and Function-hosted flows
+- `scripts\validation\Invoke-EntraPasskeySmokeTest.ps1`: repeatable Entra registration + login smoke-test harness for direct and Function-hosted flows
 - `contracts\passkey-login-credential.schema.json`: canonical login credential contract shared by PowerShell and Python login consumers
 
 ## Source material being consolidated

@@ -10,12 +10,16 @@ $assetRoot = Join-Path $sampleRoot 'src\shared\passkey-assets'
 
 New-Item -ItemType Directory -Force -Path (Join-Path $assetRoot 'modules\Passkey.Common') | Out-Null
 New-Item -ItemType Directory -Force -Path (Join-Path $assetRoot 'modules\Passkey.EntraAuth') | Out-Null
-New-Item -ItemType Directory -Force -Path (Join-Path $assetRoot 'scripts\reference') | Out-Null
+New-Item -ItemType Directory -Force -Path (Join-Path $assetRoot 'scripts\entra\reference') | Out-Null
+New-Item -ItemType Directory -Force -Path (Join-Path $assetRoot 'scripts\okta') | Out-Null
 
 Copy-Item (Join-Path $sourceRoot 'modules\Passkey.Common\Passkey.Common.psm1') (Join-Path $assetRoot 'modules\Passkey.Common\Passkey.Common.psm1') -Force
 Copy-Item (Join-Path $sourceRoot 'modules\Passkey.EntraAuth\Passkey.EntraAuth.psm1') (Join-Path $assetRoot 'modules\Passkey.EntraAuth\Passkey.EntraAuth.psm1') -Force
-Copy-Item (Join-Path $sourceRoot 'scripts\Register-KeyVaultPasskey.ps1') (Join-Path $assetRoot 'scripts\Register-KeyVaultPasskey.ps1') -Force
-Copy-Item (Join-Path $sourceRoot 'scripts\reference\PasskeyLogin.ps1') (Join-Path $assetRoot 'scripts\reference\PasskeyLogin.ps1') -Force
-Copy-Item (Join-Path $sourceRoot 'scripts\reference\Register-KeyVaultPasskeyViaESTSAuth.ps1') (Join-Path $assetRoot 'scripts\reference\Register-KeyVaultPasskeyViaESTSAuth.ps1') -Force
+Copy-Item (Join-Path $sourceRoot 'scripts\entra\Register-EntraKeyVaultPasskey.ps1') (Join-Path $assetRoot 'scripts\entra\Register-EntraKeyVaultPasskey.ps1') -Force
+Copy-Item (Join-Path $sourceRoot 'scripts\entra\reference\Invoke-EntraPasskeyLogin.ps1') (Join-Path $assetRoot 'scripts\entra\reference\Invoke-EntraPasskeyLogin.ps1') -Force
+Copy-Item (Join-Path $sourceRoot 'scripts\entra\reference\Register-EntraKeyVaultPasskeyViaEstsAuth.ps1') (Join-Path $assetRoot 'scripts\entra\reference\Register-EntraKeyVaultPasskeyViaEstsAuth.ps1') -Force
+Copy-Item (Join-Path $sourceRoot 'scripts\okta\Invoke-OktaPasskeyLogin.ps1') (Join-Path $assetRoot 'scripts\okta\Invoke-OktaPasskeyLogin.ps1') -Force
+Copy-Item (Join-Path $sourceRoot 'scripts\okta\Register-OktaKeyVaultPasskeyViaIdxSession.ps1') (Join-Path $assetRoot 'scripts\okta\Register-OktaKeyVaultPasskeyViaIdxSession.ps1') -Force
+Copy-Item (Join-Path $sourceRoot 'scripts\okta\Test-OktaPasskeyLoginViaIdxSession.ps1') (Join-Path $assetRoot 'scripts\okta\Test-OktaPasskeyLoginViaIdxSession.ps1') -Force
 
 Write-Host "Passkey Function sample assets refreshed from $sourceRoot" -ForegroundColor Green

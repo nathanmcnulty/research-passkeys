@@ -75,7 +75,7 @@
       "runAfter": {},
       "inputs": {
         "method": "POST",
-        "uri": "@{concat(parameters('functionBaseUrl'), '/api/passkeys/login')}",
+        "uri": "@{concat(parameters('functionBaseUrl'), '/api/entra/passkeys/login')}",
         "headers": {
           "x-functions-key": "@parameters('functionKey')",
           "Content-Type": "application/json"

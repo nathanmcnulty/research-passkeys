@@ -80,9 +80,9 @@ Downstream login consumers should target `contracts\passkey-login-credential.sch
 
 For repeatable local validation, use:
 
-- `scripts\validation\Invoke-PasskeySmokeTest.ps1`
-- `powershell\samples\device-code-bootstrap\Invoke-DeviceCodeBootstrap.ps1`
-- `python\samples\device-code-bootstrap\device_code_bootstrap.py`
+- `scripts\validation\Invoke-EntraPasskeySmokeTest.ps1`
+- `powershell\samples\entra\device-code-bootstrap\Invoke-EntraDeviceCodeBootstrap.ps1`
+- `python\samples\entra\invoke_entra_device_code_bootstrap.py`
 
 ### Automation and Logic App starters
 

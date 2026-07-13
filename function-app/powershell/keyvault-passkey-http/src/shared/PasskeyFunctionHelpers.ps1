@@ -91,6 +91,15 @@ function Get-RegistrationQueueName {
     return $queueName
 }
 
+function Get-OktaRegistrationQueueName {
+    $queueName = [Environment]::GetEnvironmentVariable('PASSKEY_OKTA_REGISTRATION_QUEUE_NAME')
+    if ([string]::IsNullOrWhiteSpace($queueName)) {
+        return 'okta-passkey-registration'
+    }
+
+    return $queueName
+}
+
 function Get-EstsAuthCookieFromSource {
     param(
         [Parameter()]
@@ -341,6 +350,74 @@ function Get-PasskeyFunctionConfiguration {
     }
 }
 
+function Get-OktaFunctionConfiguration {
+    $keyVaultAccessToken = [Environment]::GetEnvironmentVariable('PASSKEY_KEYVAULT_ACCESS_TOKEN')
+    $oktaDomain = [Environment]::GetEnvironmentVariable('PASSKEY_OKTA_DOMAIN')
+
+    return [ordered]@{
+        KeyVaultName = Get-RequiredSetting -Name 'PASSKEY_KEYVAULT_NAME'
+        ManagedIdentityClientId = [Environment]::GetEnvironmentVariable('PASSKEY_MANAGED_IDENTITY_CLIENT_ID')
+        KeyVaultAccessToken = $keyVaultAccessToken
+        OktaDomain = $oktaDomain
+    }
+}
+
+function Resolve-OktaDomain {
+    param(
+        [Parameter(Mandatory)]
+        [hashtable]$Body,
+
+        [Parameter(Mandatory)]
+        $Request
+    )
+
+    $domain = Get-RequestValue -Body $Body -Request $Request -Names @('oktaDomain', 'domain')
+    if ([string]::IsNullOrWhiteSpace($domain)) {
+        $domain = [Environment]::GetEnvironmentVariable('PASSKEY_OKTA_DOMAIN')
+    }
+
+    if ([string]::IsNullOrWhiteSpace($domain)) {
+        throw [System.ArgumentException]::new("Missing required Okta domain. Set 'PASSKEY_OKTA_DOMAIN' or provide 'oktaDomain'.")
+    }
+
+    return $domain.Trim()
+}
+
+function Resolve-OktaAccessToken {
+    param(
+        [Parameter(Mandatory)]
+        [hashtable]$Body,
+
+        [Parameter(Mandatory)]
+        $Request
+    )
+
+    $token = Get-RequestValue -Body $Body -Request $Request -Names @('accessToken', 'oktaAccessToken')
+    if ([string]::IsNullOrWhiteSpace($token) -and $Request.Headers) {
+        $authorization = $null
+        if ($Request.Headers -is [System.Collections.IDictionary]) {
+            if ($Request.Headers.ContainsKey('Authorization')) {
+                $authorization = [string]$Request.Headers['Authorization']
+            }
+        } else {
+            $property = $Request.Headers.PSObject.Properties['Authorization']
+            if ($property) {
+                $authorization = [string]$property.Value
+            }
+        }
+
+        if ($authorization -and $authorization -match '^(?i)Bearer\s+(.+)$') {
+            $token = $Matches[1].Trim()
+        }
+    }
+
+    if ([string]::IsNullOrWhiteSpace($token)) {
+        throw [System.ArgumentException]::new("Missing Okta user access token. Provide 'accessToken' or a Bearer Authorization header.")
+    }
+
+    return $token
+}
+
 function Get-ManagedIdentityAccessToken {
     param(
         [Parameter(Mandatory)]
@@ -510,11 +587,16 @@ function Set-RegistrationStatus {
         [string]$RequestId,
 
         [Parameter(Mandatory)]
-        [hashtable]$Status
+        [hashtable]$Status,
+
+        [Parameter()]
+        [hashtable]$Configuration
     )
 
-    $configuration = Get-PasskeyFunctionConfiguration
-    Ensure-RegistrationStatusContainer -Configuration $configuration
+    if ($null -eq $Configuration) {
+        $Configuration = Get-PasskeyFunctionConfiguration
+    }
+    Ensure-RegistrationStatusContainer -Configuration $Configuration
 
     $status.updatedAtUtc = (Get-Date).ToUniversalTime().ToString('o')
     if (-not $Status.ContainsKey('requestId') -or [string]::IsNullOrWhiteSpace([string]$Status.requestId)) {
@@ -524,7 +606,7 @@ function Set-RegistrationStatus {
         $status.loginPropagation = Get-PostRegistrationLoginHint
     }
 
-    $storageToken = Get-StorageAccessToken -Configuration $configuration
+    $storageToken = Get-StorageAccessToken -Configuration $Configuration
     $blobUri = Get-RegistrationStatusBlobUri -RequestId $RequestId
     $body = $status | ConvertTo-Json -Depth 30
     $headers = @{
@@ -540,11 +622,16 @@ function Set-RegistrationStatus {
 function Get-RegistrationStatus {
     param(
         [Parameter(Mandatory)]
-        [string]$RequestId
+        [string]$RequestId,
+
+        [Parameter()]
+        [hashtable]$Configuration
     )
 
-    $configuration = Get-PasskeyFunctionConfiguration
-    $storageToken = Get-StorageAccessToken -Configuration $configuration
+    if ($null -eq $Configuration) {
+        $Configuration = Get-PasskeyFunctionConfiguration
+    }
+    $storageToken = Get-StorageAccessToken -Configuration $Configuration
     $blobUri = Get-RegistrationStatusBlobUri -RequestId $RequestId
     $headers = @{
         Authorization = "Bearer $storageToken"
@@ -579,10 +666,14 @@ function Get-RegistrationStatusUrl {
         $Request,
 
         [Parameter(Mandatory)]
-        [string]$RequestId
+        [string]$RequestId,
+
+        [Parameter()]
+        [ValidateSet('entra', 'okta')]
+        [string]$Provider = 'entra'
     )
 
-    $relativePath = "/api/passkeys/register/status/$RequestId"
+    $relativePath = "/api/$Provider/passkeys/register/status/$RequestId"
     $code = $null
     if ($null -ne $Request.Query) {
         if ($Request.Query -is [System.Collections.IDictionary]) {
@@ -683,7 +774,7 @@ function Invoke-EstsAuthPasskeyRegistration {
 
     $configuration = Get-PasskeyFunctionConfiguration
     $keyVaultAccessToken = Get-KeyVaultAccessToken -Configuration $configuration
-    $scriptPath = Join-Path $PSScriptRoot 'passkey-assets\scripts\reference\Register-KeyVaultPasskeyViaESTSAuth.ps1'
+    $scriptPath = Join-Path $PSScriptRoot 'passkey-assets\scripts\entra\reference\Register-EntraKeyVaultPasskeyViaEstsAuth.ps1'
     $outputPath = New-TempOutputPath -UserPrincipalName $UserPrincipalName -AuthMethod 'estsauth'
 
     $scriptParameters = @{

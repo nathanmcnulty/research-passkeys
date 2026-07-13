@@ -49,7 +49,7 @@
       "runAfter": {},
       "inputs": {
         "method": "POST",
-        "uri": "@{concat(parameters('functionBaseUrl'), '/api/passkeys/register/estsauth')}",
+        "uri": "@{concat(parameters('functionBaseUrl'), '/api/entra/passkeys/register/estsauth')}",
         "headers": {
           "x-functions-key": "@parameters('functionKey')",
           "Content-Type": "application/json"

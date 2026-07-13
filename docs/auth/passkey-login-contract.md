@@ -6,9 +6,9 @@ PowerShell and Python login now share a documented credential contract at `contr
 
 This contract defines the stored credential shape consumed by:
 
-- `powershell\scripts\reference\PasskeyLogin.ps1`
-- `python\libraries\passkey\src\passkey\login.py`
-- `python\samples\passkey-login\login_keyvault_passkey.py`
+- `powershell\scripts\entra\reference\Invoke-EntraPasskeyLogin.ps1`
+- `python\libraries\passkey\src\passkey\entra_login.py`
+- `python\samples\entra\invoke_entra_passkey_login.py`
 
 It is the contract downstream repos should target when they want one stored passkey record to work across both languages.
 

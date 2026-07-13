@@ -2,11 +2,19 @@
 
 This sample hosts Python Azure Functions that register passkeys with Azure Key Vault-backed credential keys:
 
-- `RegisterPasskeyViaTap`: accepts `userPrincipalName` or `email` plus `tap`
-- `RegisterPasskeyViaEstsAuth`: accepts `userPrincipalName` or `email` plus `estsAuth`, `estsAuthCookie`, or a browser-exported cookie JSON blob containing `ESTSAUTH`
-- `QueuePasskeyRegistrationViaEstsAuth`: accepts the same ESTSAUTH inputs and enqueues registration work for async processing
-- `ProcessPasskeyRegistrationViaEstsAuth`: queue-triggered worker that runs the ESTSAUTH registration flow
-- `LoginWithPasskey`: accepts a stored credential record and returns an ESTSAUTH cookie when passkey login succeeds
+- `RegisterEntraPasskeyViaTap`: accepts `userPrincipalName` or `email` plus `tap`
+- `RegisterEntraPasskeyViaEstsAuth`: accepts `userPrincipalName` or `email` plus `estsAuth`, `estsAuthCookie`, or a browser-exported cookie JSON blob containing `ESTSAUTH`
+- `QueueEntraPasskeyRegistrationViaEstsAuth`: accepts the same ESTSAUTH inputs and enqueues registration work for async processing
+- `ProcessEntraPasskeyRegistrationViaEstsAuth`: queue-triggered worker that runs the ESTSAUTH registration flow
+- `GetEntraPasskeyRegistrationStatus`: reads queued Entra registration status
+- `LoginWithEntraPasskey`: accepts a stored credential record and returns an ESTSAUTH cookie when passkey login succeeds
+- `StartOktaMyAccountWebAuthnRegistration`: starts an Okta MyAccount WebAuthn ceremony from a user access token
+- `RegisterOktaPasskeyViaIdxSession`: completes an Okta IDX browser-session registration with a Key Vault-backed credential
+- `QueueOktaPasskeyRegistrationViaIdxSession`: enqueues an Okta IDX browser-session registration
+- `ProcessOktaPasskeyRegistrationViaIdxSession`: queue-triggered worker for the Okta IDX registration flow
+- `GetOktaPasskeyRegistrationStatus`: reads queued Okta registration status
+- `LoginWithOktaPasskey`: starts a fresh Okta IDX login and signs the assertion with Key Vault
+- `TestOktaPasskeyLoginViaIdxSession`: submits an assertion to an active Okta browser IDX transaction
 
 Unlike the PowerShell sample, this version is **Python-native**. The function host and the TAP and ESTSAUTH registration flows run in Python instead of shelling out to PowerShell.
 
@@ -16,7 +24,7 @@ This sample uses the Azure Functions Python v2 decorator model, so the functions
 
 - `src/`: Azure Functions Python v2 app plus a synced copy of the canonical `passkey` package
 - `infra/`: Bicep deployment for Flex Consumption, managed identity, Key Vault, and monitoring
-- `scripts/Sync-PasskeyLibrary.ps1`: refreshes the deployable `src\passkey` folder from `python\libraries\passkey`
+- `scripts/Sync-PasskeyLibrary.ps1`: refreshes the deployable `src\passkey` folder (including Entra and Okta modules) from `python\libraries\passkey`
 
 ## Runtime configuration
 
@@ -27,6 +35,8 @@ These app settings are expected:
 - `PASSKEY_MANAGED_IDENTITY_CLIENT_ID`
 - `PASSKEY_KEYVAULT_ACCESS_TOKEN` (optional local override; not used in Azure when managed identity is available)
 - `PASSKEY_REGISTRATION_QUEUE_NAME` (required for the async ESTSAUTH route; defaults to `passkey-registration` in the samples)
+- `PASSKEY_OKTA_REGISTRATION_QUEUE_NAME` (required for the async Okta IDX route; defaults to `okta-passkey-registration`)
+- `PASSKEY_OKTA_DOMAIN` (optional default for the Okta functions; requests may provide `oktaDomain`)
 - `AzureWebJobsFeatureFlags=EnableWorkerIndexing` (required for the Python v2 decorator model to index functions consistently)
 
 ## Local development
@@ -76,7 +86,31 @@ Queued ESTSAUTH registration from a browser cookie export:
 }
 ```
 
-Post that payload to `/api/passkeys/register/estsauth/queue` to return `202 Accepted` immediately and let the queue worker process registrations one at a time.
+Post that payload to `/api/entra/passkeys/register/estsauth/queue` to return `202 Accepted` immediately and let the queue worker process registrations one at a time.
+
+## Okta routes
+
+- `POST /api/okta/passkeys/register/myaccount`: starts `POST /idp/myaccount/webauthn/registration`; provide a user-scoped Okta access token in `accessToken` or a Bearer header.
+- `POST /api/okta/passkeys/register/idx`: completes an IDX browser-session registration using `cookieHeader`, `stateHandle`, `authenticatorId`, and Key Vault configuration.
+- `POST /api/okta/passkeys/register/idx/queue`: queues the same IDX registration and returns an Okta status URL.
+- `GET /api/okta/passkeys/register/status/{requestId}`: reads queued Okta registration status.
+- `POST /api/okta/passkeys/login`: starts a fresh Okta IDX login from `userName` and a stored credential.
+- `POST /api/okta/passkeys/login/idx`: submits an assertion to an active browser IDX transaction.
+
+Queued Okta registration payload:
+
+```json
+{
+  "oktaDomain": "your-tenant.okta.com",
+  "cookieHeader": "replace-with-browser-cookie-header",
+  "stateHandle": "replace-with-idx-state-handle",
+  "authenticatorId": "auts...",
+  "keyVaultKeyName": "optional-key-name",
+  "transport": "usb"
+}
+```
+
+The Okta queue uses its own `PASSKEY_OKTA_REGISTRATION_QUEUE_NAME` queue and carries browser cookies and an IDX `stateHandle`, so it should be processed immediately; both are short-lived secrets and may expire before a delayed worker starts. Do not use these browser-session routes as the production browser-extension protocol.
 
 Passkey login:
 
@@ -115,5 +149,6 @@ For a one-command path from this repo, use:
 .\scripts\deployment\Deploy-FunctionSample.ps1 `
   -TemplateId python-keyvault-passkey-http `
   -ResourceGroupName rg-passkey-func-python-sample-wus2 `
-  -EnvironmentName sample
+  -EnvironmentName sample `
+  -OktaDomain your-org.okta.com
 ```
