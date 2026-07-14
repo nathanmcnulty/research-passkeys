@@ -13,8 +13,7 @@ try {
     if ([string]::IsNullOrWhiteSpace($userName)) { throw [System.ArgumentException]::new("Request must include 'userName' or a credential userName.") }
 
     $keyVault = if ($credential.keyVault -is [System.Collections.IDictionary]) { [hashtable]$credential.keyVault } else { @{} }
-    $keyVaultName = Get-RequestValue -Body $body -Request $Request -Names @('keyVaultName')
-    if (-not $keyVaultName) { $keyVaultName = [string]($keyVault.vaultName ?? $configuration.KeyVaultName) }
+    $keyVaultName = [string]$configuration.KeyVaultName
     $keyVaultKeyName = Get-RequestValue -Body $body -Request $Request -Names @('keyVaultKeyName')
     if (-not $keyVaultKeyName) { $keyVaultKeyName = [string]$keyVault.keyName }
     $credentialId = [string]$credential.credentialId
@@ -31,13 +30,12 @@ try {
         KeyVaultKeyName = $keyVaultKeyName
         KeyVaultAccessToken = (Get-KeyVaultAccessToken -Configuration $configuration)
     }
-    if ($credential.keyVault.keyId) { $parameters.KeyVaultKeyId = [string]$credential.keyVault.keyId }
     if ($credential.relyingParty) { $parameters.RelyingParty = [string]$credential.relyingParty }
     $password = Get-RequestValue -Body $body -Request $Request -Names @('password')
     if ($password) { $parameters.Password = ConvertTo-SecureString -String $password -AsPlainText -Force }
     $clientId = Get-RequestValue -Body $body -Request $Request -Names @('clientId')
     if ($clientId) { $parameters.ClientId = $clientId }
-    $redirectUri = Get-RequestValue -Body $body -Request $Request -Names @('redirectUri')
+    $redirectUri = [Environment]::GetEnvironmentVariable('PASSKEY_OKTA_REDIRECT_URI')
     if ($redirectUri) { $parameters.RedirectUri = $redirectUri }
     $signCount = Get-RequestValue -Body $body -Request $Request -Names @('signCount')
     if ($signCount) { $parameters.SignCount = [uint32]$signCount }

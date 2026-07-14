@@ -21,15 +21,14 @@ try {
 
     $requestId = [guid]::NewGuid().ToString()
     $queuedAt = (Get-Date).ToUniversalTime().ToString('o')
+    $captureContext = Protect-PasskeyQueuedCapture -Configuration $configuration -Provider okta -Body $body -RequestId $requestId
     $queueMessage = [ordered]@{
         requestId = $requestId
         queuedAtUtc = $queuedAt
         provider = 'okta'
         authMethod = 'idx'
         oktaDomain = (Resolve-OktaDomain -Body $body -Request $Request)
-        cookieHeader = $cookieHeader
-        stateHandle = $stateHandle
-        authenticatorId = $authenticatorId
+        captureContext = $captureContext
         keyVaultKeyName = (Get-RequestValue -Body $body -Request $Request -Names @('keyVaultKeyName'))
         transport = $transport
     }

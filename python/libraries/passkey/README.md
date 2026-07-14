@@ -8,6 +8,7 @@ It currently includes:
 - ESTSAUTH registration against `mysignins.microsoft.com` with Azure Key Vault-backed keys
 - passkey login for Key Vault-backed and local-key credentials
 - Okta MyAccount registration-start and IDX registration/login helpers used by the Function sample
+- canonical passkey catalog record construction shared by storage transports
 
 Current consumers:
 

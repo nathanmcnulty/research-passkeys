@@ -15,7 +15,7 @@ try {
         throw [System.ArgumentException]::new("Request must include 'cookieHeader', 'stateHandle', and 'challenge'.")
     }
     $keyVault = if ($credential.keyVault -is [System.Collections.IDictionary]) { [hashtable]$credential.keyVault } else { @{} }
-    $keyVaultName = [string]($keyVault.vaultName ?? $configuration.KeyVaultName)
+    $keyVaultName = [string]$configuration.KeyVaultName
     $keyVaultKeyName = [string]$keyVault.keyName
     if ([string]::IsNullOrWhiteSpace([string]$credential.credentialId) -or [string]::IsNullOrWhiteSpace($keyVaultName) -or [string]::IsNullOrWhiteSpace($keyVaultKeyName)) {
         throw [System.ArgumentException]::new('Credential must include credentialId and Key Vault vaultName/keyName.')
@@ -32,7 +32,6 @@ try {
         KeyVaultKeyName = $keyVaultKeyName
         KeyVaultAccessToken = (Get-KeyVaultAccessToken -Configuration $configuration)
     }
-    if ($keyVault.keyId) { $parameters.KeyVaultKeyId = [string]$keyVault.keyId }
     $origin = Get-RequestValue -Body $body -Request $Request -Names @('origin', 'url')
     if (-not $origin) { $origin = [string]$credential.url }
     if ($origin) { $parameters.Origin = $origin }

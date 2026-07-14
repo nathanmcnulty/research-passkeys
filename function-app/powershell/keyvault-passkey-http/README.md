@@ -36,16 +36,23 @@ These app settings are expected:
 - `PASSKEY_TENANT_ID`
 - `PASSKEY_KEYVAULT_NAME`
 - `PASSKEY_MANAGED_IDENTITY_CLIENT_ID`
-- `PASSKEY_KEYVAULT_ACCESS_TOKEN` (optional local override; not used in Azure when managed identity is available)
+- `PASSKEY_KEYVAULT_ACCESS_TOKEN` (optional local override; honored only when `PASSKEY_ALLOW_LOCAL_CREDENTIALS=true`)
+- `PASSKEY_STORAGE_ACCESS_TOKEN` (optional local override; Azure CLI is used when omitted locally)
+- `AzureWebJobsStorage__tableServiceUri` (Table endpoint for the canonical passkey catalog)
+- `PASSKEY_CATALOG_TABLE_NAME` (defaults to `PasskeyCredentials`)
 - `PASSKEY_REGISTRATION_QUEUE_NAME` (required for the async ESTSAUTH route; defaults to `passkey-registration` in the samples)
 - `PASSKEY_OKTA_REGISTRATION_QUEUE_NAME` (required for the async Okta IDX route; defaults to `okta-passkey-registration`)
-- `PASSKEY_OKTA_DOMAIN` (optional default for the Okta functions; requests may provide `oktaDomain`)
+- `PASSKEY_OKTA_DOMAIN` (server-controlled Okta organization domain; requests cannot override it)
+- `PASSKEY_ENTRA_PORTAL_ORIGIN` (server-controlled Entra portal origin; defaults to `https://mysignins.microsoft.com`)
+- `PASSKEY_CAPTURE_TABLE_NAME` and `PASSKEY_CAPTURE_CONTAINER_NAME` (capture provenance and encrypted payload locations)
+- `PASSKEY_CAPTURE_MAX_BYTES` (defaults to 1 MiB) and `PASSKEY_CAPTURE_PROVENANCE_DAYS` (defaults to 90)
+- `PASSKEY_ENABLE_DEV_SECRET_EXPORT` (development-only secret export; defaults to `false`)
 
 ## Local development
 
 1. Copy `src/local.settings.sample.json` to `src/local.settings.json`.
 2. Set `PASSKEY_TENANT_ID` and `PASSKEY_KEYVAULT_NAME`.
-3. For local development, provide `PASSKEY_KEYVAULT_ACCESS_TOKEN` because managed identity is not available locally.
+3. For local development, sign in with Azure CLI or provide `PASSKEY_KEYVAULT_ACCESS_TOKEN` and `PASSKEY_STORAGE_ACCESS_TOKEN`. When using a real Azure storage account directly, also set `AzureWebJobsStorage__tableServiceUri` to its Table endpoint.
 4. Run from `src/`:
 
    ```powershell
@@ -53,6 +60,18 @@ These app settings are expected:
    ```
 
 ## Request examples
+
+Successful Entra and Okta registration now writes a canonical catalog record to Azure Table Storage and returns it as `catalogRecord`. The portable format is documented in `contracts/passkey-catalog-record.schema.json`; Key Vault still contains only the signing key.
+
+Catalog lookup routes:
+
+- `GET /api/entra/passkeys[/{recordId}]` lists or reads Entra passkeys.
+- `GET /api/okta/passkeys[/{recordId}]` lists or reads Okta passkeys.
+- `GET /api/passkeys` lists passkeys in the configured vault.
+- `GET /api/passkeys/{recordId}` returns one passkey.
+- List routes accept `credentialId`, `rpId`, `userName`, `displayName`, `keyVaultKeyName` (or `keyName`), and `status` filters; the generic route also accepts `provider`.
+
+These routes use Function authorization for the sample. They are not a substitute for caller authentication and per-record authorization in the planned broker design; see `docs/architecture/passkey-catalog.md`.
 
 TAP registration:
 
@@ -75,6 +94,8 @@ ESTSAUTH registration:
 ```
 
 The ESTSAUTH function rejects requests when the cookie resolves to a different user than the requested `userPrincipalName`.
+
+`RegisterEntraPasskeyViaEstsAuth` is the synchronous compatibility route. Webhooks should call `/api/entra/passkeys/register/estsauth/queue` instead; that route returns `202 Accepted` after staging the encrypted capture and leaves the passkey ceremony to `ProcessEntraPasskeyRegistrationViaEstsAuth`.
 
 Queued ESTSAUTH registration from a browser cookie export:
 
@@ -154,3 +175,7 @@ For a one-command path from this repo, use:
   -EnvironmentName sample `
   -OktaDomain your-org.okta.com
 ```
+
+The deployment creates the storage account, `PasskeyCredentials` table, queues/blob container support, Key Vault, managed identity, audit diagnostics, and required data-plane RBAC assignments. The Function and an optional development principal receive a custom Key Vault role limited to key read/write/sign/verify and secret read/write/delete. To grant the signed-in developer direct data-plane access in a development deployment, add `-GrantCurrentUserDevelopmentAccess`. Production deployments reject direct developer assignments and restrict Storage and Key Vault to the Function integration subnet; select them with `-DeploymentProfile production`.
+
+Captured registration JSON is AES-256-GCM encrypted in Blob Storage with a 24-hour CEK stored in Key Vault. Password and user agent are retained together in `pklogin-{recordId}` until explicitly replaced or deleted. Add `-EnableDevelopmentSecretExport` only to a development deployment to enable the no-store export routes; the deployment helper rejects this switch in production.

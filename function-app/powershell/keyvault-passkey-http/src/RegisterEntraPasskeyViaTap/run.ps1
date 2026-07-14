@@ -52,6 +52,8 @@ try {
     }
 
     $credential = Invoke-PasskeyRegistrationScript -ScriptPath $scriptPath -Parameters $scriptParameters
+    $extensions = Save-PasskeyLoginAndCaptureContext -Provider entra -Body $body -Credential $credential -Configuration $configuration -UserAgent $userAgent
+    $catalogRecord = Save-PasskeyCatalogRecord -Provider entra -Credential $credential -Configuration $configuration -Extensions $extensions
 
     Push-OutputBinding -Name Response -Value (New-JsonHttpResponse -StatusCode ([HttpStatusCode]::OK) -Body ([ordered]@{
         success = $true
@@ -59,6 +61,7 @@ try {
         tenantId = $configuration.TenantId
         keyVaultName = $configuration.KeyVaultName
         credential = $credential
+        catalogRecord = $catalogRecord
         loginPropagation = Get-PostRegistrationLoginHint
     }))
 } catch [System.ArgumentException] {

@@ -8,10 +8,20 @@
     "PASSKEY_KEYVAULT_NAME": "replace-with-your-key-vault-name",
     "PASSKEY_MANAGED_IDENTITY_CLIENT_ID": "",
     "PASSKEY_KEYVAULT_ACCESS_TOKEN": "",
+    "PASSKEY_ALLOW_LOCAL_CREDENTIALS": "true",
+    "PASSKEY_ENTRA_PORTAL_ORIGIN": "https://mysignins.microsoft.com",
+    "PASSKEY_STORAGE_ACCESS_TOKEN": "",
     "PASSKEY_OKTA_DOMAIN": "replace-with-your-okta-domain",
     "PASSKEY_REGISTRATION_QUEUE_NAME": "passkey-registration",
     "PASSKEY_OKTA_REGISTRATION_QUEUE_NAME": "okta-passkey-registration",
     "PASSKEY_REGISTRATION_STATUS_CONTAINER_NAME": "passkey-registration-status",
+    "PASSKEY_CATALOG_TABLE_NAME": "PasskeyCredentials",
+    "PASSKEY_CAPTURE_TABLE_NAME": "PasskeyCaptureContexts",
+    "PASSKEY_CAPTURE_CONTAINER_NAME": "passkey-capture-context",
+    "PASSKEY_CAPTURE_MAX_BYTES": "1048576",
+    "PASSKEY_CAPTURE_PROVENANCE_DAYS": "90",
+    "PASSKEY_DEPLOYMENT_PROFILE": "development",
+    "PASSKEY_ENABLE_DEV_SECRET_EXPORT": "false",
     "PASSKEY_POST_REGISTRATION_LOGIN_DELAY_SECONDS": "10"
   }
 }

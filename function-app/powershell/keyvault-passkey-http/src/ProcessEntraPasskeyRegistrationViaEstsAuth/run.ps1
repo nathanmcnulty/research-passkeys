@@ -14,12 +14,15 @@ if ($message -is [string]) {
 }
 
 $userPrincipalName = [string]($message.userPrincipalName ?? '')
-$estsAuthCookie = [string]($message.estsAuth ?? $message.estsAuthCookie ?? '')
+$configuration = Get-PasskeyFunctionConfiguration
+if ($message.captureContext -isnot [System.Collections.IDictionary]) { throw "Queue message is missing encrypted capture context." }
+$capturedBody = Export-PasskeyCapturePayload -Configuration $configuration -Context $message.captureContext
+$estsAuthCookie = [string]($capturedBody.estsAuth ?? $capturedBody.estsAuthCookie ?? '')
 $displayName = [string]($message.displayName ?? $message.passkeyDisplayName ?? '')
 $keyVaultKeyName = [string]($message.keyVaultKeyName ?? '')
 $requestId = [string]($message.requestId ?? '')
 $userAgent = Normalize-PasskeyUserAgent -UserAgent ($message.userAgent ?? $message.useragent)
-$redirectUri = Normalize-PasskeyRedirectUri -RedirectUri ($message.redirectUri ?? $message.redirecturi)
+$redirectUri = Normalize-PasskeyRedirectUri -RedirectUri ([Environment]::GetEnvironmentVariable('PASSKEY_ENTRA_PORTAL_ORIGIN'))
 
 if ([string]::IsNullOrWhiteSpace($userPrincipalName)) {
     throw "Queue message is missing 'userPrincipalName'."
@@ -54,6 +57,8 @@ try {
         -RedirectUri $redirectUri
 
     $credential = $registration.Credential
+    $extensions = Save-PasskeyLoginAndCaptureContext -Provider entra -Body $capturedBody -Credential $credential -Configuration $registration.Configuration -UserAgent $userAgent
+    $catalogRecord = Save-PasskeyCatalogRecord -Provider entra -Credential $credential -Configuration $registration.Configuration -Extensions $extensions
     $keyName = $null
     if ($credential.keyVault -is [System.Collections.IDictionary]) {
         $keyName = [string]$credential.keyVault.keyName
@@ -74,6 +79,7 @@ try {
         userAgent = $userAgent
         redirectUri = $redirectUri
         credential = $credential
+        catalogRecord = $catalogRecord
     })
 
     Write-Host "Processed ESTSAUTH passkey registration request $requestId for $userPrincipalName with key $keyName."

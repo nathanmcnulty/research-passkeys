@@ -11,8 +11,38 @@
     "oktaDomain": {
       "value": "replace-with-your-okta-domain"
     },
+    "entraPortalOrigin": {
+      "value": "https://mysignins.microsoft.com"
+    },
+    "deploymentProfile": {
+      "value": "development"
+    },
+    "enableVirtualNetworkIntegration": {
+      "value": false
+    },
+    "existingVirtualNetworkName": {
+      "value": ""
+    },
+    "existingVirtualNetworkResourceGroupName": {
+      "value": "rg-phish"
+    },
+    "existingFunctionSubnetName": {
+      "value": ""
+    },
     "environmentName": {
       "value": "sample"
+    },
+    "catalogTableName": {
+      "value": "PasskeyCredentials"
+    },
+    "captureTableName": {
+      "value": "PasskeyCaptureContexts"
+    },
+    "enableDevelopmentSecretExport": {
+      "value": false
+    },
+    "developerPrincipalId": {
+      "value": ""
     }
   }
 }

@@ -26,6 +26,8 @@ try {
     }
 
     $requestId = [guid]::NewGuid().Guid
+    $configuration = Get-PasskeyFunctionConfiguration
+    $captureContext = Protect-PasskeyQueuedCapture -Configuration $configuration -Provider entra -Body $body -RequestId $requestId
     $queueMessage = [ordered]@{
         requestId = $requestId
         queuedAtUtc = (Get-Date).ToUniversalTime().ToString('o')
@@ -33,7 +35,7 @@ try {
         userPrincipalName = $userPrincipalName
         displayName = $displayName
         keyVaultKeyName = $keyVaultKeyName
-        estsAuth = $estsAuthCookie
+        captureContext = $captureContext
         userAgent = $userAgent
         redirectUri = $redirectUri
     }
@@ -68,6 +70,7 @@ try {
         error = $_.Exception.Message
     }))
 } catch {
+    Write-Warning -Message ("QueueEntraPasskeyRegistrationViaEstsAuth failed: " + $_.Exception.ToString())
     Push-OutputBinding -Name Response -Value (New-JsonHttpResponse -StatusCode ([HttpStatusCode]::InternalServerError) -Body ([ordered]@{
         success = $false
         error = $_.Exception.Message

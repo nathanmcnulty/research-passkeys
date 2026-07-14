@@ -6,8 +6,6 @@ param($Request, $TriggerMetadata)
 
 try {
     $body = Get-RequestBodyObject -Request $Request
-    $authUrl = Get-RequestValue -Body $body -Request $Request -Names @('authUrl')
-    $keyVaultName = Get-RequestValue -Body $body -Request $Request -Names @('keyVaultName')
     $keyVaultKeyName = Get-RequestValue -Body $body -Request $Request -Names @('keyVaultKeyName')
     $userAgent = Resolve-RequestUserAgent -Body $body -Request $Request
     $credential = Get-CredentialPayload -Body $body
@@ -24,19 +22,17 @@ try {
         throw [System.ArgumentException]::new("Credential is missing required field 'userHandle'.")
     }
 
-    if (-not [string]::IsNullOrWhiteSpace($keyVaultName) -or -not [string]::IsNullOrWhiteSpace($keyVaultKeyName)) {
+    $configuration = Get-PasskeyFunctionConfiguration
+    if (-not [string]::IsNullOrWhiteSpace($configuration.KeyVaultName) -or -not [string]::IsNullOrWhiteSpace($keyVaultKeyName)) {
         if (-not $credential.ContainsKey('keyVault') -or $credential.keyVault -isnot [System.Collections.IDictionary]) {
             $credential.keyVault = @{}
         }
-        if (-not [string]::IsNullOrWhiteSpace($keyVaultName)) {
-            $credential.keyVault.vaultName = $keyVaultName
-        }
+        $credential.keyVault.vaultName = $configuration.KeyVaultName
         if (-not [string]::IsNullOrWhiteSpace($keyVaultKeyName)) {
             $credential.keyVault.keyName = $keyVaultKeyName
         }
     }
 
-    $configuration = Get-PasskeyFunctionConfiguration
     $keyVaultAccessToken = Get-KeyVaultAccessToken -Configuration $configuration
     $scriptPath = Join-Path $PSScriptRoot '..\shared\passkey-assets\scripts\entra\reference\Invoke-EntraPasskeyLogin.ps1'
 
@@ -44,6 +40,7 @@ try {
         KeyVaultAccessToken = $keyVaultAccessToken
         KeyVaultTenantId    = $configuration.TenantId
     }
+    $authUrl = [Environment]::GetEnvironmentVariable('PASSKEY_ENTRA_AUTH_URL')
     if (-not [string]::IsNullOrWhiteSpace($authUrl)) {
         $loginParameters.AuthUrl = $authUrl
     }

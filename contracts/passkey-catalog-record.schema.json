@@ -1,0 +1,59 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://research-passkeys/contracts/passkey-catalog-record.schema.json",
+  "title": "PasskeyCatalogRecord",
+  "description": "Transport-neutral catalog record for a Key Vault-backed passkey. The catalog contains no private key material.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schemaVersion",
+    "recordId",
+    "provider",
+    "credentialId",
+    "rpId",
+    "userName",
+    "displayName",
+    "keyVault",
+    "status",
+    "signCount",
+    "createdAt",
+    "updatedAt"
+  ],
+  "properties": {
+    "schemaVersion": { "const": "1" },
+    "recordId": { "type": "string", "format": "uuid" },
+    "provider": { "enum": ["entra", "okta"] },
+    "credentialId": { "type": "string", "minLength": 1 },
+    "rpId": { "type": "string", "minLength": 1 },
+    "userHandle": { "type": ["string", "null"] },
+    "userName": { "type": "string", "minLength": 1 },
+    "displayName": { "type": "string" },
+    "origin": { "type": ["string", "null"], "format": "uri" },
+    "keyVault": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["vaultName", "keyName", "keyId"],
+      "properties": {
+        "vaultName": { "type": "string", "minLength": 1 },
+        "keyName": { "type": "string", "minLength": 1 },
+        "keyId": { "type": "string", "minLength": 1 }
+      }
+    },
+    "status": { "enum": ["active", "disabled", "deleted"] },
+    "signCount": { "type": "integer", "minimum": 0 },
+    "createdAt": { "type": "string", "format": "date-time" },
+    "updatedAt": { "type": "string", "format": "date-time" },
+    "providerMetadata": {
+      "type": "object",
+      "description": "Provider-specific, non-secret registration metadata.",
+      "additionalProperties": true
+    },
+    "loginContextSecretName": {
+      "type": ["string", "null"],
+      "description": "Versionless Key Vault secret name for the durable password and user-agent login context."
+    },
+    "hasStoredPassword": { "type": "boolean" },
+    "hasStoredUserAgent": { "type": "boolean" },
+    "latestCaptureId": { "type": ["string", "null"], "format": "uuid" }
+  }
+}

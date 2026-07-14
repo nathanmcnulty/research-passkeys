@@ -55,8 +55,13 @@ class PasskeySecurityError(PasskeyProtocolError):
     pass
 
 
-def _idx_headers(origin: str, *, accept: str = "application/ion+json; okta-version=1.0.0") -> dict[str, str]:
-    return {"Accept": accept, "Origin": origin, "Referer": f"{origin}/", "User-Agent": OKTA_USER_AGENT}
+def _idx_headers(
+    origin: str,
+    *,
+    accept: str = "application/ion+json; okta-version=1.0.0",
+    user_agent: str = OKTA_USER_AGENT,
+) -> dict[str, str]:
+    return {"Accept": accept, "Origin": origin, "Referer": f"{origin}/", "User-Agent": user_agent}
 
 
 def _idx_post(session: requests.Session, href: str, body: dict[str, Any], headers: dict[str, str]) -> dict[str, Any]:
@@ -283,6 +288,7 @@ def login_okta_passkey(
     client_id: str = DEFAULT_OKTA_CLIENT_ID,
     redirect_uri: str | None = None,
     sign_count: int = 1,
+    user_agent: str = OKTA_USER_AGENT,
 ) -> dict[str, Any]:
     origin = normalize_okta_origin(okta_domain)
     host = urlparse(origin).hostname or ""
@@ -293,20 +299,20 @@ def login_okta_passkey(
     key_id = str(key_vault.get("keyId") or "") or None
     if not user_name or not credential_id or not key_vault_name or not key_name:
         raise PasskeyValidationError("Okta login requires userName, credentialId, and Key Vault coordinates.")
-    relying_party = str(credential.get("relyingParty") or host)
+    relying_party = str(credential.get("relyingParty") or credential.get("rpId") or host)
     redirect_uri = redirect_uri or f"{origin}/account-settings/callback"
     verifier = b64url_encode(secrets.token_bytes(32))
     oauth_state = b64url_encode(secrets.token_bytes(24))
     authorize_uri = f"{origin}/oauth2/v1/authorize?{urlencode({'client_id': client_id, 'redirect_uri': redirect_uri, 'response_type': 'code', 'response_mode': 'query', 'scope': OKTA_SCOPE, 'state': oauth_state, 'nonce': b64url_encode(secrets.token_bytes(24)), 'code_challenge': b64url_encode(hashlib.sha256(verifier.encode('ascii')).digest()), 'code_challenge_method': 'S256'})}"
     session = requests.Session()
-    page = session.get(authorize_uri, headers={"Accept": "text/html,application/xhtml+xml", "User-Agent": OKTA_USER_AGENT}, timeout=60)
+    page = session.get(authorize_uri, headers={"Accept": "text/html,application/xhtml+xml", "User-Agent": user_agent}, timeout=60)
     if not page.ok:
         raise PasskeyProtocolError(f"Okta authorization page failed: HTTP {page.status_code}")
     match = re.search(r"var\s+stateToken\s*=\s*'([^']+)'", page.text)
     if not match:
         raise PasskeyProtocolError("Could not extract Okta stateToken from the authorization page.")
     state_token = re.sub(r"\\x([0-9a-fA-F]{2})", lambda value: chr(int(value.group(1), 16)), match.group(1))
-    headers = _idx_headers(origin)
+    headers = _idx_headers(origin, user_agent=user_agent)
     introspect = _idx_post(session, f"{origin}/idp/idx/introspect", {"stateToken": state_token}, headers)
     identify = _remediation(introspect, "identify")
     if not identify:

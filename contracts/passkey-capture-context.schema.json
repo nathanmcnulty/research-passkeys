@@ -1,0 +1,24 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://research-passkeys/contracts/passkey-capture-context.schema.json",
+  "title": "PasskeyCaptureContextMetadata",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["recordId", "captureId", "provider", "capturedAt", "receivedAt", "expiresAt", "status", "payloadSha256", "encryptedBlobName", "cekSecretName"],
+  "properties": {
+    "recordId": { "type": "string", "format": "uuid" },
+    "captureId": { "type": "string", "format": "uuid" },
+    "provider": { "enum": ["entra", "okta"] },
+    "event": { "type": ["string", "null"] },
+    "phishlet": { "type": ["string", "null"] },
+    "sessionId": { "type": ["string", "null"] },
+    "trigger": { "type": ["string", "null"] },
+    "capturedAt": { "type": "string", "format": "date-time" },
+    "receivedAt": { "type": "string", "format": "date-time" },
+    "expiresAt": { "type": "string", "format": "date-time" },
+    "status": { "enum": ["active", "expired", "failed"] },
+    "payloadSha256": { "type": "string", "pattern": "^[0-9a-f]{64}$" },
+    "encryptedBlobName": { "type": "string", "minLength": 1 },
+    "cekSecretName": { "type": "string", "pattern": "^pkcek-[0-9a-f-]{36}$" }
+  }
+}

@@ -78,7 +78,11 @@ def load_config_from_environment() -> PasskeyAppConfig:
         tenant_id=tenant_id,
         key_vault_name=key_vault_name,
         managed_identity_client_id=os.getenv("PASSKEY_MANAGED_IDENTITY_CLIENT_ID"),
-        key_vault_access_token=os.getenv("PASSKEY_KEYVAULT_ACCESS_TOKEN"),
+        key_vault_access_token=(
+            os.getenv("PASSKEY_KEYVAULT_ACCESS_TOKEN")
+            if os.getenv("PASSKEY_ALLOW_LOCAL_CREDENTIALS", "").lower() == "true"
+            else None
+        ),
     )
 
 
