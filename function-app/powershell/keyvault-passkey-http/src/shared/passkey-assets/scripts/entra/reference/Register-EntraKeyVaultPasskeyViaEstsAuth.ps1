@@ -67,7 +67,7 @@
 .EXAMPLE
     # With explicit tenant ID
     .\Register-EntraKeyVaultPasskeyViaEstsAuth.ps1 -ESTSAuthCookie $cookie -KeyVaultName "my-keyvault" `
-        -TenantId "847b5907-ca15-40f4-b171-eb18619dbfab"
+        -TenantId "<tenant-id>"
 
 .EXAMPLE
     # With pre-obtained Key Vault token (skips Az/CLI checks)
@@ -398,9 +398,19 @@ for ($silentRedirect = 0; $silentRedirect -lt 10; $silentRedirect++) {
         if ($silentResp.Content -match '\$Config=(\{.+\});') {
             $pageCfg = $matches[1] | ConvertFrom-Json
             $pgidProperty = $pageCfg.PSObject.Properties['pgid']
-            $errMsgProperty = $pageCfg.PSObject.Properties['strServiceExceptionMessage']
             $pgid = if ($pgidProperty) { [string]$pgidProperty.Value } else { '' }
-            $errMsg = if ($errMsgProperty) { [string]$errMsgProperty.Value } else { '' }
+            $errorDetails = @(
+                'sErrorCode',
+                'strServiceExceptionMessage',
+                'strMainMessage',
+                'strAdditionalDetails'
+            ) | ForEach-Object {
+                $property = $pageCfg.PSObject.Properties[$_]
+                if ($property -and -not [string]::IsNullOrWhiteSpace([string]$property.Value)) {
+                    [string]$property.Value
+                }
+            } | Select-Object -Unique
+            $errMsg = $errorDetails -join ' - '
             if ($pgid -eq 'ConvergedTFA') {
                 throw "MFA required but not satisfied — the ESTSAUTH cookie does not contain a completed MFA session. Ensure the cookie is captured AFTER MFA is completed (e.g., after Authenticator push approval)."
             } elseif ($pgid -eq 'ConvergedSignIn') {
@@ -408,7 +418,7 @@ for ($silentRedirect = 0; $silentRedirect -lt 10; $silentRedirect++) {
             } elseif ($errMsg) {
                 throw "Azure AD returned page '$pgid' with error: $errMsg"
             } else {
-                throw "Azure AD returned page '$pgid' instead of silent auth redirect. Cookie may be invalid or expired."
+                throw "Azure AD returned page '$pgid' instead of a silent auth redirect, but supplied no error details. Verify the ESTSAUTH cookie and redirect URI."
             }
         }
         throw "Unexpected 200 response during silent auth."

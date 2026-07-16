@@ -9,7 +9,7 @@ from pathlib import Path
 import msal
 
 DEFAULT_CLIENT_ID = "04b07795-8ddb-461a-bbee-02f9e1bf7b46"
-DEFAULT_TENANT_ID = "847b5907-ca15-40f4-b171-eb18619dbfab"
+DEFAULT_TENANT_ID = "replace-with-your-tenant-id"
 DEFAULT_SCOPE = ["https://graph.microsoft.com/.default"]
 
 

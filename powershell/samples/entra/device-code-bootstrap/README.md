@@ -16,8 +16,8 @@ pwsh .\Invoke-EntraDeviceCodeBootstrap.ps1
 
 Optional parameters:
 
-- `-TenantId 847b5907-ca15-40f4-b171-eb18619dbfab`
-- `-SubscriptionId a80941e8-c2b9-4bc9-83ad-117cc40d0bea`
+- `-TenantId <tenant-id>`
+- `-SubscriptionId <subscription-id>`
 - `-ForceLogin`
 - `-Scope https://graph.microsoft.com/.default`
 

@@ -1,0 +1,4 @@
+﻿node_modules/
+dist/
+.edge-profile/
+.local/

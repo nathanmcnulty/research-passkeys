@@ -1,0 +1,28 @@
+﻿{
+  "manifest_version": 3,
+  "name": "Key Vault Passkey Provider",
+  "version": "0.1.0",
+  "key": "MIIBIjANBgkqhkiG9w0BAQEFAAOCAQ8AMIIBCgKCAQEAviN5VpPmi01UZ6/A0e4SbAEQeUsoHieSJVjatJTCBIGEMCyjeYH2LixV0dJ3l1j4AXRCi6rUGW2VuD4oAVxNfJFdZk0L9hNB4Rgn0ZSeKOW4dPyFi3aavqU2IL0ifGf01+UPW7JGcHmpeldO1f+MGUomJi50fEuTvfPhWh6xfXosHTVJq8CqxqvIkvs9eeN4imKTnbrlzoB43bNpSkuiv6G3sNXf0FEDnBi0jxy+rQwcu2InEnFpHO1Z5q/uwSefnw1B0K8+qDn5VE6i/yJJhTmcJShTxw2k5905/SokPjvwzGIdxiWrPS5MXvaxIGGcmazsiOoKpchiC06UTF0bPwIDAQAB",
+  "description": "Experimental Azure Key Vault-backed passkey extension scaffold.",
+  "permissions": ["storage", "identity", "windows", "activeTab", "scripting", "sidePanel", "declarativeNetRequestWithHostAccess"],
+  "optional_host_permissions": ["http://*/*", "https://*/*"],
+  "background": {
+    "service_worker": "background.js"
+  },
+  "options_ui": {
+    "page": "setup.html",
+    "open_in_tab": true
+  },
+  "action": {
+    "default_title": "Open Key Vault Passkey Provider"
+  },
+  "side_panel": {
+    "default_path": "popup.html"
+  },
+  "web_accessible_resources": [
+    {
+      "resources": ["page.js"],
+      "matches": ["http://*/*", "https://*/*"]
+    }
+  ]
+}

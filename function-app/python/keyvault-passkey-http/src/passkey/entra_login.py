@@ -75,6 +75,7 @@ def authenticate_with_passkey(
     auth_url: str = DEFAULT_AUTH_URL,
     user_agent: str = USER_AGENT,
     proxy: str | None = None,
+    session: requests.Session | None = None,
 ) -> PasskeyLoginResult:
     target_user = _get_required_string(credential, "userName", "username", "userPrincipalName")
     user_handle = _normalize_base64url(_get_required_string(credential, "userHandle"))
@@ -96,7 +97,7 @@ def authenticate_with_passkey(
         private_key_pem = _normalize_private_key_pem(raw_key)
 
     normalized_user_agent = normalize_user_agent(user_agent)
-    session = configure_requests_session(requests.Session(), normalized_user_agent)
+    session = configure_requests_session(session or requests.Session(), normalized_user_agent)
     if proxy:
         session.proxies.update({"http": proxy, "https": proxy})
 

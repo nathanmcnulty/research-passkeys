@@ -8,13 +8,27 @@ param(
     [string]$ResourceGroupName,
 
     [Parameter()]
-    [string]$SubscriptionId = 'a80941e8-c2b9-4bc9-83ad-117cc40d0bea',
+    [string]$SubscriptionId = 'replace-with-your-subscription-id',
 
     [Parameter()]
     [string]$Location = 'westus2',
 
     [Parameter()]
-    [string]$TenantId = '847b5907-ca15-40f4-b171-eb18619dbfab',
+    [string]$TenantId = 'replace-with-your-tenant-id',
+
+    [Parameter(Mandatory)]
+    [string]$BrowserExtensionClientId,
+
+    [Parameter()]
+    [string]$TokenClientId,
+
+    [Parameter()]
+    [string]$TokenRedirectUri = 'http://localhost',
+
+    [Parameter()]
+    [hashtable[]]$GraphDelegatedPermissions = @(
+        @{ id = 'e1fe6dd8-ba31-4d61-89e7-88639da4683d'; value = 'User.Read' }
+    ),
 
     [Parameter()]
     [string]$OktaDomain,
@@ -177,6 +191,34 @@ if ($CatalogTableName -notmatch '^[A-Za-z][A-Za-z0-9]{2,62}$') {
     throw 'CatalogTableName must be 3-63 alphanumeric characters and start with a letter.'
 }
 
+$parsedBrowserExtensionClientId = [guid]::Empty
+if (-not [guid]::TryParse($BrowserExtensionClientId, [ref]$parsedBrowserExtensionClientId)) {
+    throw 'BrowserExtensionClientId must be the GUID client ID produced by New-BrowserFunctionAppRegistration.ps1.'
+}
+
+if ($TemplateId -in @('powershell-keyvault-passkey-http', 'python-keyvault-passkey-http')) {
+    if (-not [string]::IsNullOrWhiteSpace($TokenClientId)) {
+        $parsedTokenClientId = [guid]::Empty
+        if (-not [guid]::TryParse($TokenClientId, [ref]$parsedTokenClientId)) {
+            throw 'TokenClientId must be a GUID for an existing public-client application.'
+        }
+    }
+    $parsedTokenRedirectUri = $null
+    if (-not [uri]::TryCreate($TokenRedirectUri, [System.UriKind]::Absolute, [ref]$parsedTokenRedirectUri) -or
+        $parsedTokenRedirectUri.Scheme -notin @('http', 'https') -or $parsedTokenRedirectUri.Query -or $parsedTokenRedirectUri.Fragment) {
+        throw 'TokenRedirectUri must be an absolute HTTP or HTTPS URI without a query string or fragment.'
+    }
+    if ($GraphDelegatedPermissions.Count -eq 0) {
+        throw 'At least one GraphDelegatedPermissions entry is required.'
+    }
+    foreach ($permission in $GraphDelegatedPermissions) {
+        $permissionId = [guid]::Empty
+        if (-not [guid]::TryParse([string]$permission.id, [ref]$permissionId) -or [string]$permission.value -notmatch '^[A-Za-z][A-Za-z0-9.]+$') {
+            throw 'Each GraphDelegatedPermissions entry requires a GUID id and a scope value containing letters, numbers, and periods.'
+        }
+    }
+}
+
 if ($DeploymentProfile -eq 'production' -and ($GrantCurrentUserDevelopmentAccess -or -not [string]::IsNullOrWhiteSpace($DeveloperPrincipalId))) {
     throw 'Direct developer RBAC cannot be granted with DeploymentProfile=production. Use a development deployment or broker access.'
 }
@@ -212,6 +254,10 @@ $sampleRoot = [string]$sample.SampleRoot
 $syncScript = [string]$sample.SyncScript
 $sourceRoot = [string]$sample.SourceRoot
 $infraPath = Join-Path $sampleRoot 'infra\main.bicep'
+
+if ($TemplateId -in @('powershell-keyvault-passkey-http', 'python-keyvault-passkey-http') -and [string]::IsNullOrWhiteSpace($TokenClientId)) {
+    Write-Host 'TokenClientId was not supplied; deployment will use the built-in Azure CLI public client for token acquisition.'
+}
 
 if (-not (Test-Path -LiteralPath $sampleRoot)) {
     throw "Sample root not found: $sampleRoot"
@@ -301,6 +347,7 @@ if ($LASTEXITCODE -ne 0) {
 $parameterArgs = @(
     '--parameters', "location=$Location",
     '--parameters', "tenantId=$TenantId",
+    '--parameters', "browserExtensionClientId=$BrowserExtensionClientId",
     '--parameters', "environmentName=$EnvironmentName",
     '--parameters', "catalogTableName=$CatalogTableName",
     '--parameters', "deploymentProfile=$DeploymentProfile",
@@ -325,6 +372,12 @@ if (-not [string]::IsNullOrWhiteSpace($ExistingVirtualNetworkName)) {
 }
 if (-not [string]::IsNullOrWhiteSpace($DeveloperPrincipalId)) {
     $parameterArgs += @('--parameters', "developerPrincipalId=$DeveloperPrincipalId")
+}
+if ($TemplateId -in @('powershell-keyvault-passkey-http', 'python-keyvault-passkey-http')) {
+    $graphPermissionsJson = ConvertTo-Json -InputObject $GraphDelegatedPermissions -Depth 5 -Compress
+    $parameterArgs += @('--parameters', "tokenClientId=$TokenClientId")
+    $parameterArgs += @('--parameters', "tokenRedirectUri=$TokenRedirectUri")
+    $parameterArgs += @('--parameters', "graphDelegatedPermissions=$graphPermissionsJson")
 }
 
 if (-not $SkipWhatIf) {
@@ -372,6 +425,9 @@ $managedIdentityStorageBlobRoleAssignmentId = [string]$deploymentOutputs.managed
 $managedIdentityStorageQueueRoleAssignmentId = [string]$deploymentOutputs.managedIdentityStorageQueueRoleAssignmentId.value
 $managedIdentityStorageTableRoleAssignmentId = [string]$deploymentOutputs.managedIdentityStorageTableRoleAssignmentId.value
 $managedIdentityKeyVaultRoleAssignmentId = [string]$deploymentOutputs.managedIdentityKeyVaultRoleAssignmentId.value
+$deployedTokenClientId = if ($deploymentOutputs.tokenClientId) { [string]$deploymentOutputs.tokenClientId.value } else { '' }
+$deployedTokenRedirectUri = if ($deploymentOutputs.tokenRedirectUri) { [string]$deploymentOutputs.tokenRedirectUri.value } else { '' }
+$deployedGraphAllowedScopes = if ($deploymentOutputs.graphAllowedScopes) { @($deploymentOutputs.graphAllowedScopes.value) } else { @() }
 
 $requiredOutputs = @{
     functionAppName = $functionAppName
@@ -453,6 +509,11 @@ $expectedSettings = @{
     'PASSKEY_ENTRA_PORTAL_ORIGIN' = $EntraPortalOrigin
     'PASSKEY_ALLOW_LOCAL_CREDENTIALS' = 'false'
 }
+if ($TemplateId -in @('powershell-keyvault-passkey-http', 'python-keyvault-passkey-http')) {
+    $expectedSettings['PASSKEY_TOKEN_CLIENT_ID'] = $deployedTokenClientId
+    $expectedSettings['PASSKEY_TOKEN_REDIRECT_URI'] = $deployedTokenRedirectUri
+    $expectedSettings['PASSKEY_GRAPH_ALLOWED_SCOPES'] = ($deployedGraphAllowedScopes -join ',')
+}
 foreach ($entry in $expectedSettings.GetEnumerator()) {
     if ($appSettings[[string]$entry.Key] -ne [string]$entry.Value) {
         throw "Function app setting '$($entry.Key)' was not configured with the expected deployed value."
@@ -518,6 +579,9 @@ $result = [PSCustomObject]@{
     existingFunctionSubnetResourceId = $existingFunctionSubnetResourceId
     networkIntegrationEnabled = $networkIntegrationEnabled
     developmentSecretExportEnabled = [bool]$EnableDevelopmentSecretExport
+    tokenClientId             = $deployedTokenClientId
+    tokenRedirectUri          = $deployedTokenRedirectUri
+    graphAllowedScopes        = $deployedGraphAllowedScopes
     deploymentProfile         = $DeploymentProfile
     entraPortalOrigin         = $EntraPortalOrigin
     azConfigDir               = $AzConfigDir

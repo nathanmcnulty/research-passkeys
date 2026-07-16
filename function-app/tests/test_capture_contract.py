@@ -70,6 +70,32 @@ class CaptureContractTests(unittest.TestCase):
         self.assertIn('queue_message.pop("cookieHeader", None)', python_source)
         self.assertIn('queue_message.pop("stateHandle", None)', python_source)
 
+    def test_entra_queue_worker_replays_normalized_capture_context(self):
+        powershell_worker = (
+            POWERSHELL_ROOT / "src/ProcessEntraPasskeyRegistrationViaEstsAuth/run.ps1"
+        ).read_text(encoding="utf-8")
+        powershell_helper = (
+            POWERSHELL_ROOT / "src/shared/PasskeyFunctionHelpers.ps1"
+        ).read_text(encoding="utf-8")
+        python_source = (PYTHON_ROOT / "src/function_app.py").read_text(encoding="utf-8")
+
+        self.assertIn("Get-EstsAuthCookieFromSource -CookieSource $capturedBody", powershell_worker)
+        self.assertIn("$message.redirectUri ?? $message.redirecturi", powershell_worker)
+        self.assertIn("Get-RequestValue -Body $Body -Request $Request -Names @('redirectUri', 'redirecturi')", powershell_helper)
+        self.assertIn("extract_ests_auth_cookie_value(captured_payload)", python_source)
+        self.assertIn('message_payload.get("redirectUri")', python_source)
+
+    def test_capture_user_agent_does_not_override_ests_replay_profile(self):
+        powershell_helper = (
+            POWERSHELL_ROOT / "src/shared/PasskeyFunctionHelpers.ps1"
+        ).read_text(encoding="utf-8")
+        python_source = (PYTHON_ROOT / "src/function_app.py").read_text(encoding="utf-8")
+
+        self.assertIn("-Names @('userAgent', 'useragent')", powershell_helper)
+        self.assertNotIn("-Names @('userAgent', 'useragent', 'user_agent')", powershell_helper)
+        self.assertIn('_get_request_value(body, req, "userAgent", "useragent")', python_source)
+        self.assertNotIn('_get_request_value(body, req, "userAgent", "useragent", "user_agent")', python_source)
+
     def test_ests_auth_registration_keeps_sync_and_queue_routes_distinct(self):
         python_source = (PYTHON_ROOT / "src/function_app.py").read_text(encoding="utf-8")
         powershell_direct = json.loads(

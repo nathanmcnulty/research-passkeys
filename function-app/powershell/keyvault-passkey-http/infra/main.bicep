@@ -2,7 +2,24 @@
 param location string = 'westus2'
 
 @description('Tenant ID used by the passkey registration scripts.')
-param tenantId string = '847b5907-ca15-40f4-b171-eb18619dbfab'
+param tenantId string = 'replace-with-your-tenant-id'
+
+@description('Single-tenant browser extension application client ID used by Easy Auth.')
+param browserExtensionClientId string
+
+@description('Optional single-tenant public-client application used to request Graph and ARM delegated tokens. Omit to use the built-in Azure CLI public client id.')
+param tokenClientId string = ''
+
+@description('Registered public-client redirect URI used by authorization code with PKCE.')
+param tokenRedirectUri string = 'http://localhost'
+
+@description('Allowed Microsoft Graph delegated permissions. Configure matching permissions and consent on the configured token client id.')
+param graphDelegatedPermissions array = [
+  {
+    id: 'e1fe6dd8-ba31-4d61-89e7-88639da4683d'
+    value: 'User.Read'
+  }
+]
 
 @description('Optional Okta organization domain used as the default by the Okta Function routes.')
 param oktaDomain string = ''
@@ -366,6 +383,7 @@ resource passkeyKeyOperatorRole 'Microsoft.Authorization/roleDefinitions@2022-04
         dataActions: [
           'Microsoft.KeyVault/vaults/keys/read'
           'Microsoft.KeyVault/vaults/keys/create/action'
+          'Microsoft.KeyVault/vaults/keys/delete'
           'Microsoft.KeyVault/vaults/keys/sign/action'
           'Microsoft.KeyVault/vaults/keys/verify/action'
           'Microsoft.KeyVault/vaults/secrets/getSecret/action'
@@ -501,6 +519,9 @@ resource functionAppSettings 'Microsoft.Web/sites/config@2024-11-01' = {
     PASSKEY_OKTA_DOMAIN: oktaDomain
     PASSKEY_OKTA_REDIRECT_URI: oktaRedirectUri
     PASSKEY_ENTRA_PORTAL_ORIGIN: entraPortalOrigin
+    PASSKEY_TOKEN_CLIENT_ID: tokenClientId
+    PASSKEY_TOKEN_REDIRECT_URI: tokenRedirectUri
+    PASSKEY_GRAPH_ALLOWED_SCOPES: join(map(graphDelegatedPermissions, permission => permission.value), ',')
     PASSKEY_DEPLOYMENT_PROFILE: deploymentProfile
     PASSKEY_ALLOW_LOCAL_CREDENTIALS: 'false'
     PASSKEY_REGISTRATION_QUEUE_NAME: registrationQueueName
@@ -515,6 +536,47 @@ resource functionAppSettings 'Microsoft.Web/sites/config@2024-11-01' = {
     PASSKEY_POST_REGISTRATION_LOGIN_DELAY_SECONDS: '10'
     APPLICATIONINSIGHTS_CONNECTION_STRING: applicationInsights.properties.ConnectionString
     APPLICATIONINSIGHTS_AUTHENTICATION_STRING: 'ClientId=${userAssignedIdentity.properties.clientId};Authorization=AAD'
+  }
+}
+
+resource functionAppAuth 'Microsoft.Web/sites/config@2024-11-01' = {
+  parent: functionApp
+  name: 'authsettingsV2'
+  properties: {
+    platform: {
+      enabled: true
+      runtimeVersion: '~1'
+    }
+    globalValidation: {
+      requireAuthentication: true
+      unauthenticatedClientAction: 'Return401'
+      excludedPaths: [
+        '/api/entra/passkeys/register/estsauth/queue'
+        '/api/okta/passkeys/register/idx/queue'
+      ]
+    }
+    httpSettings: {
+      requireHttps: true
+    }
+    identityProviders: {
+      azureActiveDirectory: {
+        enabled: true
+        registration: {
+          clientId: browserExtensionClientId
+          openIdIssuer: '${environment().authentication.loginEndpoint}${tenantId}/v2.0'
+        }
+        validation: {
+          allowedAudiences: [
+            'api://${browserExtensionClientId}'
+          ]
+          defaultAuthorizationPolicy: {
+            allowedApplications: [
+              browserExtensionClientId
+            ]
+          }
+        }
+      }
+    }
   }
 }
 
@@ -600,6 +662,9 @@ resource tableDiagnostics 'Microsoft.Insights/diagnosticSettings@2021-05-01-prev
 
 output functionAppName string = functionApp.name
 output functionAppDefaultHostname string = functionApp.properties.defaultHostName
+output tokenClientId string = tokenClientId
+output tokenRedirectUri string = tokenRedirectUri
+output graphAllowedScopes array = map(graphDelegatedPermissions, permission => permission.value)
 output keyVaultName string = keyVault.name
 output keyVaultResourceId string = keyVault.id
 output managedIdentityClientId string = userAssignedIdentity.properties.clientId

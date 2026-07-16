@@ -1,0 +1,112 @@
+﻿<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>Key Vault Passkey Provider</title>
+    <link rel="stylesheet" href="popup.css">
+  </head>
+  <body>
+    <main class="shell shell-compact">
+      <header class="hero">
+        <p class="eyebrow">Experimental</p>
+        <h1>Key Vault Passkey</h1>
+        <p class="subtitle">Persistent status, access, and stored passkey management.</p>
+        <div class="hero-actions">
+          <button id="openSetupWizard" type="button" class="secondary compact">Configuration</button>
+          <button id="refreshPopup" type="button" class="secondary compact">Refresh</button>
+        </div>
+      </header>
+
+      <section class="panel">
+        <div class="overview-header">
+          <div>
+            <p class="eyebrow eyebrow-inline">Status</p>
+            <h2 id="setupSummary" class="section-title">Checking...</h2>
+            <p id="setupDetail" class="helper-text">Loading extension state...</p>
+          </div>
+          <label class="toggle-stack" for="enabled">
+            <span class="toggle-stack-label">Intercept</span>
+            <input id="enabled" type="checkbox">
+          </label>
+        </div>
+        <div class="summary-grid popup-summary-grid">
+          <article class="summary-card compact-card">
+            <span class="summary-label">Configuration</span>
+            <strong id="configStatus">Checking...</strong>
+          </article>
+          <article class="summary-card compact-card">
+            <span class="summary-label">Function API Auth</span>
+            <strong id="authStatus">Checking...</strong>
+          </article>
+          <article class="summary-card compact-card">
+            <span class="summary-label">PIN</span>
+            <strong id="pinUvStatus">Checking...</strong>
+          </article>
+          <article class="summary-card compact-card">
+            <span class="summary-label">Intercept</span>
+            <strong id="interceptStatus">Checking...</strong>
+          </article>
+        </div>
+        <div class="actions compact-actions">
+          <div id="unlockPanel" class="field-grid" hidden>
+            <label for="unlockPin">
+              <span>Extension PIN</span>
+              <input id="unlockPin" type="password" autocomplete="current-password" placeholder="Enter PIN to unlock">
+            </label>
+            <p id="unlockHint" class="helper-text">Enter the extension PIN to unlock. An expired API session requires signing in again.</p>
+          </div>
+          <div class="button-row">
+            <button id="unlockButton" type="button" hidden>Unlock</button>
+            <button id="signIn" type="button">Sign In</button>
+            <button id="signOut" type="button" class="secondary">Sign Out</button>
+            <button id="lockNow" type="button" class="secondary" hidden>Lock Now</button>
+          </div>
+        </div>
+        <p id="status" class="status status-block" aria-live="polite"></p>
+      </section>
+
+      <section class="panel metric-grid">
+        <article class="summary-card compact-card">
+          <span class="summary-label">Stored Passkeys</span>
+          <strong id="storedCredentialCount">0</strong>
+        </article>
+        <article class="summary-card compact-card">
+          <span class="summary-label">Relying Parties</span>
+          <strong id="relyingPartyCount">0</strong>
+        </article>
+        <article class="summary-card compact-card metric-card-wide">
+          <span class="summary-label">Metadata Updated</span>
+          <strong id="metadataLastUpdatedAt">never</strong>
+        </article>
+      </section>
+
+      <section class="panel">
+        <div class="diagnostics-header">
+          <strong>Current Site</strong>
+        </div>
+        <strong id="currentSiteOrigin">Checking current tab...</strong>
+        <p id="currentSiteAccess" class="helper-text">Checking site access...</p>
+        <p id="currentSitePasskeys" class="helper-text">Checking current-site passkeys...</p>
+        <div class="button-row site-access-actions">
+          <button id="allowCurrentSite" type="button" class="secondary compact" hidden>Allow On This Site</button>
+          <button id="removeCurrentSite" type="button" class="secondary compact" hidden>Remove Access</button>
+          <button id="reloadCurrentSite" type="button" class="secondary compact" hidden>Reload Site</button>
+        </div>
+      </section>
+
+      <section class="panel">
+        <div class="diagnostics-header">
+          <strong>Stored Passkeys</strong>
+          <div class="button-row diagnostics-actions">
+            <button id="refreshStoredCredentials" type="button" class="secondary compact">Refresh</button>
+          </div>
+        </div>
+        <p id="storedCredentialListStatus" class="helper-text">Checking stored passkeys...</p>
+        <div id="storedCredentialList" class="credential-list"></div>
+      </section>
+    </main>
+
+    <script src="popup.js"></script>
+  </body>
+</html>

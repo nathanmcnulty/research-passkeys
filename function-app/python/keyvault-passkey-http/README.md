@@ -44,6 +44,9 @@ These app settings are expected:
 - `PASSKEY_CAPTURE_TABLE_NAME` and `PASSKEY_CAPTURE_CONTAINER_NAME` (capture provenance and encrypted payload locations)
 - `PASSKEY_CAPTURE_MAX_BYTES` (defaults to 1 MiB) and `PASSKEY_CAPTURE_PROVENANCE_DAYS` (defaults to 90)
 - `PASSKEY_ENABLE_DEV_SECRET_EXPORT` (development-only secret export; defaults to `false`)
+- `PASSKEY_TOKEN_CLIENT_ID` (optional single-tenant public-client application id; when omitted, token requests use the built-in Azure CLI public client id)
+- `PASSKEY_TOKEN_REDIRECT_URI` (registered public-client redirect URI; defaults to `http://localhost` in deployment)
+- `PASSKEY_GRAPH_ALLOWED_SCOPES` (comma-separated Graph delegated-scope allowlist; defaults to `User.Read`)
 - `AzureWebJobsFeatureFlags=EnableWorkerIndexing` (required for the Python v2 decorator model to index functions consistently)
 
 ## Local development
@@ -69,9 +72,17 @@ Catalog lookup routes:
 - `GET /api/okta/passkeys[/{recordId}]` lists or reads Okta passkeys.
 - `GET /api/passkeys` lists passkeys in the configured vault.
 - `GET /api/passkeys/{recordId}` returns one passkey.
+- `GET /api/passkeys/{recordId}/browser-context` returns only provider, RP ID, username, and captured User-Agent for the browser adapter.
+- `DELETE /api/passkeys/{recordId}` deletes the catalog row, stored login-context secret, and Key Vault signing key. Key Vault soft-delete may retain the deleted key for recovery.
+- `GET /api/broker/config` returns the non-secret broker profile configuration.
+- `POST /api/entra/passkeys/{recordId}/token` performs passkey authentication and returns a fresh delegated token.
 - List routes accept `credentialId`, `rpId`, `userName`, `displayName`, `keyVaultKeyName` (or `keyName`), and `status` filters; the generic route also accepts `provider`.
 
 These routes use Function authorization for the sample. They are not a substitute for caller authentication and per-record authorization in the planned broker design; see `docs/architecture/passkey-catalog.md`.
+
+The token endpoint accepts only server-configured profiles. `MicrosoftGraph` defaults to `User.Read` and is limited by `PASSKEY_GRAPH_ALLOWED_SCOPES`; `AzureResourceManager` is fixed to `https://management.azure.com/user_impersonation`. Client IDs, redirect URIs, authorities, and resources cannot be supplied in requests. Token and ESTSAUTH responses include `Cache-Control: no-store`.
+
+By default the broker uses the built-in Azure CLI public-client app id for both Graph and ARM token requests. For tighter control, set `PASSKEY_TOKEN_CLIENT_ID` to an app registration you own that has the required Microsoft Graph delegated permissions and `Azure Service Management` `user_impersonation` consented.
 
 TAP registration:
 
@@ -153,10 +164,10 @@ Passkey login:
 
 ## Deploy with Bicep
 
-The Bicep sample targets subscription `a80941e8-c2b9-4bc9-83ad-117cc40d0bea` and defaults to `westus2`.
+The Bicep sample targets a subscription you provide and defaults to `westus2`.
 
 ```powershell
-az account set --subscription a80941e8-c2b9-4bc9-83ad-117cc40d0bea
+az account set --subscription <subscription-id>
 az group create --name rg-passkey-func-python-sample-wus2 --location westus2
 az deployment group what-if --resource-group rg-passkey-func-python-sample-wus2 --template-file infra/main.bicep
 az deployment group create --resource-group rg-passkey-func-python-sample-wus2 --template-file infra/main.bicep
@@ -171,9 +182,11 @@ For a one-command path from this repo, use:
   -TemplateId python-keyvault-passkey-http `
   -ResourceGroupName rg-passkey-func-python-sample-wus2 `
   -EnvironmentName sample `
+  -BrowserExtensionClientId '<browser-extension-application-id>' `
+  [-TokenClientId '<public-client-application-id>'] `
   -OktaDomain your-org.okta.com
 ```
 
-The deployment creates the storage account, `PasskeyCredentials` table, queues/blob container support, Key Vault, managed identity, audit diagnostics, and required data-plane RBAC assignments. The Function and an optional development principal receive a custom Key Vault role limited to key read/write/sign/verify and secret read/write/delete. To grant the signed-in developer direct data-plane access in a development deployment, add `-GrantCurrentUserDevelopmentAccess`. Production deployments reject direct developer assignments and restrict Storage and Key Vault to the Function integration subnet; select them with `-DeploymentProfile production`.
+The deployment creates the storage account, `PasskeyCredentials` table, queues/blob container support, Key Vault, managed identity, audit diagnostics, and required data-plane RBAC assignments. The Function and an optional development principal receive a custom Key Vault role limited to key read/create/delete/sign/verify and secret read/write/delete. To grant the signed-in developer direct data-plane access in a development deployment, add `-GrantCurrentUserDevelopmentAccess`. Production deployments reject direct developer assignments and restrict Storage and Key Vault to the Function integration subnet; select them with `-DeploymentProfile production`.
 
 Captured registration JSON is AES-256-GCM encrypted in Blob Storage with a 24-hour CEK stored in Key Vault. Password and user agent are retained together in `pklogin-{recordId}` until explicitly replaced or deleted. Add `-EnableDevelopmentSecretExport` only to a development deployment to enable the no-store export routes; the deployment helper rejects this switch in production.

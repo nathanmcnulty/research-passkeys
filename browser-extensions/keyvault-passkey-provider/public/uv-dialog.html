@@ -1,0 +1,35 @@
+﻿<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>Passkey PIN Verification</title>
+    <link rel="stylesheet" href="popup.css">
+  </head>
+  <body>
+    <main class="shell">
+      <header class="hero">
+        <p class="eyebrow">User Verification</p>
+        <h1 id="uvTitle">Confirm Passkey Request</h1>
+        <p class="subtitle">Enter the extension PIN to satisfy a real WebAuthn UV ceremony for this request.</p>
+      </header>
+
+      <section class="panel">
+        <pre id="uvDetails" class="detail-block">Loading verification details...</pre>
+        <label class="field-stack">
+          <span>Extension PIN</span>
+          <input id="pin" type="password" autocomplete="current-password">
+        </label>
+        <div class="actions stacked-actions">
+          <div class="button-row">
+            <button id="verify" type="button">Verify PIN</button>
+            <button id="cancel" type="button" class="secondary">Cancel</button>
+          </div>
+          <p id="status" class="status" aria-live="polite">Ready.</p>
+        </div>
+      </section>
+    </main>
+
+    <script src="uv-dialog.js"></script>
+  </body>
+</html>

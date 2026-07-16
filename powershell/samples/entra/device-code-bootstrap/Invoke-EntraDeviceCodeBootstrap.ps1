@@ -33,7 +33,7 @@
 [CmdletBinding()]
 param(
     [Parameter()]
-    [string]$TenantId = '847b5907-ca15-40f4-b171-eb18619dbfab',
+    [string]$TenantId = 'replace-with-your-tenant-id',
 
     [Parameter()]
     [string]$SubscriptionId,

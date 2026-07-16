@@ -52,7 +52,7 @@ try {
     $result = $login.Result
     $statusCode = if ($result.Success) { [HttpStatusCode]::OK } else { [HttpStatusCode]::Unauthorized }
 
-    Push-OutputBinding -Name Response -Value (New-JsonHttpResponse -StatusCode $statusCode -Body ([ordered]@{
+    Push-OutputBinding -Name Response -Value (New-JsonHttpResponse -StatusCode $statusCode -NoStore -Body ([ordered]@{
         success = [bool]$result.Success
         authMethod = 'passkey'
         userPrincipalName = $result.UserPrincipalName
@@ -63,12 +63,12 @@ try {
         estsAuthCookie = $login.ESTSAuthCookie
     }))
 } catch [System.ArgumentException] {
-    Push-OutputBinding -Name Response -Value (New-JsonHttpResponse -StatusCode ([HttpStatusCode]::BadRequest) -Body ([ordered]@{
+    Push-OutputBinding -Name Response -Value (New-JsonHttpResponse -StatusCode ([HttpStatusCode]::BadRequest) -NoStore -Body ([ordered]@{
         success = $false
         error = $_.Exception.Message
     }))
 } catch {
-    Push-OutputBinding -Name Response -Value (New-JsonHttpResponse -StatusCode ([HttpStatusCode]::InternalServerError) -Body ([ordered]@{
+    Push-OutputBinding -Name Response -Value (New-JsonHttpResponse -StatusCode ([HttpStatusCode]::InternalServerError) -NoStore -Body ([ordered]@{
         success = $false
         error = $_.Exception.Message
     }))

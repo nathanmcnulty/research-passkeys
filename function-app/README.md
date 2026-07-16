@@ -38,6 +38,8 @@ pwsh -NoProfile -File ./scripts/deployment/Deploy-FunctionSample.ps1 `
   -TemplateId powershell-keyvault-passkey-http `
   -ResourceGroupName rg-phish-entra `
   -Location westus2 `
+  -BrowserExtensionClientId <browser-extension-application-id> `
+  [-TokenClientId <public-client-application-id>] `
   -DeploymentProfile development `
   -ExistingNatGatewayName <existing-nat-name> `
   -ExistingNatGatewayResourceGroupName rg-phish `
@@ -52,6 +54,7 @@ pwsh -NoProfile -File ./scripts/deployment/Deploy-FunctionSample.ps1 `
   -TemplateId python-keyvault-passkey-http `
   -ResourceGroupName rg-phish-okta `
   -Location westus2 `
+  -BrowserExtensionClientId <browser-extension-application-id> `
   -DeploymentProfile development `
   -ExistingNatGatewayName <existing-nat-name> `
   -ExistingNatGatewayResourceGroupName rg-phish `

@@ -6,7 +6,24 @@
       "value": "westus2"
     },
     "tenantId": {
-      "value": "847b5907-ca15-40f4-b171-eb18619dbfab"
+      "value": "replace-with-your-tenant-id"
+    },
+    "browserExtensionClientId": {
+      "value": "replace-with-browser-extension-app-client-id"
+    },
+    "tokenClientId": {
+      "value": ""
+    },
+    "tokenRedirectUri": {
+      "value": "http://localhost"
+    },
+    "graphDelegatedPermissions": {
+      "value": [
+        {
+          "id": "e1fe6dd8-ba31-4d61-89e7-88639da4683d",
+          "value": "User.Read"
+        }
+      ]
     },
     "oktaDomain": {
       "value": "replace-with-your-okta-domain"

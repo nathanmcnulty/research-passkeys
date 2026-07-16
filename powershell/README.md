@@ -9,6 +9,7 @@ Current shape:
 
 - `modules/Passkey.Common/`: shared binary and encoding helpers
 - `modules/Passkey.EntraAuth/`: ESTS/TAP login helpers and browser-parity headers
+- `modules/Passkey.Broker/`: Function-key client for Graph and Az PowerShell token handoff
 - `scripts/entra/`: Entra registration, login, TAP/ESTSAUTH, and reference scripts
 - `scripts/okta/`: Okta MyAccount and IDX registration/login proof-of-concept scripts
 - `samples/entra/device-code-bootstrap/`: CA-friendly delegated-auth bootstrap using Azure CLI device code flow
@@ -21,6 +22,25 @@ Real fixes intentionally carried forward into the curated script include:
 - safer output/key-name sanitization for UPN-derived file and key names
 
 Compatibility-only ESTS or raw session flows can still stay here, but they should be clearly labeled and separated from the preferred shared auth path.
+
+## Passkey broker client
+
+The PowerShell Function sample can exchange a stored Entra passkey assertion for a narrowly scoped Microsoft Graph or Azure Resource Manager token:
+
+```powershell
+Import-Module .\modules\Passkey.Broker\Passkey.Broker.psd1
+$functionKey = Read-Host 'Function key' -AsSecureString
+Connect-PasskeyBroker -Uri 'https://func-example.azurewebsites.net' -FunctionKey $functionKey
+
+Get-PasskeyBrokerContext
+Get-PasskeyRecord -RecordId '<record-id>'
+Connect-MgGraphWithPasskey -RecordId '<record-id>' -Scopes 'User.Read'
+Connect-AzAccountWithPasskey -RecordId '<record-id>' -SubscriptionId '<subscription-id>'
+```
+
+`Microsoft.Graph.Authentication` and `Az.Accounts` are optional client-side dependencies used only by their corresponding convenience commands. `Get-PasskeyAccessToken` always performs a new passkey authentication; the broker does not return or retain refresh tokens.
+
+For Defender portal testing, the existing stored-login endpoint still returns an ESTSAUTH cookie with no-store response headers. That cookie can be passed to XdrInternals `Connect-XdrByEstsCookie`. Portal cookie bootstrapping remains provider-specific and is intentionally not part of `Passkey.Broker`.
 
 ## Okta MyAccount API smoke test
 

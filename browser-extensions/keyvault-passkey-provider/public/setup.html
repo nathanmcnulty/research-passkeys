@@ -1,0 +1,177 @@
+﻿<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>Key Vault Passkey Setup</title>
+    <link rel="stylesheet" href="popup.css">
+    <link rel="stylesheet" href="setup.css">
+  </head>
+  <body>
+    <main class="shell setup-shell">
+      <header class="hero setup-hero">
+        <p class="eyebrow">Get Started</p>
+        <h1>Set Up Key Vault Passkey</h1>
+        <p class="subtitle">Work through the initial configuration one step at a time. The extension stays disabled until setup is complete.</p>
+      </header>
+
+      <section class="panel setup-progress-panel">
+        <div class="diagnostics-header">
+          <strong>Setup Progress</strong>
+          <p id="setupOverallStatus" class="inline-status">Checking...</p>
+        </div>
+        <div class="setup-progress-list">
+          <button id="progress-config" type="button" class="setup-progress-item">
+            <span class="setup-progress-index">1</span>
+            <span class="setup-progress-copy">
+              <strong>Configuration</strong>
+              <small id="progress-config-status">Pending</small>
+            </span>
+          </button>
+          <button id="progress-auth" type="button" class="setup-progress-item">
+            <span class="setup-progress-index">2</span>
+            <span class="setup-progress-copy">
+              <strong>Sign-In</strong>
+              <small id="progress-auth-status">Pending</small>
+            </span>
+          </button>
+          <button id="progress-pin" type="button" class="setup-progress-item">
+            <span class="setup-progress-index">3</span>
+            <span class="setup-progress-copy">
+              <strong>PIN</strong>
+              <small id="progress-pin-status">Pending</small>
+            </span>
+          </button>
+          <button id="progress-finish" type="button" class="setup-progress-item">
+            <span class="setup-progress-index">4</span>
+            <span class="setup-progress-copy">
+              <strong>Finish</strong>
+              <small id="progress-finish-status">Locked</small>
+            </span>
+          </button>
+        </div>
+      </section>
+
+      <p id="status" class="panel status-banner" aria-live="polite">Loading setup state...</p>
+
+      <section id="step-config" class="panel setup-step" data-step="config">
+        <p class="eyebrow">Step 1</p>
+        <h2>Save the extension configuration</h2>
+        <p class="helper-text">Enter the Function App and its single-tenant application registration. Key Vault and Table Storage remain server-side concerns.</p>
+        <div class="field-grid setup-form-grid">
+          <label>
+            <span>Tenant ID</span>
+            <input id="tenantId" type="text" autocomplete="off">
+          </label>
+          <label>
+            <span>Client ID</span>
+            <input id="clientId" type="text" autocomplete="off">
+          </label>
+          <label>
+            <span>Function App Base URL</span>
+            <input id="developmentFunctionAppBaseUrl" type="url" autocomplete="off" placeholder="https://func-example.azurewebsites.net">
+            <small class="field-note">The extension calls <code>/api/passkeys</code> and the constrained assertion endpoint using an Entra bearer token.</small>
+          </label>
+          <label>
+            <span>Idle Lock Timeout</span>
+            <select id="lockTimeoutMinutes"></select>
+            <small class="field-note">Choose 5 minutes to 8 hours. Unlock requires the extension PIN and attempts silent Entra SSO before prompting.</small>
+          </label>
+        </div>
+        <div class="actions setup-actions">
+          <div class="button-row">
+            <button id="saveConfig" type="button">Save Configuration</button>
+          </div>
+          <div class="button-row">
+            <button id="nextFromConfig" type="button" class="secondary">Continue</button>
+          </div>
+        </div>
+      </section>
+
+      <section id="step-auth" class="panel setup-step" data-step="auth" hidden>
+        <p class="eyebrow">Step 2</p>
+        <h2>Sign in to the Function API</h2>
+        <p id="authStepHint" class="helper-text">Interactive Entra sign-in uses the browser profile's Microsoft session. The account you select may therefore remain signed in to Microsoft services in this profile.</p>
+        <div class="detail-block" id="authStatus">Checking authentication state...</div>
+        <div class="actions setup-actions">
+          <div class="button-row">
+            <button id="backFromAuth" type="button" class="secondary">Back</button>
+            <button id="signIn" type="button">Sign In</button>
+            <button id="signOut" type="button" class="secondary">Sign Out</button>
+          </div>
+          <div class="button-row">
+            <button id="nextFromAuth" type="button" class="secondary">Continue</button>
+          </div>
+        </div>
+      </section>
+
+      <section id="step-pin" class="panel setup-step" data-step="pin" hidden>
+        <p class="eyebrow">Step 3</p>
+        <h2>Set the extension PIN</h2>
+        <p class="helper-text">The extension PIN is stored locally and used to satisfy required user verification. It is never sent to the Function App.</p>
+        <div class="detail-block" id="pinUvStatus">Checking PIN protection state...</div>
+        <div class="field-grid pin-grid">
+          <label id="currentPinField" hidden>
+            <span>Current PIN</span>
+            <input id="currentPin" type="password" autocomplete="current-password">
+          </label>
+          <label>
+            <span>New PIN</span>
+            <input id="newPin" type="password" autocomplete="new-password">
+          </label>
+          <label>
+            <span>Confirm New PIN</span>
+            <input id="confirmPin" type="password" autocomplete="new-password">
+          </label>
+        </div>
+        <p id="pinHint" class="helper-text">Use at least 6 characters. Longer is stronger.</p>
+        <div class="actions setup-actions">
+          <div class="button-row">
+            <button id="backFromPin" type="button" class="secondary">Back</button>
+            <button id="savePin" type="button">Set PIN</button>
+          </div>
+          <div class="button-row">
+            <button id="nextFromPin" type="button" class="secondary">Finish Setup</button>
+          </div>
+        </div>
+      </section>
+
+      <section id="step-finish" class="panel setup-step" data-step="finish" hidden>
+        <p class="eyebrow">Step 4</p>
+        <h2>Setup complete</h2>
+        <p class="helper-text">The extension is ready to intercept WebAuthn requests. You can reopen this wizard later from the extension side panel if you need to change configuration or PIN state.</p>
+        <div class="summary-grid">
+          <article class="summary-card">
+            <strong>Intercept</strong>
+            <p id="enabledStatus">Checking...</p>
+          </article>
+          <article class="summary-card">
+            <strong>Lock Timeout</strong>
+            <p id="lockTimeoutSummary">15 minutes</p>
+          </article>
+          <article class="summary-card">
+            <strong>Stored Passkeys</strong>
+            <p id="storedCredentialCount">0</p>
+          </article>
+          <article class="summary-card">
+            <strong>Relying Parties</strong>
+            <p id="relyingPartyCount">0</p>
+          </article>
+          <article class="summary-card">
+            <strong>Metadata Updated</strong>
+            <p id="metadataLastUpdatedAt">never</p>
+          </article>
+        </div>
+        <div class="actions setup-actions">
+          <div class="button-row">
+            <button id="backFromFinish" type="button" class="secondary">Back</button>
+            <button id="refreshSummary" type="button" class="secondary">Refresh Summary</button>
+            <button id="doneButton" type="button">Done</button>
+          </div>
+        </div>
+      </section>
+    </main>
+
+    <script src="setup.js"></script>
+  </body>
+</html>

