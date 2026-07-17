@@ -31,3 +31,27 @@ Optional parameters:
 - `--auth-url`
 
 On success, the sample prints the ESTS cookie type and cookie value that were issued.
+
+## Pass the cookie to roadtx
+
+Use the adapter when the next step is a ROADtools interactive authentication flow:
+
+```powershell
+python .\invoke_entra_passkey_roadtx.py `
+  --credential-path .\credential.json `
+  --roadtx-driver-path C:\path\to\geckodriver.exe
+```
+
+The adapter keeps the cookie in memory and invokes `roadtx interactiveauth --estscookie`.
+It does not print or save the cookie. `roadtx` still receives the value as a process
+argument because that is the interface exposed by the current ROADtools version.
+
+Useful options include:
+
+- `--roadtx-command` to provide a full path to the `roadtx` executable
+- `--roadtx-tokenfile` to choose where roadtx writes its token data
+- `--roadtx-headless` to run the roadtx browser headlessly
+- `--roadtx-resource` instead of the default Graph v2 scope
+
+The cookie is a bearer credential. Avoid recording the command line or sharing process
+listings while this adapter is running.
