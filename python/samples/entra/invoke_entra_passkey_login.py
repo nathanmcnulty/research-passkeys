@@ -23,6 +23,7 @@ def main() -> int:
     parser.add_argument("--keyvault-client-secret")
     parser.add_argument("--keyvault-tenant-id")
     parser.add_argument("--auth-url")
+    parser.add_argument("--debug", action="store_true", help="Print safe HTTP/page/cookie diagnostics to stderr.")
     args = parser.parse_args()
 
     credential = load_credential_record(
@@ -37,6 +38,7 @@ def main() -> int:
         key_vault_client_secret=args.keyvault_client_secret,
         key_vault_tenant_id=args.keyvault_tenant_id,
         auth_url=args.auth_url or None or "https://login.microsoftonline.com/organizations/oauth2/v2.0/authorize?response_type=code&redirect_uri=msauth.com.msauth.unsignedapp://auth&scope=https://graph.microsoft.com/.default&client_id=04b07795-8ddb-461a-bbee-02f9e1bf7b46",
+        debug=args.debug,
     )
 
     print(

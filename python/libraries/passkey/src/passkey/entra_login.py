@@ -3,6 +3,7 @@ from __future__ import annotations
 import json
 import re
 import subprocess
+import sys
 import time
 from collections import OrderedDict
 from dataclasses import dataclass
@@ -76,6 +77,7 @@ def authenticate_with_passkey(
     user_agent: str = USER_AGENT,
     proxy: str | None = None,
     session: requests.Session | None = None,
+    debug: bool = False,
 ) -> PasskeyLoginResult:
     target_user = _get_required_string(credential, "userName", "username", "userPrincipalName")
     user_handle = _normalize_base64url(_get_required_string(credential, "userHandle"))
@@ -116,10 +118,9 @@ def authenticate_with_passkey(
             tenant_id=key_vault_tenant_id,
         )
 
-    session_info = _extract_json_payload(
-        session.get(auth_url, allow_redirects=False, timeout=60).text,
-        "initial authorize response",
-    )
+    authorize_response = session.get(auth_url, allow_redirects=False, timeout=60)
+    _debug_response("initial authorize", authorize_response, session, enabled=debug)
+    session_info = _extract_json_payload(authorize_response.text, "initial authorize response")
     has_fido = bool(
         (((session_info.get("oGetCredTypeResult") or {}).get("Credentials") or {}).get("HasFido"))
     )
@@ -187,6 +188,7 @@ def authenticate_with_passkey(
         allow_redirects=False,
         timeout=60,
     )
+    _debug_response("fido pre-verify", pre_verify, session, enabled=debug)
     if pre_verify.status_code >= 400:
         raise PasskeyProtocolError(
             f"Pre-verification failed: HTTP {pre_verify.status_code}. ResponseBody={pre_verify.text[:1000]}"
@@ -210,6 +212,7 @@ def authenticate_with_passkey(
         allow_redirects=False,
         timeout=60,
     )
+    _debug_response("fido login", login_response, session, enabled=debug)
     if use_key_vault:
         time.sleep(0.5)
 
@@ -220,6 +223,7 @@ def authenticate_with_passkey(
         allow_redirects=False,
         timeout=60,
     )
+    _debug_response("fido sso reload", login_response, session, enabled=debug)
     if use_key_vault:
         time.sleep(0.5)
 
@@ -254,6 +258,7 @@ def authenticate_with_passkey(
                 allow_redirects=False,
                 timeout=60,
             )
+            _debug_response("CmsiInterrupt", response, session, enabled=debug)
         elif page_id == "KmsiInterrupt":
             response = session.post(
                 "https://login.microsoftonline.com/kmsi",
@@ -269,6 +274,7 @@ def authenticate_with_passkey(
                 allow_redirects=False,
                 timeout=60,
             )
+            _debug_response("KmsiInterrupt", response, session, enabled=debug)
         else:
             session_id = debug.get("sessionId")
             arr_sessions = debug.get("arrSessions") or []
@@ -279,6 +285,7 @@ def authenticate_with_passkey(
                 allow_redirects=False,
                 timeout=60,
             )
+            _debug_response("ConvergedSignIn", response, session, enabled=debug)
 
         last_response = response
         time.sleep(0.3)
@@ -292,8 +299,13 @@ def authenticate_with_passkey(
     if use_key_vault:
         time.sleep(0.5)
 
-    _follow_completion_redirects(session, last_response)
+    completion_response = _follow_completion_redirects(session, last_response)
+    _debug_response("completion", completion_response, session, enabled=debug)
     ests_cookies = [cookie for cookie in session.cookies if cookie.name.startswith("ESTS")]
+    if completion_response is not None:
+        ests_cookies.extend(cookie for cookie in completion_response.cookies if cookie.name.startswith("ESTS"))
+    if debug and not ests_cookies:
+        print("[passkey-debug] No ESTS cookies found after completion.", file=sys.stderr)
     if not ests_cookies:
         return PasskeyLoginResult(
             success=False,
@@ -359,6 +371,41 @@ def _ensure_query_parameter(auth_url: str, name: str, value: str) -> str:
         return auth_url
     delimiter = "&" if parsed.query else "?"
     return f"{auth_url}{delimiter}{urlencode({name: value})}"
+
+
+def _debug_response(
+    label: str,
+    response: requests.Response | None,
+    session: requests.Session,
+    *,
+    enabled: bool,
+) -> None:
+    if not enabled:
+        return
+    if response is None:
+        print(f"[passkey-debug] {label}: no response", file=sys.stderr)
+        return
+
+    parsed_url = urlparse(response.url)
+    safe_url = f"{parsed_url.scheme}://{parsed_url.netloc}{parsed_url.path}"
+    location = response.headers.get("Location")
+    if location:
+        parsed_location = urlparse(urljoin(response.url, location))
+        safe_location = f"{parsed_location.scheme}://{parsed_location.netloc}{parsed_location.path}"
+    else:
+        safe_location = "-"
+    page = _try_extract_json_payload(response.text) if response.text else None
+    page_id = page.get("pgid") if isinstance(page, dict) else None
+    error_message = page.get("strServiceExceptionMessage") if isinstance(page, dict) else None
+    response_cookie_names = sorted(cookie.name for cookie in response.cookies)
+    session_cookie_names = sorted(cookie.name for cookie in session.cookies)
+    print(
+        f"[passkey-debug] {label}: status={response.status_code} url={safe_url} "
+        f"page={page_id or '-'} error={error_message or '-'} "
+        f"location={safe_location} responseCookies={response_cookie_names or '-'} "
+        f"sessionCookies={session_cookie_names or '-'}",
+        file=sys.stderr,
+    )
 
 
 def _follow_completion_redirects(session: requests.Session, response: requests.Response | None, max_hops: int = 10) -> requests.Response | None:

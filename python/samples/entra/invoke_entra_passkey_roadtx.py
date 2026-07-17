@@ -66,6 +66,7 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--keyvault-client-secret")
     parser.add_argument("--keyvault-tenant-id")
     parser.add_argument("--auth-url")
+    parser.add_argument("--debug", action="store_true", help="Print safe HTTP/page/cookie diagnostics to stderr.")
 
     parser.add_argument("--roadtx-command", default="roadtx", help="roadtx executable or path to it.")
     parser.add_argument("--roadtx-client", default=DEFAULT_ROADTX_CLIENT)
@@ -102,6 +103,8 @@ def main() -> int:
     }
     if args.auth_url:
         auth_arguments["auth_url"] = args.auth_url
+    if args.debug:
+        auth_arguments["debug"] = True
 
     result = authenticate_with_passkey(**auth_arguments)
     if not result.success or not result.cookie_value:
