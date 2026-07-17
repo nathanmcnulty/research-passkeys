@@ -18,7 +18,7 @@ This sample hosts Python Azure Functions that register passkeys with Azure Key V
 
 Unlike the PowerShell sample, this version is **Python-native**. The function host and the TAP and ESTSAUTH registration flows run in Python instead of shelling out to PowerShell.
 
-This sample uses the Azure Functions Python v2 decorator model, so the functions live in [src/function_app.py](/home/nathan/GitHub/research-passkeys/function-app/python/keyvault-passkey-http/src/function_app.py) instead of one folder per function. The runtime still exposes the same named functions as the PowerShell app.
+This sample uses the Azure Functions Python v2 decorator model, so the functions live in [src/function_app.py](/research-passkeys/function-app/python/keyvault-passkey-http/src/function_app.py) instead of one folder per function. The runtime still exposes the same named functions as the PowerShell app.
 
 ## Layout
 

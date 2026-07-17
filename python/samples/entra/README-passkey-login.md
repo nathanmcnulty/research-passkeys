@@ -55,3 +55,6 @@ Useful options include:
 
 The cookie is a bearer credential. Avoid recording the command line or sharing process
 listings while this adapter is running.
+
+For the complete TAP → passkey → ROADtools → ROADrecon workflow, see
+[`roadtools.md`](roadtools.md).
