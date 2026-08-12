@@ -458,6 +458,9 @@ $provisionUrl = $innerJson.provisionUrl
 $fidoCanary = $requestData.canary
 $serverChallenge = $requestData.serverChallenge
 $postBackUrl = $requestData.postBackUrl
+if ($postBackUrl -and ([uri]$postBackUrl).GetLeftPart([UriPartial]::Authority) -ine ([uri]$RedirectUri).GetLeftPart([UriPartial]::Authority)) { throw "Refusing untrusted postBackUrl: $postBackUrl" }
+if ($provisionUrl -and ([uri]$provisionUrl).Scheme -ne 'https') { throw "Refusing untrusted provisionUrl: $provisionUrl" }
+if ($provisionUrl -and ([uri]$provisionUrl).Host -notin @('login.microsoft.com','login.microsoftonline.com')) { throw "Refusing untrusted provisionUrl: $provisionUrl" }
 $fidoUserId = $requestData.userId
 $correlationId = [guid]::NewGuid().ToString()
 $excludeCredentials = $requestData.ExcludeNextGenCredentialsJSON
@@ -780,6 +783,7 @@ if ($fidoResp.Content -match '<div\s+id="redirectUrl"\s+data-content="([^"]*)"')
 
 if ($newfidoRedirectUrl) {
     $navUrl = $newfidoRedirectUrl -replace '#.*$', ''
+    if (([uri]$navUrl).GetLeftPart([UriPartial]::Authority) -ine ([uri]$RedirectUri).GetLeftPart([UriPartial]::Authority)) { throw "Refusing untrusted redirectUrl: $navUrl" }
     Write-Host "    Loading security-info page (simulating browser redirect)..." -ForegroundColor Gray
     try {
         $navResp = Invoke-WebRequest -Uri $navUrl -Method GET -UseBasicParsing -WebSession $webSession

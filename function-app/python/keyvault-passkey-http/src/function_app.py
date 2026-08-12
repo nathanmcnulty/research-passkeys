@@ -155,11 +155,8 @@ def _resolve_user_agent(body: dict[str, object], req: func.HttpRequest) -> str:
 
 
 def _resolve_redirect_uri(body: dict[str, object], req: func.HttpRequest) -> str:
-    requested_redirect_uri = _get_request_value(body, req, "redirectUri", "redirecturi")
-    return normalize_redirect_uri(
-        requested_redirect_uri
-        or os.getenv("PASSKEY_ENTRA_PORTAL_ORIGIN", "https://mysignins.microsoft.com")
-    )
+    del body, req
+    return normalize_redirect_uri(os.getenv("PASSKEY_ENTRA_PORTAL_ORIGIN", "https://mysignins.microsoft.com"))
 
 
 def _resolve_okta_domain(body: dict[str, object], req: func.HttpRequest) -> str:
@@ -1072,11 +1069,7 @@ def _process_registration_queue_message(message_payload: dict[str, object]) -> d
     display_name = str(message_payload.get("displayName") or message_payload.get("passkeyDisplayName") or "").strip()
     key_vault_key_name = str(message_payload.get("keyVaultKeyName") or "").strip() or None
     user_agent = normalize_user_agent(message_payload.get("userAgent") or message_payload.get("useragent"))
-    redirect_uri = normalize_redirect_uri(
-        message_payload.get("redirectUri")
-        or message_payload.get("redirecturi")
-        or os.getenv("PASSKEY_ENTRA_PORTAL_ORIGIN", "https://mysignins.microsoft.com")
-    )
+    redirect_uri = normalize_redirect_uri(os.getenv("PASSKEY_ENTRA_PORTAL_ORIGIN", "https://mysignins.microsoft.com"))
 
     if not user_principal_name:
         raise PasskeyValidationError("Queue message is missing 'userPrincipalName'.")
@@ -1988,7 +1981,7 @@ def process_entra_passkey_registration_via_ests_auth_queue(registration_message:
             "queuedAtUtc": str(payload.get("queuedAtUtc") or ""),
             "processingStartedAtUtc": processing_started_at_utc,
             "userAgent": normalize_user_agent(payload.get("userAgent") or payload.get("useragent")),
-            "redirectUri": normalize_redirect_uri(payload.get("redirectUri") or payload.get("redirecturi")),
+            "redirectUri": normalize_redirect_uri(os.getenv("PASSKEY_ENTRA_PORTAL_ORIGIN", "https://mysignins.microsoft.com")),
         },
     )
     try:
@@ -2011,7 +2004,7 @@ def process_entra_passkey_registration_via_ests_auth_queue(registration_message:
                 "processingStartedAtUtc": processing_started_at_utc,
                 "completedAtUtc": _utc_timestamp(),
                 "userAgent": normalize_user_agent(payload.get("userAgent") or payload.get("useragent")),
-                "redirectUri": normalize_redirect_uri(payload.get("redirectUri") or payload.get("redirecturi")),
+                "redirectUri": normalize_redirect_uri(os.getenv("PASSKEY_ENTRA_PORTAL_ORIGIN", "https://mysignins.microsoft.com")),
                 "credential": credential,
                 "catalogRecord": result["catalogRecord"],
             },
@@ -2037,7 +2030,7 @@ def process_entra_passkey_registration_via_ests_auth_queue(registration_message:
                 "processingStartedAtUtc": processing_started_at_utc,
                 "failedAtUtc": _utc_timestamp(),
                 "userAgent": normalize_user_agent(payload.get("userAgent") or payload.get("useragent")),
-                "redirectUri": normalize_redirect_uri(payload.get("redirectUri") or payload.get("redirecturi")),
+                "redirectUri": normalize_redirect_uri(os.getenv("PASSKEY_ENTRA_PORTAL_ORIGIN", "https://mysignins.microsoft.com")),
                 "error": str(exc),
             },
         )

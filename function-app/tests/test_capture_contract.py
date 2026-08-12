@@ -80,10 +80,29 @@ class CaptureContractTests(unittest.TestCase):
         python_source = (PYTHON_ROOT / "src/function_app.py").read_text(encoding="utf-8")
 
         self.assertIn("Get-EstsAuthCookieFromSource -CookieSource $capturedBody", powershell_worker)
-        self.assertIn("$message.redirectUri ?? $message.redirecturi", powershell_worker)
-        self.assertIn("Get-RequestValue -Body $Body -Request $Request -Names @('redirectUri', 'redirecturi')", powershell_helper)
+        self.assertNotIn("$message.redirectUri ?? $message.redirecturi", powershell_worker)
+        self.assertNotIn("Get-RequestValue -Body $Body -Request $Request -Names @('redirectUri', 'redirecturi')", powershell_helper)
         self.assertIn("extract_ests_auth_cookie_value(captured_payload)", python_source)
-        self.assertIn('message_payload.get("redirectUri")', python_source)
+        self.assertNotIn('message_payload.get("redirectUri")', python_source)
+
+    def test_entra_portal_origin_is_server_controlled_and_upstream_urls_are_checked(self):
+        powershell_helper = (
+            POWERSHELL_ROOT / "src/shared/PasskeyFunctionHelpers.ps1"
+        ).read_text(encoding="utf-8")
+        python_source = (PYTHON_ROOT / "src/function_app.py").read_text(encoding="utf-8")
+        python_registration = (
+            ROOT / "python/libraries/passkey/src/passkey/entra_registration.py"
+        ).read_text(encoding="utf-8")
+
+        redirect_resolver = python_source.split("def _resolve_redirect_uri", 1)[1].split("\ndef ", 1)[0]
+        self.assertNotIn("_get_request_value", redirect_resolver)
+        self.assertIn("PASSKEY_ENTRA_PORTAL_ORIGIN", redirect_resolver)
+        powershell_resolver = powershell_helper.split("function Resolve-RequestRedirectUri", 1)[1].split("\nfunction ", 1)[0]
+        self.assertNotIn("Get-RequestValue", powershell_resolver)
+        self.assertIn("PASSKEY_ENTRA_PORTAL_ORIGIN", powershell_resolver)
+        self.assertIn("def _require_allowed_service_url", python_registration)
+        self.assertIn('field_name="postBackUrl"', python_registration)
+        self.assertIn('field_name="provisionUrl"', python_registration)
 
     def test_capture_user_agent_does_not_override_ests_replay_profile(self):
         powershell_helper = (

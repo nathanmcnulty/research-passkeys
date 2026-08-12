@@ -418,11 +418,8 @@ function Resolve-RequestRedirectUri {
         $Request
     )
 
-    $requestRedirectUri = Get-RequestValue -Body $Body -Request $Request -Names @('redirectUri', 'redirecturi')
-    if (-not [string]::IsNullOrWhiteSpace($requestRedirectUri)) {
-        return Normalize-PasskeyRedirectUri -RedirectUri $requestRedirectUri
-    }
-
+    $null = $Body
+    $null = $Request
     return Normalize-PasskeyRedirectUri -RedirectUri ([Environment]::GetEnvironmentVariable('PASSKEY_ENTRA_PORTAL_ORIGIN'))
 }
 

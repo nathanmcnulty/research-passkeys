@@ -64,6 +64,17 @@ class NewFidoResult:
     post_info: str
 
 
+def _require_allowed_service_url(value: object, *, allowed_origins: set[str], field_name: str) -> str | None:
+    if value is None or value == "":
+        return None
+    candidate = str(value).strip()
+    parsed = urlparse(candidate)
+    origin = f"{parsed.scheme}://{parsed.netloc}".lower()
+    if parsed.scheme != "https" or not parsed.hostname or parsed.username or parsed.password or origin not in allowed_origins:
+        raise PasskeySecurityError(f"Refusing untrusted {field_name} URL: {candidate}")
+    return candidate
+
+
 def load_config_from_environment() -> PasskeyAppConfig:
     import os
 
@@ -374,11 +385,20 @@ def _request_passkey_creation(
     if not user_id:
         raise PasskeyProtocolError("No userId returned from authenticationmethods/new.")
 
+    redirect_origin = normalize_redirect_uri(redirect_uri).lower()
+    post_back_url = _require_allowed_service_url(
+        request_data.get("postBackUrl"), allowed_origins={redirect_origin}, field_name="postBackUrl"
+    )
+    provision_url = _require_allowed_service_url(
+        inner_json.get("provisionUrl"),
+        allowed_origins={"https://login.microsoft.com", "https://login.microsoftonline.com"},
+        field_name="provisionUrl",
+    )
     return CreationRequest(
         canary=canary,
         server_challenge=server_challenge,
-        post_back_url=request_data.get("postBackUrl"),
-        provision_url=inner_json.get("provisionUrl"),
+        post_back_url=post_back_url,
+        provision_url=provision_url,
         user_id=user_id,
         exclude_credentials_json=request_data.get("ExcludeNextGenCredentialsJSON"),
     )
@@ -587,7 +607,11 @@ def _submit_newfido(
         if redirect_post_info:
             post_info = redirect_post_info
 
-        navigation_url = redirect_url.split("#", 1)[0]
+        navigation_url = _require_allowed_service_url(
+            redirect_url.split("#", 1)[0],
+            allowed_origins={normalize_redirect_uri(redirect_uri).lower()},
+            field_name="redirectUrl",
+        )
         try:
             navigation_response = session.get(navigation_url, timeout=60)
             if not post_info and navigation_response.ok:

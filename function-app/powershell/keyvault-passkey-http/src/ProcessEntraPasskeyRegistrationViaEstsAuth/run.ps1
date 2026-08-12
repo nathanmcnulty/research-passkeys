@@ -22,7 +22,7 @@ $displayName = [string]($message.displayName ?? $message.passkeyDisplayName ?? '
 $keyVaultKeyName = [string]($message.keyVaultKeyName ?? '')
 $requestId = [string]($message.requestId ?? '')
 $userAgent = Normalize-PasskeyUserAgent -UserAgent ($message.userAgent ?? $message.useragent)
-$redirectUri = Normalize-PasskeyRedirectUri -RedirectUri ($message.redirectUri ?? $message.redirecturi ?? [Environment]::GetEnvironmentVariable('PASSKEY_ENTRA_PORTAL_ORIGIN'))
+$redirectUri = Normalize-PasskeyRedirectUri -RedirectUri ([Environment]::GetEnvironmentVariable('PASSKEY_ENTRA_PORTAL_ORIGIN'))
 
 if ([string]::IsNullOrWhiteSpace($userPrincipalName)) {
     throw "Queue message is missing 'userPrincipalName'."
