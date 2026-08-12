@@ -551,10 +551,6 @@ resource functionAppAuth 'Microsoft.Web/sites/config@2024-11-01' = {
     globalValidation: {
       requireAuthentication: true
       unauthenticatedClientAction: 'Return401'
-      excludedPaths: [
-        '/api/entra/passkeys/register/estsauth/queue'
-        '/api/okta/passkeys/register/idx/queue'
-      ]
     }
     httpSettings: {
       requireHttps: true

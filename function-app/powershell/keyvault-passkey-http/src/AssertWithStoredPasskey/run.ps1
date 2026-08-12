@@ -23,6 +23,7 @@ try {
         Push-OutputBinding -Name Response -Value (New-JsonHttpResponse -StatusCode ([HttpStatusCode]::NotFound) -Body @{success=$false;error='Passkey was not found.'})
         return
     }
+    Assert-PasskeyRecordOwner -Record $record -Caller (Get-PasskeyCallerIdentity -Request $Request)
     if ([string]$record.status -ne 'active') { throw [System.ArgumentException]::new('Passkey is not active.') }
     if ([string]$record.rpId -cne $rpId) { throw [System.UnauthorizedAccessException]::new('The requested RP ID does not match this passkey.') }
     $expectedKeyPrefix = "https://$($configuration.KeyVaultName).vault.azure.net/keys/"

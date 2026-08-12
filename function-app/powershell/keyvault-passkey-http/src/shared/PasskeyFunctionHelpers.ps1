@@ -1,5 +1,55 @@
 using namespace System.Net
 
+function Get-PasskeyRequestHeader {
+    param([Parameter(Mandatory)]$Request, [Parameter(Mandatory)][string]$Name)
+    if ($null -eq $Request.Headers) { return $null }
+    if ($Request.Headers -is [System.Collections.IDictionary]) {
+        foreach ($key in $Request.Headers.Keys) {
+            if ([string]$key -ieq $Name) { return [string]$Request.Headers[$key] }
+        }
+    } else {
+        foreach ($property in $Request.Headers.PSObject.Properties) {
+            if ($property.Name -ieq $Name) { return [string]$property.Value }
+        }
+    }
+    return $null
+}
+
+function Get-PasskeyCallerIdentity {
+    param([Parameter(Mandatory)]$Request)
+    $encoded = Get-PasskeyRequestHeader -Request $Request -Name 'X-MS-CLIENT-PRINCIPAL'
+    if ([string]::IsNullOrWhiteSpace($encoded)) {
+        throw [System.UnauthorizedAccessException]::new('An authenticated Microsoft Entra caller is required.')
+    }
+    try {
+        $principal = [Text.Encoding]::UTF8.GetString([Convert]::FromBase64String($encoded)) | ConvertFrom-Json -AsHashtable -Depth 20
+    } catch {
+        throw [System.UnauthorizedAccessException]::new('The authenticated caller identity is malformed.')
+    }
+    $claims = @{}
+    foreach ($claim in @($principal.claims)) {
+        if ($claim -is [System.Collections.IDictionary] -and -not [string]::IsNullOrWhiteSpace([string]$claim.typ)) {
+            $claims[[string]$claim.typ.ToLowerInvariant()] = [string]$claim.val
+        }
+    }
+    $objectId = [string]($claims['http://schemas.microsoft.com/identity/claims/objectidentifier'] ?? $claims['oid'] ?? (Get-PasskeyRequestHeader -Request $Request -Name 'X-MS-CLIENT-PRINCIPAL-ID'))
+    $tenantId = [string]($claims['http://schemas.microsoft.com/identity/claims/tenantid'] ?? $claims['tid'])
+    if ([string]::IsNullOrWhiteSpace($objectId) -or [string]::IsNullOrWhiteSpace($tenantId)) {
+        throw [System.UnauthorizedAccessException]::new('The authenticated caller is missing immutable tenant or object identifiers.')
+    }
+    return @{ tenantId = $tenantId.ToLowerInvariant(); objectId = $objectId.ToLowerInvariant() }
+}
+
+function Assert-PasskeyRecordOwner {
+    param([Parameter(Mandatory)][hashtable]$Record, [Parameter(Mandatory)][hashtable]$Caller)
+    if ($Record.owner -isnot [System.Collections.IDictionary]) {
+        throw [System.UnauthorizedAccessException]::new('This legacy passkey has no owner and is denied until it is migrated.')
+    }
+    if ([string]$Record.owner.tenantId -ine [string]$Caller.tenantId -or [string]$Record.owner.objectId -ine [string]$Caller.objectId) {
+        throw [System.UnauthorizedAccessException]::new('The requested passkey is not owned by the authenticated caller.')
+    }
+}
+
 function Get-RequestBodyObject {
     param(
         [Parameter(Mandatory)]
@@ -932,12 +982,17 @@ function Save-PasskeyCatalogRecord {
         [Parameter(Mandatory)]
         [hashtable]$Configuration,
 
+        [Parameter(Mandatory)]
+        [hashtable]$Owner,
+
         [Parameter()]
         [hashtable]$Extensions = @{}
     )
 
     Ensure-PasskeyCatalogTable -Configuration $Configuration
     $record = New-PasskeyCatalogRecord -Provider $Provider -Credential $Credential
+    $record.schemaVersion = '2'
+    $record.owner = $Owner
     foreach ($entry in $Extensions.GetEnumerator()) {
         $record[$entry.Key] = $entry.Value
     }
@@ -1106,6 +1161,7 @@ function Invoke-ProviderPasskeyLookup {
     )
 
     try {
+        $caller = Get-PasskeyCallerIdentity -Request $Request
         $recordId = $null
         if ($Request.Params -is [System.Collections.IDictionary] -and $Request.Params.ContainsKey('recordId')) {
             $recordId = [string]$Request.Params['recordId']
@@ -1127,6 +1183,7 @@ function Invoke-ProviderPasskeyLookup {
                 }))
                 return
             }
+            Assert-PasskeyRecordOwner -Record $record -Caller $caller
             Push-OutputBinding -Name Response -Value (New-JsonHttpResponse -StatusCode ([System.Net.HttpStatusCode]::OK) -Body ([ordered]@{
                 success = $true
                 provider = $Provider
@@ -1148,6 +1205,7 @@ function Invoke-ProviderPasskeyLookup {
         $records = @(Get-PasskeyCatalogRecords -Configuration $configuration -Provider $Provider `
             -RpId $rpId -UserName $userName -Status ([string]($status ?? '')) `
             -CredentialId $credentialId -DisplayName $displayName -KeyVaultKeyName $keyVaultKeyName)
+        $records = @($records | Where-Object { $_.owner -is [System.Collections.IDictionary] -and [string]$_.owner.tenantId -ieq [string]$caller.tenantId -and [string]$_.owner.objectId -ieq [string]$caller.objectId })
         Push-OutputBinding -Name Response -Value (New-JsonHttpResponse -StatusCode ([System.Net.HttpStatusCode]::OK) -Body ([ordered]@{
             success = $true
             provider = $Provider
@@ -1267,6 +1325,14 @@ function Set-RegistrationStatus {
         $Configuration = Get-PasskeyFunctionConfiguration
     }
     Ensure-RegistrationStatusContainer -Configuration $Configuration
+
+    if ($Status.owner -isnot [System.Collections.IDictionary]) {
+        $existing = Get-RegistrationStatus -RequestId $RequestId -Configuration $Configuration
+        if ($existing -and $existing.owner -is [System.Collections.IDictionary]) { $Status.owner = $existing.owner }
+    }
+    if ($Status.owner -isnot [System.Collections.IDictionary]) {
+        throw [System.UnauthorizedAccessException]::new('Registration status is missing an authenticated owner.')
+    }
 
     $status.updatedAtUtc = (Get-Date).ToUniversalTime().ToString('o')
     if (-not $Status.ContainsKey('requestId') -or [string]::IsNullOrWhiteSpace([string]$Status.requestId)) {

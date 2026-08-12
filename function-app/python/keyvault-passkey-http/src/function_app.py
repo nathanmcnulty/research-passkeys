@@ -56,6 +56,63 @@ _BUILT_IN_TOKEN_CLIENT_ID = "04b07795-8ddb-461a-bbee-02f9e1bf7b46"
 _ARM_SCOPE = "https://management.azure.com/user_impersonation"
 
 
+def _get_caller_identity(req: func.HttpRequest) -> dict[str, str]:
+    encoded_principal = str(req.headers.get("X-MS-CLIENT-PRINCIPAL") or "").strip()
+    if not encoded_principal:
+        raise PasskeySecurityError("An authenticated Microsoft Entra caller is required.")
+    try:
+        padding = "=" * (-len(encoded_principal) % 4)
+        principal = json.loads(base64.b64decode(encoded_principal + padding).decode("utf-8"))
+    except (ValueError, TypeError, UnicodeDecodeError, json.JSONDecodeError, binascii.Error) as exc:
+        raise PasskeySecurityError("The authenticated caller identity is malformed.") from exc
+
+    claims = principal.get("claims") if isinstance(principal, dict) else None
+    claim_values: dict[str, str] = {}
+    if isinstance(claims, list):
+        for claim in claims:
+            if not isinstance(claim, dict):
+                continue
+            claim_type = str(claim.get("typ") or "").lower()
+            claim_value = str(claim.get("val") or "").strip()
+            if claim_type and claim_value:
+                claim_values[claim_type] = claim_value
+
+    object_id = (
+        claim_values.get("http://schemas.microsoft.com/identity/claims/objectidentifier")
+        or claim_values.get("oid")
+        or str(req.headers.get("X-MS-CLIENT-PRINCIPAL-ID") or "").strip()
+    )
+    tenant_id = (
+        claim_values.get("http://schemas.microsoft.com/identity/claims/tenantid")
+        or claim_values.get("tid")
+    )
+    if not object_id or not tenant_id:
+        raise PasskeySecurityError("The authenticated caller is missing immutable tenant or object identifiers.")
+    return {"tenantId": tenant_id.lower(), "objectId": object_id.lower()}
+
+
+def _require_record_owner(record: dict[str, object], caller: dict[str, str]) -> None:
+    owner = record.get("owner")
+    if not isinstance(owner, dict):
+        raise PasskeySecurityError("This legacy passkey has no owner and is denied until it is migrated.")
+    if (
+        str(owner.get("tenantId") or "").lower() != caller["tenantId"]
+        or str(owner.get("objectId") or "").lower() != caller["objectId"]
+    ):
+        raise PasskeySecurityError("The requested passkey is not owned by the authenticated caller.")
+
+
+def _get_owned_catalog_record(req: func.HttpRequest, record_id: str) -> dict[str, object] | None:
+    record = _get_catalog_record(record_id)
+    if record is not None:
+        _require_record_owner(record, _get_caller_identity(req))
+    return record
+
+
+def _owner_extensions(req: func.HttpRequest) -> dict[str, object]:
+    return {"schemaVersion": "2", "owner": _get_caller_identity(req)}
+
+
 def _get_request_body(req: func.HttpRequest) -> dict[str, object]:
     try:
         body = req.get_json()
@@ -243,6 +300,13 @@ def _build_status_blob_url(request_id: str) -> str:
 def _write_registration_status(request_id: str, payload: dict[str, object]) -> None:
     _ensure_status_container_exists()
     payload = dict(payload)
+    owner = payload.get("owner")
+    if not isinstance(owner, dict):
+        existing = _read_registration_status(request_id)
+        owner = existing.get("owner") if existing else None
+    if not isinstance(owner, dict):
+        raise PasskeySecurityError("Registration status is missing an authenticated owner.")
+    payload["owner"] = owner
     payload.setdefault("requestId", request_id)
     payload["updatedAtUtc"] = _utc_timestamp()
     payload.setdefault("loginPropagation", _build_login_propagation_hint())
@@ -982,6 +1046,7 @@ def _build_registration_queue_message(
     key_vault_key_name: str | None,
     user_agent: str,
     redirect_uri: str,
+    owner: dict[str, str],
 ) -> dict[str, object]:
     return {
         "requestId": str(uuid.uuid4()),
@@ -993,6 +1058,7 @@ def _build_registration_queue_message(
         "estsAuth": ests_auth_cookie,
         "userAgent": normalize_user_agent(user_agent),
         "redirectUri": normalize_redirect_uri(redirect_uri),
+        "owner": owner,
     }
 
 
@@ -1027,7 +1093,10 @@ def _process_registration_queue_message(message_payload: dict[str, object]) -> d
         user_agent=user_agent,
         redirect_uri=redirect_uri,
     )
-    extensions = _persist_capture_context("entra", captured_payload, credential, user_agent)
+    owner = message_payload.get("owner")
+    if not isinstance(owner, dict):
+        raise PasskeySecurityError("Queue message is missing an authenticated owner.")
+    extensions = {**_persist_capture_context("entra", captured_payload, credential, user_agent), "schemaVersion": "2", "owner": owner}
     catalog_record = _save_catalog_record("entra", credential, extensions)
     return {
         "requestId": str(message_payload.get("requestId") or ""),
@@ -1058,6 +1127,7 @@ def _build_okta_queue_message(*, body: dict[str, object], req: func.HttpRequest)
         "authenticatorId": authenticator_id,
         "keyVaultKeyName": _get_request_value(body, req, "keyVaultKeyName"),
         "transport": transport,
+        "owner": _get_caller_identity(req),
     }
 
 
@@ -1076,7 +1146,10 @@ def _process_okta_queue_message(message_payload: dict[str, object]) -> dict[str,
         key_vault_key_name=str(message_payload.get("keyVaultKeyName") or "") or None,
         transport=str(message_payload.get("transport") or "usb"),
     )
-    extensions = _persist_capture_context("okta", captured_payload, credential, normalize_user_agent(captured_payload.get("user_agent") or captured_payload.get("userAgent")))
+    owner = message_payload.get("owner")
+    if not isinstance(owner, dict):
+        raise PasskeySecurityError("Queue message is missing an authenticated owner.")
+    extensions = {**_persist_capture_context("okta", captured_payload, credential, normalize_user_agent(captured_payload.get("user_agent") or captured_payload.get("userAgent"))), "schemaVersion": "2", "owner": owner}
     catalog_record = _save_catalog_record("okta", credential, extensions)
     return {
         "requestId": str(message_payload.get("requestId") or ""),
@@ -1118,6 +1191,7 @@ def _apply_configured_key_vault(credential: dict[str, object], configured_vault_
 @app.route(route="passkeys", methods=["GET"], auth_level=func.AuthLevel.ANONYMOUS)
 def list_passkey_catalog_records_http(req: func.HttpRequest) -> func.HttpResponse:
     try:
+        caller = _get_caller_identity(req)
         provider = _get_request_value({}, req, "provider")
         if provider and provider not in {"entra", "okta"}:
             raise PasskeyValidationError("provider must be 'entra' or 'okta'.")
@@ -1133,7 +1207,10 @@ def list_passkey_catalog_records_http(req: func.HttpRequest) -> func.HttpRespons
             display_name=_get_request_value({}, req, "displayName"),
             key_vault_key_name=_get_request_value({}, req, "keyVaultKeyName", "keyName"),
         )
+        records = [record for record in records if isinstance(record.get("owner"), dict) and record["owner"].get("tenantId", "").lower() == caller["tenantId"] and record["owner"].get("objectId", "").lower() == caller["objectId"]]
         return _json_response(200, {"success": True, "count": len(records), "records": records})
+    except PasskeySecurityError as exc:
+        return _json_response(403, {"success": False, "error": str(exc)})
     except PasskeyValidationError as exc:
         return _json_response(400, {"success": False, "error": str(exc)})
     except Exception as exc:  # noqa: BLE001
@@ -1147,10 +1224,12 @@ def get_passkey_catalog_record_http(req: func.HttpRequest) -> func.HttpResponse:
         record_id = req.route_params.get("recordId") or req.params.get("recordId")
         if not record_id:
             raise PasskeyValidationError("Missing required route or query value 'recordId'.")
-        record = _get_catalog_record(record_id)
+        record = _get_owned_catalog_record(req, record_id)
         if record is None:
             return _json_response(404, {"success": False, "recordId": record_id, "error": "Passkey was not found."})
         return _json_response(200, {"success": True, "record": record})
+    except PasskeySecurityError as exc:
+        return _json_response(403, {"success": False, "error": str(exc)})
     except PasskeyValidationError as exc:
         return _json_response(400, {"success": False, "error": str(exc)})
     except Exception as exc:  # noqa: BLE001
@@ -1164,7 +1243,7 @@ def get_passkey_browser_context_http(req: func.HttpRequest) -> func.HttpResponse
         record_id = str(req.route_params.get("recordId") or "").strip()
         if not record_id:
             raise PasskeyValidationError("Missing required route value 'recordId'.")
-        record = _get_catalog_record(record_id)
+        record = _get_owned_catalog_record(req, record_id)
         if record is None:
             return _no_store_response(404, {"success": False, "error": "Passkey was not found."})
         if record.get("status") != "active":
@@ -1181,6 +1260,8 @@ def get_passkey_browser_context_http(req: func.HttpRequest) -> func.HttpResponse
                 "userAgent": user_agent,
             },
         })
+    except PasskeySecurityError as exc:
+        return _no_store_response(403, {"success": False, "error": str(exc)})
     except PasskeyValidationError as exc:
         return _no_store_response(400, {"success": False, "error": str(exc)})
     except Exception as exc:  # noqa: BLE001
@@ -1198,6 +1279,7 @@ def delete_passkey_catalog_record_http(req: func.HttpRequest) -> func.HttpRespon
         if entity is None:
             return _no_store_response(404, {"success": False, "error": "Passkey was not found."})
         record, _etag = entity
+        _require_record_owner(record, _get_caller_identity(req))
         config = load_config_from_environment()
         secret_name = str(record.get("loginContextSecretName") or "")
         deleted_login_context = bool(secret_name and _delete_key_vault_secret(config, secret_name))
@@ -1214,6 +1296,8 @@ def delete_passkey_catalog_record_http(req: func.HttpRequest) -> func.HttpRespon
             "loginContextDeleted": deleted_login_context,
             "keyDeleted": deleted_key,
         })
+    except PasskeySecurityError as exc:
+        return _no_store_response(403, {"success": False, "error": str(exc)})
     except PasskeyValidationError as exc:
         return _no_store_response(400, {"success": False, "error": str(exc)})
     except Exception as exc:  # noqa: BLE001
@@ -1246,6 +1330,7 @@ def assert_with_stored_passkey_http(req: func.HttpRequest) -> func.HttpResponse:
         if entity is None:
             return _json_response(404, {"success": False, "error": "Passkey was not found."})
         record, etag = entity
+        _require_record_owner(record, _get_caller_identity(req))
         if record.get("status") != "active":
             raise PasskeyValidationError("Passkey is not active.")
         if str(record.get("rpId") or "") != rp_id:
@@ -1298,9 +1383,10 @@ def assert_with_stored_passkey_http(req: func.HttpRequest) -> func.HttpResponse:
 
 def _get_provider_passkeys_response(req: func.HttpRequest, provider: str) -> func.HttpResponse:
     try:
+        caller = _get_caller_identity(req)
         record_id = req.route_params.get("recordId") or req.params.get("recordId")
         if record_id:
-            record = _get_catalog_record(record_id)
+            record = _get_owned_catalog_record(req, record_id)
             if record is None or record.get("provider") != provider:
                 return _json_response(
                     404,
@@ -1320,10 +1406,13 @@ def _get_provider_passkeys_response(req: func.HttpRequest, provider: str) -> fun
             display_name=_get_request_value({}, req, "displayName"),
             key_vault_key_name=_get_request_value({}, req, "keyVaultKeyName", "keyName"),
         )
+        records = [record for record in records if isinstance(record.get("owner"), dict) and record["owner"].get("tenantId", "").lower() == caller["tenantId"] and record["owner"].get("objectId", "").lower() == caller["objectId"]]
         return _json_response(
             200,
             {"success": True, "provider": provider, "count": len(records), "records": records},
         )
+    except PasskeySecurityError as exc:
+        return _json_response(403, {"success": False, "provider": provider, "error": str(exc)})
     except PasskeyValidationError as exc:
         return _json_response(400, {"success": False, "provider": provider, "error": str(exc)})
     except Exception as exc:  # noqa: BLE001
@@ -1347,10 +1436,12 @@ def get_okta_passkeys_http(req: func.HttpRequest) -> func.HttpResponse:
 def list_passkey_capture_contexts_http(req: func.HttpRequest) -> func.HttpResponse:
     try:
         record_id = str(req.route_params.get("recordId") or "")
-        if not _get_catalog_record(record_id):
+        if not _get_owned_catalog_record(req, record_id):
             return _json_response(404, {"success": False, "error": "Passkey was not found."})
         contexts = _list_capture_contexts(record_id)
         return _json_response(200, {"success": True, "recordId": record_id, "count": len(contexts), "contexts": contexts})
+    except PasskeySecurityError as exc:
+        return _json_response(403, {"success": False, "error": str(exc)})
     except PasskeyValidationError as exc:
         return _json_response(400, {"success": False, "error": str(exc)})
     except Exception as exc:  # noqa: BLE001
@@ -1363,6 +1454,8 @@ def get_passkey_capture_context_http(req: func.HttpRequest) -> func.HttpResponse
     try:
         record_id = str(req.route_params.get("recordId") or "")
         capture_id = str(req.route_params.get("captureId") or "")
+        if not _get_owned_catalog_record(req, record_id):
+            return _json_response(404, {"success": False, "error": "Passkey was not found."})
         context = _get_capture_context(record_id, capture_id)
         if not context:
             return _json_response(404, {"success": False, "error": "Capture context was not found."})
@@ -1594,6 +1687,8 @@ def get_passkey_broker_configuration_http(req: func.HttpRequest) -> func.HttpRes
                 },
             ],
         })
+    except PasskeySecurityError as exc:
+        return _json_response(403, {"success": False, "error": str(exc)})
     except PasskeyValidationError as exc:
         return _no_store_response(400, {"success": False, "error": str(exc)})
     except Exception:  # noqa: BLE001
@@ -1607,7 +1702,7 @@ def get_entra_passkey_access_token_http(req: func.HttpRequest) -> func.HttpRespo
     try:
         broker = _get_broker_configuration()
         token_request = _resolve_broker_token_request(_get_request_body(req), broker)
-        record = _get_catalog_record(str(req.route_params.get("recordId") or ""))
+        record = _get_owned_catalog_record(req, str(req.route_params.get("recordId") or ""))
         if not record or record.get("provider") != "entra":
             return _no_store_response(404, {"success": False, "error": "Entra passkey was not found."})
 
@@ -1641,6 +1736,8 @@ def get_entra_passkey_access_token_http(req: func.HttpRequest) -> func.HttpRespo
             user_principal_name=result.user_principal_name,
         )
         return _no_store_response(200, {"success": True, **token})
+    except PasskeySecurityError as exc:
+        return _no_store_response(403, {"success": False, "error": str(exc)})
     except PasskeyValidationError as exc:
         return _no_store_response(400, {"success": False, "error": str(exc)})
     except Exception:  # noqa: BLE001
@@ -1654,7 +1751,7 @@ def export_passkey_login_context_http(req: func.HttpRequest) -> func.HttpRespons
     if not _development_export_enabled():
         return _no_store_response(403, {"success": False, "error": "Development secret export is disabled."})
     try:
-        record = _get_catalog_record(str(req.route_params.get("recordId") or ""))
+        record = _get_owned_catalog_record(req, str(req.route_params.get("recordId") or ""))
         if not record:
             return _no_store_response(404, {"success": False, "error": "Passkey was not found."})
         context = _load_login_context(record)
@@ -1662,6 +1759,10 @@ def export_passkey_login_context_http(req: func.HttpRequest) -> func.HttpRespons
             return _no_store_response(404, {"success": False, "error": "Login context was not found."})
         logging.warning("Development login-context export for recordId=%s", record.get("recordId"))
         return _no_store_response(200, {"success": True, "recordId": record.get("recordId"), "loginContext": context})
+    except PasskeySecurityError as exc:
+        return _no_store_response(403, {"success": False, "error": str(exc)})
+    except PasskeySecurityError as exc:
+        return _json_response(403, {"success": False, "error": str(exc)})
     except Exception as exc:  # noqa: BLE001
         return _no_store_response(500, {"success": False, "error": str(exc)})
 
@@ -1670,7 +1771,7 @@ def export_passkey_login_context_http(req: func.HttpRequest) -> func.HttpRespons
 @app.route(route="passkeys/{recordId}/login-context", methods=["DELETE"], auth_level=func.AuthLevel.FUNCTION)
 def delete_passkey_login_context_http(req: func.HttpRequest) -> func.HttpResponse:
     try:
-        record = _get_catalog_record(str(req.route_params.get("recordId") or ""))
+        record = _get_owned_catalog_record(req, str(req.route_params.get("recordId") or ""))
         if not record:
             return _json_response(404, {"success": False, "error": "Passkey was not found."})
         secret_name = str(record.get("loginContextSecretName") or "")
@@ -1678,12 +1779,14 @@ def delete_passkey_login_context_http(req: func.HttpRequest) -> func.HttpRespons
         credential = dict(record)
         credential["relyingParty"] = record.get("rpId")
         credential[str(record.get("provider"))] = record.get("providerMetadata") or {}
-        extensions = {"loginContextSecretName": None, "hasStoredPassword": False, "hasStoredUserAgent": False}
+        extensions = {"schemaVersion": "2", "owner": record["owner"], "loginContextSecretName": None, "hasStoredPassword": False, "hasStoredUserAgent": False}
         if record.get("latestCaptureId"):
             extensions["latestCaptureId"] = record["latestCaptureId"]
         _save_catalog_record(str(record.get("provider")), credential, extensions)
         logging.warning("Login context deletion recordId=%s deleted=%s", record.get("recordId"), deleted)
         return _json_response(200, {"success": True, "recordId": record.get("recordId"), "deleted": deleted})
+    except PasskeySecurityError as exc:
+        return _json_response(403, {"success": False, "error": str(exc)})
     except Exception as exc:  # noqa: BLE001
         return _json_response(500, {"success": False, "error": str(exc)})
 
@@ -1696,12 +1799,16 @@ def export_passkey_capture_context_http(req: func.HttpRequest) -> func.HttpRespo
     try:
         record_id = str(req.route_params.get("recordId") or "")
         capture_id = str(req.route_params.get("captureId") or "")
+        if not _get_owned_catalog_record(req, record_id):
+            return _no_store_response(404, {"success": False, "error": "Passkey was not found."})
         context = _get_capture_context(record_id, capture_id)
         if not context:
             return _no_store_response(404, {"success": False, "error": "Capture context was not found."})
         payload = _decrypt_capture(context)
         logging.warning("Development capture export for recordId=%s captureId=%s", record_id, capture_id)
         return _no_store_response(200, {"success": True, "recordId": record_id, "captureId": capture_id, "capture": payload})
+    except PasskeySecurityError as exc:
+        return _no_store_response(403, {"success": False, "error": str(exc)})
     except TimeoutError:
         return _no_store_response(410, {"success": False, "error": "Capture context has expired."})
     except Exception as exc:  # noqa: BLE001
@@ -1712,7 +1819,7 @@ def export_passkey_capture_context_http(req: func.HttpRequest) -> func.HttpRespo
 @app.route(route="entra/passkeys/{recordId}/login", methods=["POST"], auth_level=func.AuthLevel.FUNCTION)
 def login_with_stored_entra_passkey_http(req: func.HttpRequest) -> func.HttpResponse:
     try:
-        record = _get_catalog_record(str(req.route_params.get("recordId") or ""))
+        record = _get_owned_catalog_record(req, str(req.route_params.get("recordId") or ""))
         if not record or record.get("provider") != "entra":
             return _json_response(404, {"success": False, "error": "Entra passkey was not found."})
         login_context = _load_login_context(record)
@@ -1727,6 +1834,8 @@ def login_with_stored_entra_passkey_http(req: func.HttpRequest) -> func.HttpResp
             **({"auth_url": os.getenv("PASSKEY_ENTRA_AUTH_URL", "").strip()} if os.getenv("PASSKEY_ENTRA_AUTH_URL", "").strip() else {}),
         )
         return _no_store_response(200 if result.success else 401, {"success": result.success, "provider": "entra", "recordId": record.get("recordId"), "userPrincipalName": result.user_principal_name, "estsAuth": result.cookie_value})
+    except PasskeySecurityError as exc:
+        return _no_store_response(403, {"success": False, "error": str(exc)})
     except PasskeyValidationError as exc:
         return _no_store_response(400, {"success": False, "error": str(exc)})
     except Exception as exc:  # noqa: BLE001
@@ -1737,7 +1846,7 @@ def login_with_stored_entra_passkey_http(req: func.HttpRequest) -> func.HttpResp
 @app.route(route="okta/passkeys/{recordId}/login", methods=["POST"], auth_level=func.AuthLevel.FUNCTION)
 def login_with_stored_okta_passkey_http(req: func.HttpRequest) -> func.HttpResponse:
     try:
-        record = _get_catalog_record(str(req.route_params.get("recordId") or ""))
+        record = _get_owned_catalog_record(req, str(req.route_params.get("recordId") or ""))
         if not record or record.get("provider") != "okta":
             return _json_response(404, {"success": False, "error": "Okta passkey was not found."})
         login_context = _load_login_context(record)
@@ -1753,6 +1862,8 @@ def login_with_stored_okta_passkey_http(req: func.HttpRequest) -> func.HttpRespo
             user_agent=normalize_user_agent(str(login_context.get("userAgent") or "")),
         )
         return _json_response(200, {"provider": "okta", "recordId": record.get("recordId"), **result})
+    except PasskeySecurityError as exc:
+        return _json_response(403, {"success": False, "error": str(exc)})
     except PasskeyValidationError as exc:
         return _json_response(400, {"success": False, "error": str(exc)})
     except Exception as exc:  # noqa: BLE001
@@ -1781,7 +1892,7 @@ def register_entra_passkey_via_tap_http(req: func.HttpRequest) -> func.HttpRespo
             user_agent=user_agent,
             redirect_uri=redirect_uri,
         )
-        capture_extensions = _persist_capture_context("entra", body, credential, user_agent)
+        capture_extensions = {**_persist_capture_context("entra", body, credential, user_agent), **_owner_extensions(req)}
         catalog_record = _save_catalog_record("entra", credential, capture_extensions)
         return _json_response(
             200,
@@ -1799,7 +1910,7 @@ def register_entra_passkey_via_tap_http(req: func.HttpRequest) -> func.HttpRespo
         return _json_response(400, {"success": False, "error": str(exc)})
     except PasskeySecurityError as exc:
         logger.exception("RegisterEntraPasskeyViaTap security failure")
-        return _json_response(500, {"success": False, "error": str(exc)})
+        return _json_response(403, {"success": False, "error": str(exc)})
     except Exception as exc:  # noqa: BLE001
         logger.exception("RegisterEntraPasskeyViaTap failed")
         return _json_response(500, {"success": False, "error": str(exc)})
@@ -1827,7 +1938,7 @@ def register_entra_passkey_via_ests_auth_http(req: func.HttpRequest) -> func.Htt
             user_agent=user_agent,
             redirect_uri=redirect_uri,
         )
-        capture_extensions = _persist_capture_context("entra", body, credential, user_agent)
+        capture_extensions = {**_persist_capture_context("entra", body, credential, user_agent), **_owner_extensions(req)}
         catalog_record = _save_catalog_record("entra", credential, capture_extensions)
         return _no_store_response(
             200,
@@ -1845,7 +1956,7 @@ def register_entra_passkey_via_ests_auth_http(req: func.HttpRequest) -> func.Htt
         return _no_store_response(400, {"success": False, "error": str(exc)})
     except PasskeySecurityError as exc:
         logger.exception("RegisterEntraPasskeyViaEstsAuth security failure")
-        return _no_store_response(500, {"success": False, "error": str(exc)})
+        return _no_store_response(403, {"success": False, "error": str(exc)})
     except Exception as exc:  # noqa: BLE001
         logger.exception("RegisterEntraPasskeyViaEstsAuth failed")
         return _no_store_response(500, {"success": False, "error": str(exc)})
@@ -1881,12 +1992,13 @@ def queue_entra_passkey_registration_via_ests_auth_http(
             key_vault_key_name=key_vault_key_name,
             user_agent=user_agent,
             redirect_uri=redirect_uri,
+            owner=_get_caller_identity(req),
         )
         queue_message["captureContext"] = _stage_queued_capture("entra", body, str(queue_message["requestId"]))
         queue_message.pop("estsAuth", None)
         _write_registration_status(
             str(queue_message["requestId"]),
-            {
+            {"owner": _get_caller_identity(req),
                 "requestId": queue_message["requestId"],
                 "status": "queued",
                 "authMethod": "estsauth",
@@ -2018,8 +2130,11 @@ def get_entra_passkey_registration_status_http(req: func.HttpRequest) -> func.Ht
                 },
             )
 
+        _require_record_owner(status, _get_caller_identity(req))
         status["success"] = True
         return _json_response(200, status)
+    except PasskeySecurityError as exc:
+        return _json_response(403, {"success": False, "error": str(exc)})
     except PasskeyValidationError as exc:
         return _json_response(400, {"success": False, "error": str(exc)})
     except Exception as exc:  # noqa: BLE001
@@ -2112,7 +2227,7 @@ def register_okta_passkey_via_idx_session_http(req: func.HttpRequest) -> func.Ht
             transport=_get_request_value(body, req, "transport") or "usb",
         )
         user_agent = _resolve_user_agent(body, req)
-        capture_extensions = _persist_capture_context("okta", body, credential, user_agent)
+        capture_extensions = {**_persist_capture_context("okta", body, credential, user_agent), **_owner_extensions(req)}
         catalog_record = _save_catalog_record("okta", credential, capture_extensions)
         return _json_response(
             200,
@@ -2147,7 +2262,7 @@ def queue_okta_passkey_registration_via_idx_session_http(
         queue_message.pop("stateHandle", None)
         _write_registration_status(
             str(queue_message["requestId"]),
-            {
+            {"owner": _get_caller_identity(req),
                 "requestId": queue_message["requestId"],
                 "provider": "okta",
                 "authMethod": "idx",
@@ -2238,9 +2353,12 @@ def get_okta_passkey_registration_status_http(req: func.HttpRequest) -> func.Htt
         status = _read_registration_status(request_id)
         if status is None:
             return _json_response(404, {"success": False, "provider": "okta", "requestId": request_id, "error": "Registration request status was not found."})
+        _require_record_owner(status, _get_caller_identity(req))
         status["success"] = True
         status["provider"] = "okta"
         return _json_response(200, status)
+    except PasskeySecurityError as exc:
+        return _json_response(403, {"success": False, "provider": "okta", "error": str(exc)})
     except PasskeyValidationError as exc:
         return _json_response(400, {"success": False, "provider": "okta", "error": str(exc)})
     except Exception as exc:  # noqa: BLE001

@@ -5,6 +5,7 @@ param($Request, $TriggerMetadata)
 . (Join-Path $PSScriptRoot '..\shared\PasskeyFunctionHelpers.ps1')
 
 try {
+    $owner = Get-PasskeyCallerIdentity -Request $Request
     $body = Get-RequestBodyObject -Request $Request
     $configuration = Get-OktaFunctionConfiguration
     $cookieHeader = Get-RequestValue -Body $body -Request $Request -Names @('cookieHeader', 'cookie')
@@ -38,7 +39,7 @@ try {
     $credential = Invoke-PasskeyRegistrationScript -ScriptPath $scriptPath -Parameters $scriptParameters
     $userAgent = Resolve-RequestUserAgent -Body $body -Request $Request
     $extensions = Save-PasskeyLoginAndCaptureContext -Provider okta -Body $body -Credential $credential -Configuration $configuration -UserAgent $userAgent
-    $catalogRecord = Save-PasskeyCatalogRecord -Provider okta -Credential $credential -Configuration $configuration -Extensions $extensions
+    $catalogRecord = Save-PasskeyCatalogRecord -Provider okta -Credential $credential -Configuration $configuration -Owner $owner -Extensions $extensions
 
     Push-OutputBinding -Name Response -Value (New-JsonHttpResponse -StatusCode ([HttpStatusCode]::OK) -Body ([ordered]@{
         success = $true

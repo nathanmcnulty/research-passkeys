@@ -37,7 +37,8 @@ try {
     if ($payload.keyVaultKeyName) { $parameters.KeyVaultKeyName = [string]$payload.keyVaultKeyName }
     $credential = Invoke-PasskeyRegistrationScript -ScriptPath $scriptPath -Parameters $parameters
     $extensions = Save-PasskeyLoginAndCaptureContext -Provider okta -Body $capturedBody -Credential $credential -Configuration $configuration -UserAgent ([string]($capturedBody.user_agent ?? $capturedBody.userAgent))
-    $catalogRecord = Save-PasskeyCatalogRecord -Provider okta -Credential $credential -Configuration $configuration -Extensions $extensions
+    if ($payload.owner -isnot [System.Collections.IDictionary]) { throw 'Queue message is missing an authenticated owner.' }
+    $catalogRecord = Save-PasskeyCatalogRecord -Provider okta -Credential $credential -Configuration $configuration -Owner ([hashtable]$payload.owner) -Extensions $extensions
     Set-RegistrationStatus -RequestId $requestId -Configuration $configuration -Status ([ordered]@{
         requestId = $requestId
         provider = 'okta'

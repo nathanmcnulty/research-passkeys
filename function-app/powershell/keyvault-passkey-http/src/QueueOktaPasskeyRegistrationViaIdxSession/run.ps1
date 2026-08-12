@@ -5,6 +5,7 @@ param($Request, $TriggerMetadata)
 . (Join-Path $PSScriptRoot '..\shared\PasskeyFunctionHelpers.ps1')
 
 try {
+    $owner = Get-PasskeyCallerIdentity -Request $Request
     $body = Get-RequestBodyObject -Request $Request
     $configuration = Get-OktaFunctionConfiguration
     $cookieHeader = Get-RequestValue -Body $body -Request $Request -Names @('cookieHeader', 'cookie')
@@ -31,8 +32,10 @@ try {
         captureContext = $captureContext
         keyVaultKeyName = (Get-RequestValue -Body $body -Request $Request -Names @('keyVaultKeyName'))
         transport = $transport
+        owner = $owner
     }
     Set-RegistrationStatus -RequestId $requestId -Configuration $configuration -Status ([ordered]@{
+        owner = $owner
         requestId = $requestId
         provider = 'okta'
         authMethod = 'idx'

@@ -40,19 +40,28 @@ class BrowserExtensionAdapterContractTests(unittest.TestCase):
             trigger = next(binding for binding in payload["bindings"] if binding["type"] == "httpTrigger")
             self.assertEqual(trigger["authLevel"], "function")
 
-    def test_both_templates_enable_easy_auth_with_exact_queue_exclusions(self):
-        expected_paths = (
-            "/api/entra/passkeys/register/estsauth/queue",
-            "/api/okta/passkeys/register/idx/queue",
-        )
+    def test_both_templates_require_easy_auth_for_queue_ingress(self):
         for sample in (POWERSHELL, PYTHON):
             template = (sample / "infra/main.bicep").read_text(encoding="utf-8")
             self.assertIn("name: 'authsettingsV2'", template)
             self.assertIn("requireAuthentication: true", template)
             self.assertIn("unauthenticatedClientAction: 'Return401'", template)
             self.assertIn("param browserExtensionClientId string", template)
-            for path in expected_paths:
-                self.assertIn(path, template)
+            self.assertNotIn("excludedPaths:", template)
+
+    def test_catalog_records_and_status_are_bound_to_easy_auth_owner(self):
+        python_source = (PYTHON / "src/function_app.py").read_text(encoding="utf-8")
+        powershell_helper = (POWERSHELL / "src/shared/PasskeyFunctionHelpers.ps1").read_text(encoding="utf-8")
+        schema = json.loads((ROOT / "contracts/passkey-catalog-record.schema.json").read_text(encoding="utf-8"))
+
+        self.assertIn('def _get_caller_identity', python_source)
+        self.assertIn('def _require_record_owner', python_source)
+        self.assertIn('"owner": _get_caller_identity(req)', python_source)
+        self.assertIn('function Get-PasskeyCallerIdentity', powershell_helper)
+        self.assertIn('function Assert-PasskeyRecordOwner', powershell_helper)
+        self.assertIn("$record.owner = $Owner", powershell_helper)
+        self.assertEqual(schema["properties"]["schemaVersion"]["const"], "2")
+        self.assertIn("owner", schema["required"])
 
     def test_python_exposes_constrained_assertion_route(self):
         source = (PYTHON / "src/function_app.py").read_text(encoding="utf-8")

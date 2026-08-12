@@ -58,7 +58,8 @@ try {
 
     $credential = $registration.Credential
     $extensions = Save-PasskeyLoginAndCaptureContext -Provider entra -Body $capturedBody -Credential $credential -Configuration $registration.Configuration -UserAgent $userAgent
-    $catalogRecord = Save-PasskeyCatalogRecord -Provider entra -Credential $credential -Configuration $registration.Configuration -Extensions $extensions
+    if ($message.owner -isnot [System.Collections.IDictionary]) { throw 'Queue message is missing an authenticated owner.' }
+    $catalogRecord = Save-PasskeyCatalogRecord -Provider entra -Credential $credential -Configuration $registration.Configuration -Owner ([hashtable]$message.owner) -Extensions $extensions
     $keyName = $null
     if ($credential.keyVault -is [System.Collections.IDictionary]) {
         $keyName = [string]$credential.keyVault.keyName

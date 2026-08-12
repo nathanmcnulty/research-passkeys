@@ -14,6 +14,7 @@ try {
         Push-OutputBinding -Name Response -Value (New-JsonHttpResponse -StatusCode NotFound -NoStore -Body @{ success = $false; error = 'Entra passkey was not found.' })
         return
     }
+    Assert-PasskeyRecordOwner -Record $record -Caller (Get-PasskeyCallerIdentity -Request $Request)
 
     $context = Get-PasskeyLoginContext -Configuration $configuration -Record $record
     $record.keyVault.vaultName = $configuration.KeyVaultName

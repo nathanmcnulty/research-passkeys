@@ -19,6 +19,7 @@ try {
         })
         return
     }
+    Assert-PasskeyRecordOwner -Record $record -Caller (Get-PasskeyCallerIdentity -Request $Request)
 
     $deletedLoginContext = $false
     if (-not [string]::IsNullOrWhiteSpace([string]$record.loginContextSecretName)) {
@@ -35,6 +36,8 @@ try {
         loginContextDeleted = $deletedLoginContext
         keyDeleted = $deletedKey
     }))
+} catch [System.UnauthorizedAccessException] {
+    Push-OutputBinding -Name Response -Value (New-JsonHttpResponse -StatusCode Forbidden -NoStore -Body @{success=$false;error=$_.Exception.Message})
 } catch [System.ArgumentException] {
     Push-OutputBinding -Name Response -Value (New-JsonHttpResponse -StatusCode BadRequest -NoStore -Body @{
         success = $false

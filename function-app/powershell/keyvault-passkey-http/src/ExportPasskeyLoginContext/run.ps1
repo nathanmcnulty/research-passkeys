@@ -5,6 +5,7 @@ if (-not (Test-DevelopmentSecretExportEnabled)) { Push-OutputBinding -Name Respo
 try {
     $configuration=Get-PasskeyFunctionConfiguration; $recordId=[string]$Request.Params.recordId; $record=Get-PasskeyCatalogRecord -Configuration $configuration -RecordId $recordId
     if (-not $record) { Push-OutputBinding -Name Response -Value (New-JsonHttpResponse -StatusCode NotFound -NoStore -Body @{success=$false;error='Passkey was not found.'}); return }
+    Assert-PasskeyRecordOwner -Record $record -Caller (Get-PasskeyCallerIdentity -Request $Request)
     $context=Get-PasskeyLoginContext -Configuration $configuration -Record $record
     if ($context.Count -eq 0) { Push-OutputBinding -Name Response -Value (New-JsonHttpResponse -StatusCode NotFound -NoStore -Body @{success=$false;error='Login context was not found.'}); return }
     Write-Warning "Development login-context export recordId=$recordId"

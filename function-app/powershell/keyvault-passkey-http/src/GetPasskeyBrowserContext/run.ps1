@@ -19,6 +19,7 @@ try {
         })
         return
     }
+    Assert-PasskeyRecordOwner -Record $record -Caller (Get-PasskeyCallerIdentity -Request $Request)
     if ([string]$record.status -ne 'active') {
         Push-OutputBinding -Name Response -Value (New-JsonHttpResponse -StatusCode Conflict -NoStore -Body @{
             success = $false
@@ -42,6 +43,8 @@ try {
             userAgent = $userAgent
         }
     }))
+} catch [System.UnauthorizedAccessException] {
+    Push-OutputBinding -Name Response -Value (New-JsonHttpResponse -StatusCode Forbidden -NoStore -Body @{success=$false;error=$_.Exception.Message})
 } catch [System.ArgumentException] {
     Push-OutputBinding -Name Response -Value (New-JsonHttpResponse -StatusCode BadRequest -NoStore -Body @{
         success = $false

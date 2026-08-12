@@ -17,10 +17,11 @@
     "status",
     "signCount",
     "createdAt",
-    "updatedAt"
+    "updatedAt",
+    "owner"
   ],
   "properties": {
-    "schemaVersion": { "const": "1" },
+    "schemaVersion": { "const": "2" },
     "recordId": { "type": "string", "format": "uuid" },
     "provider": { "enum": ["entra", "okta"] },
     "credentialId": { "type": "string", "minLength": 1 },
@@ -43,6 +44,16 @@
     "signCount": { "type": "integer", "minimum": 0 },
     "createdAt": { "type": "string", "format": "date-time" },
     "updatedAt": { "type": "string", "format": "date-time" },
+    "owner": {
+      "type": "object",
+      "description": "Immutable Microsoft Entra tenant and object identifiers for the caller that created the record.",
+      "additionalProperties": false,
+      "required": ["tenantId", "objectId"],
+      "properties": {
+        "tenantId": { "type": "string", "format": "uuid" },
+        "objectId": { "type": "string", "format": "uuid" }
+      }
+    },
     "providerMetadata": {
       "type": "object",
       "description": "Provider-specific, non-secret registration metadata.",
