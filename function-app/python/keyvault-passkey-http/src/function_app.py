@@ -1307,78 +1307,11 @@ def delete_passkey_catalog_record_http(req: func.HttpRequest) -> func.HttpRespon
 @app.function_name(name="AssertWithStoredPasskey")
 @app.route(route="passkeys/{recordId}/assert", methods=["POST"], auth_level=func.AuthLevel.ANONYMOUS)
 def assert_with_stored_passkey_http(req: func.HttpRequest) -> func.HttpResponse:
-    try:
-        record_id = str(req.route_params.get("recordId") or "").strip()
-        if not record_id:
-            raise PasskeyValidationError("Missing required route value 'recordId'.")
-        body = _get_request_body(req)
-        rp_id = str(body.get("rpId") or "").strip()
-        client_data_hash_text = str(body.get("clientDataHash") or "").strip()
-        user_verified = body.get("userVerified")
-        if not rp_id or not client_data_hash_text:
-            raise PasskeyValidationError("rpId and clientDataHash are required.")
-        if not isinstance(user_verified, bool):
-            raise PasskeyValidationError("userVerified must be a boolean.")
-        try:
-            client_data_hash = base64.urlsafe_b64decode(client_data_hash_text + "=" * (-len(client_data_hash_text) % 4))
-        except (ValueError, binascii.Error) as exc:
-            raise PasskeyValidationError("clientDataHash must be base64url.") from exc
-        if len(client_data_hash) != 32:
-            raise PasskeyValidationError("clientDataHash must contain exactly 32 bytes.")
-
-        entity = _get_catalog_record_entity(record_id)
-        if entity is None:
-            return _json_response(404, {"success": False, "error": "Passkey was not found."})
-        record, etag = entity
-        _require_record_owner(record, _get_caller_identity(req))
-        if record.get("status") != "active":
-            raise PasskeyValidationError("Passkey is not active.")
-        if str(record.get("rpId") or "") != rp_id:
-            return _json_response(403, {"success": False, "error": "The requested RP ID does not match this passkey."})
-        key_vault = record.get("keyVault")
-        if not isinstance(key_vault, dict):
-            raise PasskeyValidationError("Passkey has no signing-key metadata.")
-        configured_vault = os.getenv("PASSKEY_KEYVAULT_NAME", "").strip().lower()
-        key_id = str(key_vault.get("keyId") or "")
-        expected_prefix = f"https://{configured_vault}.vault.azure.net/keys/"
-        if not configured_vault or not key_id.lower().startswith(expected_prefix.lower()):
-            raise PasskeySecurityError("Passkey signing key is outside the configured Key Vault.")
-
-        sign_count = int(record.get("signCount") or 0) + 1
-        flags = 0x01 | (0x04 if user_verified else 0)
-        authenticator_data = hashlib.sha256(rp_id.encode("utf-8")).digest() + bytes([flags]) + sign_count.to_bytes(4, "big")
-        digest = hashlib.sha256(authenticator_data + client_data_hash).digest()
-        config = load_config_from_environment()
-        response = requests.post(
-            f"{key_id}/sign?api-version=7.4",
-            headers={"Authorization": f"Bearer {_get_key_vault_data_token(config)}", "Content-Type": "application/json"},
-            json={"alg": "ES256", "value": base64.urlsafe_b64encode(digest).rstrip(b"=").decode("ascii")},
-            timeout=30,
-        )
-        if not response.ok:
-            raise PasskeyValidationError(f"Key Vault signing failed with HTTP {response.status_code}.")
-        signature = str(response.json().get("value") or "")
-        signature_bytes = base64.urlsafe_b64decode(signature + "=" * (-len(signature) % 4))
-        if len(signature_bytes) != 64:
-            raise PasskeyValidationError("Key Vault returned an invalid ES256 signature.")
-
-        record["signCount"] = sign_count
-        record["updatedAt"] = datetime.now(UTC).isoformat().replace("+00:00", "Z")
-        _put_catalog_record(record, etag=etag)
-        return _json_response(200, {
-            "success": True,
-            "recordId": record_id,
-            "signCount": sign_count,
-            "authenticatorData": base64.urlsafe_b64encode(authenticator_data).rstrip(b"=").decode("ascii"),
-            "signature": signature,
-            "signatureFormat": "ieee-p1363",
-        })
-    except PasskeyValidationError as exc:
-        return _json_response(400, {"success": False, "error": str(exc)})
-    except PasskeySecurityError as exc:
-        return _json_response(403, {"success": False, "error": str(exc)})
-    except Exception as exc:  # noqa: BLE001
-        return _json_response(500, {"success": False, "error": str(exc)})
+    del req
+    return _json_response(501, {
+        "success": False,
+        "error": "Software-backed assertions are disabled because this service cannot prove fresh user presence or verification.",
+    })
 
 
 def _get_provider_passkeys_response(req: func.HttpRequest, provider: str) -> func.HttpResponse:

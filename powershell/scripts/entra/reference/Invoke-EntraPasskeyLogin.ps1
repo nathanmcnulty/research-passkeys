@@ -400,7 +400,7 @@ function New-FidoAuthenticatorData {
         [Parameter(Mandatory)]
         [string]$RpId,
         [int]$SignCount = 0,
-        [byte]$Flags = 0x05
+        [byte]$Flags = 0x00
     )
 
     # 1. RP ID Hash (32 bytes)
@@ -849,6 +849,7 @@ Write-Host "`n=== Generating FIDO2 Assertion ===" -ForegroundColor Cyan
 Write-Host "  Creating authenticator data..." -ForegroundColor Gray
 
 try {
+    throw [System.NotSupportedException]::new('Software-backed assertions are disabled because this process cannot prove fresh user presence or verification.')
     $authData = New-FidoAuthenticatorData -RpId $rpId -SignCount $SignCount
     
     if ($useKeyVault) {

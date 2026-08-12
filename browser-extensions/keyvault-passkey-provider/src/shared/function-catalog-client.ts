@@ -92,9 +92,10 @@ export class DevelopmentFunctionCatalogClient {
   public async assert(
     recordId: string,
     rpId: string,
-    clientDataHash: Uint8Array,
-    userVerified: boolean
+    clientDataHash: Uint8Array
   ): Promise<FunctionAssertion> {
+    rejectFunctionAssertion();
+
     const response = await this.fetchImpl(buildAssertionUrl(this.config.baseUrl, recordId), {
       method: "POST",
       cache: "no-store",
@@ -102,7 +103,7 @@ export class DevelopmentFunctionCatalogClient {
         ...(await this.getHeaders()),
         "Content-Type": "application/json"
       },
-      body: JSON.stringify({ rpId, clientDataHash: toBase64Url(clientDataHash), userVerified })
+      body: JSON.stringify({ rpId, clientDataHash: toBase64Url(clientDataHash) })
     });
     const payload = await readResponsePayload(response) as FunctionCatalogResponse & {
       authenticatorData?: unknown;
@@ -165,6 +166,13 @@ export class DevelopmentFunctionCatalogClient {
     const token = await this.tokenProvider([this.config.apiScope]);
     return { Accept: "application/json", Authorization: `Bearer ${token.accessToken}` };
   }
+}
+
+function rejectFunctionAssertion(): void {
+  throw new DOMException(
+    "Function-backed assertions are disabled until a trusted native user-presence channel is available.",
+    "NotSupportedError"
+  );
 }
 
 export function mapCatalogRecord(

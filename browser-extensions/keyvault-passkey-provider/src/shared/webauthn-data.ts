@@ -61,25 +61,16 @@ export async function buildAssertionAuthenticatorDataWithFlags(
   backupState = false,
   extensions: Array<[string, Uint8Array]> = []
 ): Promise<Uint8Array> {
-  const rpIdHash = await sha256(new TextEncoder().encode(rpId));
-  const extensionsData = buildAuthenticatorExtensionsData(extensions);
-  const result = new Uint8Array(32 + 1 + 4 + extensionsData.length);
-  result.set(rpIdHash, 0);
-  result[32] = buildFlags({
-    userPresent: true,
-    userVerified,
-    attestedCredentialData: false,
-    backupEligible,
-    backupState,
-    extensionDataIncluded: extensionsData.length > 0
-  });
-  writeUint32BigEndian(result, 33, signCount);
-
-  if (extensionsData.length > 0) {
-    result.set(extensionsData, 37);
-  }
-
-  return result;
+  void rpId;
+  void signCount;
+  void userVerified;
+  void backupEligible;
+  void backupState;
+  void extensions;
+  throw new DOMException(
+    "Assertion authenticator data requires a trusted user-presence channel.",
+    "NotSupportedError"
+  );
 }
 
 export function buildCosePublicKey(x: Uint8Array, y: Uint8Array): Uint8Array {

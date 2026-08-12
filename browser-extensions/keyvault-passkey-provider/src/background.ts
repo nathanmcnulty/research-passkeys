@@ -580,6 +580,8 @@ async function handleGetRequest(
   clientData: WebAuthnClientData,
   options: CredentialCreationOptions | CredentialRequestOptions
 ): Promise<SerializedPublicKeyCredential | CredentialSelectionDirective> {
+  rejectSoftwareBackedAssertion();
+
   const publicKey = getRequestOptions(options);
   if (!publicKey) {
     throw new DOMException("Expected publicKey request options.", "TypeError");
@@ -643,8 +645,7 @@ async function handleGetRequest(
     const assertion = await environment.developmentCatalog.assert(
       selected.recordId,
       rpId,
-      clientDataHash,
-      userVerified
+      clientDataHash
     );
     const signature = new x509.AsnEcSignatureFormatter().toAsnSignature(
       { name: "ECDSA", namedCurve: "P-256", hash: "SHA-256" } as EcKeyGenParams & EcdsaParams,
@@ -699,6 +700,13 @@ async function handleGetRequest(
       userHandle: selected.userHandle
     }
   };
+}
+
+function rejectSoftwareBackedAssertion(): void {
+  throw new DOMException(
+    "Software-backed assertions are disabled until a trusted native user-presence channel is available.",
+    "NotSupportedError"
+  );
 }
 
 function ensureEs256Supported(parameters: PublicKeyCredentialParameters[]): void {

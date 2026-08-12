@@ -16,6 +16,7 @@ from cryptography.hazmat.primitives.asymmetric import ec, utils
 
 from .common import (
     PasskeyProtocolError,
+    PasskeySecurityError,
     PasskeyValidationError,
     RP_ID,
     USER_AGENT,
@@ -445,10 +446,10 @@ def _try_extract_json_payload(content: str) -> dict[str, Any] | None:
 
 
 def _new_authenticator_data(relying_party: str, sign_count: int) -> bytes:
-    digest = hashes.Hash(hashes.SHA256())
-    digest.update(relying_party.encode("utf-8"))
-    rp_id_hash = digest.finalize()
-    return rp_id_hash + bytes([0x05]) + int(sign_count).to_bytes(4, "big")
+    del relying_party, sign_count
+    raise PasskeySecurityError(
+        "Software-backed assertions are disabled because this process cannot prove fresh user presence or verification."
+    )
 
 
 def _new_fido_signature(

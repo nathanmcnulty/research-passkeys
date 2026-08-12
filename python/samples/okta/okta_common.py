@@ -181,9 +181,12 @@ def credential_values(
 
 
 def build_assertion(*, challenge: str, origin: str, relying_party: str, sign_count: int, key_values: tuple[str, str, str, str | None, str], session: requests.Session, access_token: str) -> tuple[dict[str, str], str]:
+    raise RuntimeError(
+        "Software-backed assertions are disabled because this process cannot prove fresh user presence or verification."
+    )
     credential_id, key_vault_name, key_name, key_id, _ = key_values
     rp_hash = hashlib.sha256(relying_party.encode("utf-8")).digest()
-    auth_data = rp_hash + bytes([0x05]) + sign_count.to_bytes(4, "big")
+    auth_data = rp_hash + bytes([0x00]) + sign_count.to_bytes(4, "big")
     client_data = json.dumps(
         {"type": "webauthn.get", "challenge": challenge, "origin": origin, "crossOrigin": False},
         separators=(",", ":"),

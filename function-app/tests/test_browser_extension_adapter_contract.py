@@ -63,11 +63,16 @@ class BrowserExtensionAdapterContractTests(unittest.TestCase):
         self.assertEqual(schema["properties"]["schemaVersion"]["const"], "2")
         self.assertIn("owner", schema["required"])
 
-    def test_python_exposes_constrained_assertion_route(self):
+    def test_assertion_routes_fail_closed_without_trusted_user_presence(self):
         source = (PYTHON / "src/function_app.py").read_text(encoding="utf-8")
         self.assertIn('route="passkeys/{recordId}/assert"', source)
-        self.assertIn('"signatureFormat": "ieee-p1363"', source)
+        self.assertIn('return _json_response(501', source)
+        self.assertNotIn('user_verified = body.get("userVerified")', source)
         self.assertNotIn('route="signDigest"', source)
+
+        powershell = (POWERSHELL / "src/AssertWithStoredPasskey/run.ps1").read_text(encoding="utf-8")
+        self.assertIn("NotImplemented", powershell)
+        self.assertNotIn("userVerified", powershell)
 
     def test_python_exposes_browser_context_and_delete_routes(self):
         source = (PYTHON / "src" / "function_app.py").read_text(encoding="utf-8")

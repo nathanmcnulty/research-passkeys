@@ -87,7 +87,10 @@ def main() -> int:
         "User-Agent": USER_AGENT,
     }
     rp_hash = hashlib.sha256(relying_party.encode("utf-8")).digest()
-    auth_data = rp_hash + bytes([0x05]) + args.sign_count.to_bytes(4, "big")
+    raise RuntimeError(
+        "Software-backed assertions are disabled because this process cannot prove fresh user presence or verification."
+    )
+    auth_data = rp_hash + bytes([0x00]) + args.sign_count.to_bytes(4, "big")
     client_data = json.dumps(
         {"type": "webauthn.get", "challenge": args.challenge, "origin": origin, "crossOrigin": False},
         separators=(",", ":"),

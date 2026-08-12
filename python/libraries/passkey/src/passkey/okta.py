@@ -146,27 +146,10 @@ def _sign_digest(*, session: requests.Session, key_vault_name: str, key_name: st
 
 
 def _assertion(*, session: requests.Session, origin: str, relying_party: str, challenge: str, sign_count: int, key_vault_name: str, key_name: str, key_id: str | None, token: str) -> dict[str, str]:
-    if sign_count < 0 or sign_count > 2**32 - 1:
-        raise PasskeyValidationError("signCount must be between 0 and 4294967295.")
-    auth_data = hashlib.sha256(relying_party.encode("utf-8")).digest() + bytes([0x05]) + sign_count.to_bytes(4, "big")
-    client_data = json.dumps(
-        {"type": "webauthn.get", "challenge": challenge, "origin": origin, "crossOrigin": False},
-        separators=(",", ":"),
-    ).encode("utf-8")
-    digest = hashlib.sha256(auth_data + hashlib.sha256(client_data).digest()).digest()
-    signature = _sign_digest(
-        session=session,
-        key_vault_name=key_vault_name,
-        key_name=key_name,
-        key_id=key_id,
-        digest=digest,
-        token=token,
+    del session, origin, relying_party, challenge, sign_count, key_vault_name, key_name, key_id, token
+    raise PasskeySecurityError(
+        "Software-backed assertions are disabled because this process cannot prove fresh user presence or verification."
     )
-    return {
-        "clientData": base64.b64encode(client_data).decode("ascii"),
-        "authenticatorData": base64.b64encode(auth_data).decode("ascii"),
-        "signatureData": base64.b64encode(signature).decode("ascii"),
-    }
 
 
 def _import_cookie_header(session: requests.Session, cookie_header: str, origin: str) -> int:
