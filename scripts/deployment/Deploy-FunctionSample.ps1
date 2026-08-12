@@ -35,7 +35,7 @@ param(
 
     [Parameter()]
     [ValidateSet('development', 'production')]
-    [string]$DeploymentProfile = 'development',
+    [string]$DeploymentProfile = 'production',
 
     [Parameter()]
     [string]$EntraPortalOrigin = 'https://mysignins.microsoft.com',

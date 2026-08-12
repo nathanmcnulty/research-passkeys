@@ -32,7 +32,7 @@
       "value": "https://mysignins.microsoft.com"
     },
     "deploymentProfile": {
-      "value": "development"
+      "value": "production"
     },
     "enableVirtualNetworkIntegration": {
       "value": false

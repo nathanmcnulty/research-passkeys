@@ -120,6 +120,17 @@ class BrowserExtensionAdapterContractTests(unittest.TestCase):
         self.assertIn("ConvertTo-Json -InputObject $GraphDelegatedPermissions", deploy)
         self.assertNotIn("$GraphDelegatedPermissions | ConvertTo-Json", deploy)
 
+    def test_deployments_default_to_production_and_least_privilege_blob_access(self):
+        deploy = (ROOT / "scripts/deployment/Deploy-FunctionSample.ps1").read_text(encoding="utf-8")
+        self.assertIn("[string]$DeploymentProfile = 'production'", deploy)
+        for sample in (POWERSHELL, PYTHON):
+            template = (sample / "infra/main.bicep").read_text(encoding="utf-8")
+            parameters = json.loads((sample / "infra/main.parameters.sample.json").read_text(encoding="utf-8"))
+            self.assertIn("param deploymentProfile string = 'production'", template)
+            self.assertNotIn("storageBlobDataOwnerRoleId", template)
+            self.assertIn("userAssignedIdentity.id, storageBlobDataContributorId", template)
+            self.assertEqual(parameters["parameters"]["deploymentProfile"]["value"], "production")
+
 
 if __name__ == "__main__":
     unittest.main()
