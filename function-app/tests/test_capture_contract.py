@@ -16,6 +16,15 @@ class CaptureContractTests(unittest.TestCase):
             with (ROOT / "contracts" / name).open(encoding="utf-8") as stream:
                 json.load(stream)
 
+    def test_logic_app_run_history_secures_secret_inputs_and_outputs(self):
+        workflow_root = ROOT / "templates/logic-app/passkey-function-http/workflows"
+        for workflow_path in workflow_root.glob("*.json"):
+            workflow = json.loads(workflow_path.read_text(encoding="utf-8"))
+            operations = list(workflow["triggers"].values()) + list(workflow["actions"].values())
+            for operation in operations:
+                properties = operation.get("runtimeConfiguration", {}).get("secureData", {}).get("properties", [])
+                self.assertEqual(set(properties), {"inputs", "outputs"}, workflow_path)
+
     def test_both_templates_define_capture_resources_and_guards(self):
         required = {
             "PASSKEY_CAPTURE_TABLE_NAME",
