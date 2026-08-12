@@ -8,7 +8,7 @@ try {
     $owner = Get-PasskeyCallerIdentity -Request $Request
     $body = Get-RequestBodyObject -Request $Request
     $userPrincipalName = Get-RequestValue -Body $body -Request $Request -Names @('userPrincipalName', 'username', 'email')
-    $tap = Get-RequestValue -Body $body -Request $Request -Names @('tap', 'temporaryAccessPass')
+    $tap = Get-SecretBodyValue -Body $body -Names @('tap', 'temporaryAccessPass')
     $displayName = Get-RequestValue -Body $body -Request $Request -Names @('displayName')
     $keyVaultKeyName = Get-RequestValue -Body $body -Request $Request -Names @('keyVaultKeyName')
     $userAgent = Resolve-RequestUserAgent -Body $body -Request $Request

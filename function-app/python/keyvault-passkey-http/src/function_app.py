@@ -148,6 +148,11 @@ def _get_body_value(body: dict[str, object], *names: str) -> object | None:
     return None
 
 
+def _get_secret_body_value(body: dict[str, object], *names: str) -> str | None:
+    value = _get_body_value(body, *names)
+    return value.strip() if isinstance(value, str) and value.strip() else None
+
+
 def _resolve_user_agent(body: dict[str, object], req: func.HttpRequest) -> str:
     # `user_agent` is capture provenance. Preserve the known-compatible ESTS
     # replay profile unless the caller explicitly supplies `userAgent`.
@@ -168,7 +173,7 @@ def _resolve_okta_domain(body: dict[str, object], req: func.HttpRequest) -> str:
 
 
 def _resolve_okta_access_token(body: dict[str, object], req: func.HttpRequest) -> str:
-    token = _get_request_value(body, req, "accessToken", "oktaAccessToken")
+    token = _get_secret_body_value(body, "accessToken", "oktaAccessToken")
     if not token:
         authorization = req.headers.get("Authorization", "")
         if authorization.lower().startswith("bearer "):
@@ -1008,15 +1013,12 @@ def _build_status_url(req: func.HttpRequest, request_id: str, provider: str = "e
         status_url = f"{base_url[: -len(queue_suffix)]}/api/{provider}/passkeys/register/status/{request_id}"
     else:
         status_url = f"/api/{provider}/passkeys/register/status/{request_id}"
-    code = req.params.get("code")
-    if code:
-        separator = "&" if "?" in status_url else "?"
-        status_url = f"{status_url}{separator}code={quote(code, safe='')}"
     return status_url
 
 
 def _resolve_ests_auth_value(body: dict[str, object], req: func.HttpRequest) -> str | None:
-    direct_cookie = _get_request_value(body, req, "estsAuth", "estsAuthCookie")
+    del req
+    direct_cookie = _get_secret_body_value(body, "estsAuth", "estsAuthCookie")
     if direct_cookie:
         parsed_direct_cookie = extract_ests_auth_cookie_value(direct_cookie)
         if parsed_direct_cookie:
@@ -1027,10 +1029,6 @@ def _resolve_ests_auth_value(body: dict[str, object], req: func.HttpRequest) -> 
         parsed_cookie = extract_ests_auth_cookie_value(cookie_source)
         if parsed_cookie:
             return parsed_cookie
-
-    cookie_query_value = _get_request_value(body, req, *_COOKIE_EXPORT_FIELDS)
-    if cookie_query_value:
-        return extract_ests_auth_cookie_value(cookie_query_value)
 
     return None
 
@@ -1101,8 +1099,8 @@ def _process_registration_queue_message(message_payload: dict[str, object]) -> d
 
 
 def _build_okta_queue_message(*, body: dict[str, object], req: func.HttpRequest) -> dict[str, object]:
-    cookie_header = _get_request_value(body, req, "cookieHeader", "cookie")
-    state_handle = _get_request_value(body, req, "stateHandle")
+    cookie_header = _get_secret_body_value(body, "cookieHeader", "cookie")
+    state_handle = _get_secret_body_value(body, "stateHandle")
     authenticator_id = _get_request_value(body, req, "authenticatorId")
     if not cookie_header or not state_handle or not authenticator_id:
         raise PasskeyValidationError("Okta queue requests require cookieHeader, stateHandle, and authenticatorId.")
@@ -1803,7 +1801,7 @@ def register_entra_passkey_via_tap_http(req: func.HttpRequest) -> func.HttpRespo
         config = load_config_from_environment()
         body = _get_request_body(req)
         user_principal_name = _get_request_value(body, req, "userPrincipalName", "username", "email")
-        tap = _get_request_value(body, req, "tap", "temporaryAccessPass")
+        tap = _get_secret_body_value(body, "tap", "temporaryAccessPass")
         display_name = _get_request_value(body, req, "displayName") or build_display_name()
         key_vault_key_name = _get_request_value(body, req, "keyVaultKeyName")
         user_agent = _resolve_user_agent(body, req)
@@ -2144,8 +2142,8 @@ def register_okta_passkey_via_idx_session_http(req: func.HttpRequest) -> func.Ht
         credential = register_okta_idx_session(
             config=config,
             okta_domain=_resolve_okta_domain(body, req),
-            cookie_header=_get_request_value(body, req, "cookieHeader", "cookie") or "",
-            state_handle=_get_request_value(body, req, "stateHandle") or "",
+            cookie_header=_get_secret_body_value(body, "cookieHeader", "cookie") or "",
+            state_handle=_get_secret_body_value(body, "stateHandle") or "",
             authenticator_id=_get_request_value(body, req, "authenticatorId") or "",
             key_vault_name=config.key_vault_name,
             key_vault_key_name=_get_request_value(body, req, "keyVaultKeyName"),
@@ -2305,7 +2303,7 @@ def login_with_okta_passkey_http(req: func.HttpRequest) -> func.HttpResponse:
             user_name=user_name,
             credential=credential,
             key_vault_access_token=config.key_vault_access_token,
-            password=_get_request_value(body, req, "password"),
+            password=_get_secret_body_value(body, "password"),
             client_id=_get_request_value(body, req, "clientId") or "okta.b8003760-1ca5-51b8-9404-85bb7ef9bc8c",
             redirect_uri=os.getenv("PASSKEY_OKTA_REDIRECT_URI", "").strip() or None,
             sign_count=int(_get_request_value(body, req, "signCount") or "1"),
@@ -2329,9 +2327,9 @@ def test_okta_passkey_login_via_idx_session_http(req: func.HttpRequest) -> func.
         result = login_okta_idx_session(
             config=config,
             okta_domain=_resolve_okta_domain(body, req),
-            cookie_header=_get_request_value(body, req, "cookieHeader", "cookie") or "",
-            state_handle=_get_request_value(body, req, "stateHandle") or "",
-            challenge=_get_request_value(body, req, "challenge") or "",
+            cookie_header=_get_secret_body_value(body, "cookieHeader", "cookie") or "",
+            state_handle=_get_secret_body_value(body, "stateHandle") or "",
+            challenge=_get_secret_body_value(body, "challenge") or "",
             credential=credential,
             key_vault_access_token=config.key_vault_access_token,
             sign_count=int(_get_request_value(body, req, "signCount") or "0"),

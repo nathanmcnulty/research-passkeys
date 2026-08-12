@@ -11,18 +11,16 @@ from typing import Any
 from urllib import error, parse, request
 
 
-def build_endpoint_url(explicit_url: str | None, base_url: str | None, function_key: str | None) -> str | None:
+def build_endpoint_url(explicit_url: str | None, base_url: str | None) -> str | None:
     if explicit_url:
+        if "code" in parse.parse_qs(parse.urlsplit(explicit_url).query):
+            raise ValueError("Function keys must be supplied in the x-functions-key header, not the URL.")
         return explicit_url
 
     if not base_url:
         return None
 
-    url = f"{base_url.rstrip('/')}/api/entra/passkeys/register/estsauth/queue"
-    if function_key:
-        separator = "&" if "?" in url else "?"
-        url = f"{url}{separator}code={parse.quote(function_key, safe='')}"
-    return url
+    return f"{base_url.rstrip('/')}/api/entra/passkeys/register/estsauth/queue"
 
 
 def load_cookie_export(path: str | None, raw_json: str | None) -> Any | None:
@@ -55,9 +53,12 @@ def resolve_ests_auth(direct_value: str | None, env_var_name: str, prompt: bool)
     return None
 
 
-def invoke_queue_request(target: str, url: str, payload: dict[str, Any], timeout: int) -> dict[str, Any]:
+def invoke_queue_request(target: str, url: str, function_key: str | None, payload: dict[str, Any], timeout: int) -> dict[str, Any]:
     body = json.dumps(payload).encode("utf-8")
-    req = request.Request(url, data=body, headers={"Content-Type": "application/json"}, method="POST")
+    headers = {"Content-Type": "application/json"}
+    if function_key:
+        headers["x-functions-key"] = function_key
+    req = request.Request(url, data=body, headers=headers, method="POST")
     try:
         with request.urlopen(req, timeout=timeout) as response:
             raw = response.read().decode("utf-8")
@@ -163,24 +164,22 @@ def main() -> int:
     powershell_url = build_endpoint_url(
         args.powershell_function_url,
         args.powershell_base_url,
-        args.powershell_function_key or args.common_function_key,
     )
     python_url = build_endpoint_url(
         args.python_function_url,
         args.python_base_url,
-        args.python_function_key or args.common_function_key,
     )
 
     targets: list[dict[str, Any]] = []
     if args.target in {"powershell", "both"}:
         if not powershell_url:
             parser.error("PowerShell target selected, but no PowerShell function URL or base URL was provided.")
-        targets.append(invoke_queue_request("powershell", powershell_url, payload, args.timeout_seconds))
+        targets.append(invoke_queue_request("powershell", powershell_url, args.powershell_function_key or args.common_function_key, payload, args.timeout_seconds))
 
     if args.target in {"python", "both"}:
         if not python_url:
             parser.error("Python target selected, but no Python function URL or base URL was provided.")
-        targets.append(invoke_queue_request("python", python_url, payload, args.timeout_seconds))
+        targets.append(invoke_queue_request("python", python_url, args.python_function_key or args.common_function_key, payload, args.timeout_seconds))
 
     summary = {
         "submittedAtUtc": datetime.now(UTC).isoformat().replace("+00:00", "Z"),

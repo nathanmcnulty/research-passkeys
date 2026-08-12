@@ -132,6 +132,16 @@ function Get-BodyValue {
     return $null
 }
 
+function Get-SecretBodyValue {
+    param([Parameter(Mandatory)][hashtable]$Body, [Parameter(Mandatory)][string[]]$Names)
+    foreach ($name in $Names) {
+        if ($Body.ContainsKey($name) -and -not [string]::IsNullOrWhiteSpace([string]$Body[$name])) {
+            return [string]$Body[$name]
+        }
+    }
+    return $null
+}
+
 function Get-PasskeyObjectValue {
     param(
         [Parameter()]
@@ -285,7 +295,7 @@ function Resolve-EstsAuthCookie {
         $Request
     )
 
-    $directCookie = Get-RequestValue -Body $Body -Request $Request -Names @('estsAuth', 'estsAuthCookie')
+    $directCookie = Get-SecretBodyValue -Body $Body -Names @('estsAuth', 'estsAuthCookie')
     if (-not [string]::IsNullOrWhiteSpace($directCookie)) {
         $parsedDirectCookie = Get-EstsAuthCookieFromSource -CookieSource $directCookie
         if (-not [string]::IsNullOrWhiteSpace($parsedDirectCookie)) {
@@ -299,11 +309,6 @@ function Resolve-EstsAuthCookie {
         if (-not [string]::IsNullOrWhiteSpace($parsedCookie)) {
             return $parsedCookie
         }
-    }
-
-    $queryCookie = Get-RequestValue -Body $Body -Request $Request -Names @('cookies', 'cookieExport', 'cookieJson', 'cookieData', 'browserCookies', 'tokens')
-    if (-not [string]::IsNullOrWhiteSpace($queryCookie)) {
-        return Get-EstsAuthCookieFromSource -CookieSource $queryCookie
     }
 
     return $null
@@ -711,7 +716,7 @@ function Resolve-OktaAccessToken {
         $Request
     )
 
-    $token = Get-RequestValue -Body $Body -Request $Request -Names @('accessToken', 'oktaAccessToken')
+    $token = Get-SecretBodyValue -Body $Body -Names @('accessToken', 'oktaAccessToken')
     if ([string]::IsNullOrWhiteSpace($token) -and $Request.Headers) {
         $authorization = $null
         if ($Request.Headers -is [System.Collections.IDictionary]) {
@@ -1407,32 +1412,11 @@ function Get-RegistrationStatusUrl {
     )
 
     $relativePath = "/api/$Provider/passkeys/register/status/$RequestId"
-    $code = $null
-    if ($null -ne $Request.Query) {
-        if ($Request.Query -is [System.Collections.IDictionary]) {
-            if ($Request.Query.ContainsKey('code')) {
-                $code = [string]$Request.Query['code']
-            }
-        } else {
-            $property = $Request.Query.PSObject.Properties['code']
-            if ($property) {
-                $code = [string]$property.Value
-            }
-        }
-    }
-
     if ($Request.Url) {
         $requestUri = if ($Request.Url -is [uri]) { $Request.Url } else { [uri][string]$Request.Url }
         $baseUrl = $requestUri.GetLeftPart([System.UriPartial]::Authority)
         $statusUrl = "$baseUrl$relativePath"
-        if (-not [string]::IsNullOrWhiteSpace($code)) {
-            $statusUrl += "?code=$([uri]::EscapeDataString($code))"
-        }
         return $statusUrl
-    }
-
-    if (-not [string]::IsNullOrWhiteSpace($code)) {
-        return "$relativePath?code=$([uri]::EscapeDataString($code))"
     }
 
     return $relativePath

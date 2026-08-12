@@ -8,8 +8,8 @@ try {
     $owner = Get-PasskeyCallerIdentity -Request $Request
     $body = Get-RequestBodyObject -Request $Request
     $configuration = Get-OktaFunctionConfiguration
-    $cookieHeader = Get-RequestValue -Body $body -Request $Request -Names @('cookieHeader', 'cookie')
-    $stateHandle = Get-RequestValue -Body $body -Request $Request -Names @('stateHandle')
+    $cookieHeader = Get-SecretBodyValue -Body $body -Names @('cookieHeader', 'cookie')
+    $stateHandle = Get-SecretBodyValue -Body $body -Names @('stateHandle')
     $authenticatorId = Get-RequestValue -Body $body -Request $Request -Names @('authenticatorId')
     $keyVaultKeyName = Get-RequestValue -Body $body -Request $Request -Names @('keyVaultKeyName')
     $transport = Get-RequestValue -Body $body -Request $Request -Names @('transport')

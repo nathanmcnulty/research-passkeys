@@ -84,10 +84,10 @@ New-Item -ItemType Directory -Path $OutputDirectory -Force | Out-Null
 $smokeScript = Join-Path $PSScriptRoot 'Invoke-EntraPasskeySmokeTest.ps1'
 $queueScript = Join-Path $PSScriptRoot 'Invoke-EntraQueuePasskeyRegistration.ps1'
 
-$powerShellRegisterUrl = "$($PowerShellBaseUrl.TrimEnd('/'))/api/entra/passkeys/register/tap?code=$([uri]::EscapeDataString($PowerShellFunctionKey))"
-$pythonRegisterUrl = "$($PythonBaseUrl.TrimEnd('/'))/api/entra/passkeys/register/tap?code=$([uri]::EscapeDataString($PythonFunctionKey))"
-$powerShellLoginUrl = "$($PowerShellBaseUrl.TrimEnd('/'))/api/entra/passkeys/login?code=$([uri]::EscapeDataString($PowerShellFunctionKey))"
-$pythonLoginUrl = "$($PythonBaseUrl.TrimEnd('/'))/api/entra/passkeys/login?code=$([uri]::EscapeDataString($PythonFunctionKey))"
+$powerShellRegisterUrl = "$($PowerShellBaseUrl.TrimEnd('/'))/api/entra/passkeys/register/tap"
+$pythonRegisterUrl = "$($PythonBaseUrl.TrimEnd('/'))/api/entra/passkeys/register/tap"
+$powerShellLoginUrl = "$($PowerShellBaseUrl.TrimEnd('/'))/api/entra/passkeys/login"
+$pythonLoginUrl = "$($PythonBaseUrl.TrimEnd('/'))/api/entra/passkeys/login"
 
 $smokeOutputDirectory = Join-Path $OutputDirectory 'smoke'
 $queueOutputPath = Join-Path $OutputDirectory 'queue-summary.json'
@@ -100,11 +100,14 @@ $smokeResult = & $smokeScript `
     -PythonFunctionUrl $pythonRegisterUrl `
     -PowerShellFunctionLoginUrl $powerShellLoginUrl `
     -PythonFunctionLoginUrl $pythonLoginUrl `
+    -PowerShellFunctionKey $PowerShellFunctionKey `
+    -PythonFunctionKey $PythonFunctionKey `
     -SkipDirectRegistration `
     -SkipPowerShellLogin `
     -SkipPythonLogin `
     -OutputDirectory $smokeOutputDirectory `
-    -PassThru
+    -PassThru `
+    -IncludeSensitiveResults
 
 if (-not $smokeResult.estsAuthCookie) {
     throw 'No ESTSAUTH cookie was captured from the live function login flow.'

@@ -79,6 +79,26 @@ class CaptureContractTests(unittest.TestCase):
         self.assertIn('queue_message.pop("cookieHeader", None)', python_source)
         self.assertIn('queue_message.pop("stateHandle", None)', python_source)
 
+    def test_samples_do_not_log_or_place_secrets_in_urls_by_default(self):
+        proxy = (ROOT / "samples/proxy-entra/http_proxy.go").read_text(encoding="utf-8")
+        python_login = (ROOT / "python/samples/entra/invoke_entra_passkey_login.py").read_text(encoding="utf-8")
+        python_queue = (ROOT / "scripts/validation/submit_entra_queue_passkey_registration.py").read_text(encoding="utf-8")
+        powershell_queue = (ROOT / "scripts/validation/Invoke-EntraQueuePasskeyRegistration.ps1").read_text(encoding="utf-8")
+        powershell_live = (ROOT / "scripts/validation/Invoke-EntraLiveFunctionQueueValidation.ps1").read_text(encoding="utf-8")
+        python_function = (PYTHON_ROOT / "src/function_app.py").read_text(encoding="utf-8")
+        powershell_helper = (POWERSHELL_ROOT / "src/shared/PasskeyFunctionHelpers.ps1").read_text(encoding="utf-8")
+
+        self.assertNotIn("request body: %s", proxy)
+        self.assertIn("--show-cookie", python_login)
+        self.assertIn('if args.show_cookie else {}', python_login)
+        self.assertNotIn("code={parse.quote", python_queue)
+        self.assertIn('headers["x-functions-key"]', python_queue)
+        self.assertNotIn("code=$([uri]::EscapeDataString($FunctionKey))", powershell_queue)
+        self.assertIn("headers['x-functions-key']", powershell_queue)
+        self.assertNotIn("?code=", powershell_live)
+        self.assertIn("def _get_secret_body_value", python_function)
+        self.assertIn("function Get-SecretBodyValue", powershell_helper)
+
     def test_entra_queue_worker_replays_normalized_capture_context(self):
         powershell_worker = (
             POWERSHELL_ROOT / "src/ProcessEntraPasskeyRegistrationViaEstsAuth/run.ps1"
