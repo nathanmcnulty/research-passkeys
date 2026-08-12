@@ -74,6 +74,29 @@ class BrowserExtensionAdapterContractTests(unittest.TestCase):
         self.assertIn("NotImplemented", powershell)
         self.assertNotIn("userVerified", powershell)
 
+    def test_software_registrations_do_not_claim_authenticator_provenance(self):
+        sources = [
+            ROOT / "python/libraries/passkey/src/passkey/entra_registration.py",
+            ROOT / "python/libraries/passkey/src/passkey/okta.py",
+            ROOT / "powershell/scripts/entra/Register-EntraKeyVaultPasskey.ps1",
+            ROOT / "powershell/scripts/okta/Register-OktaKeyVaultPasskeyViaIdxSession.ps1",
+            ROOT / "browser-extensions/keyvault-passkey-provider/src/background.ts",
+            PYTHON / "src/passkey/entra_registration.py",
+            PYTHON / "src/passkey/okta.py",
+            POWERSHELL / "src/shared/passkey-assets/scripts/entra/Register-EntraKeyVaultPasskey.ps1",
+            POWERSHELL / "src/shared/passkey-assets/scripts/okta/Register-OktaKeyVaultPasskeyViaIdxSession.ps1",
+        ]
+        combined = "\n".join(path.read_text(encoding="utf-8") for path in sources)
+
+        self.assertNotIn('"fmt", "packed"', combined)
+        self.assertNotIn("fmt      = 'packed'", combined)
+        self.assertNotIn("CreateSelfSigned", combined)
+        self.assertNotIn("0x45", combined)
+        self.assertNotIn("authenticator           = 'cross-platform'", combined)
+        self.assertNotIn("transports              = 'usb'", combined)
+        self.assertIn('"fmt", "none"', combined)
+        self.assertIn("fmt      = 'none'", combined)
+
     def test_python_exposes_browser_context_and_delete_routes(self):
         source = (PYTHON / "src" / "function_app.py").read_text(encoding="utf-8")
         self.assertIn('route="passkeys/{recordId}/browser-context"', source)

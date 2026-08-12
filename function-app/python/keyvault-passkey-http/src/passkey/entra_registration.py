@@ -12,10 +12,7 @@ from urllib.parse import parse_qs, urlparse
 
 import cbor2
 import requests
-from cryptography import x509
-from cryptography.hazmat.primitives import hashes, serialization
-from cryptography.hazmat.primitives.asymmetric import ec
-from cryptography.x509.oid import NameOID
+from cryptography.hazmat.primitives import hashes
 
 from .common import (
     AttestationPayload,
@@ -428,7 +425,7 @@ def _build_attestation(
     rp_id_hash.update(RP_ID.encode("utf-8"))
     auth_data = (
         rp_id_hash.finalize()
-        + bytes([0x45])
+        + bytes([0x40])
         + b"\x00\x00\x00\x00"
         + b"\x00" * 16
         + len(credential_id).to_bytes(2, "big")
@@ -446,45 +443,10 @@ def _build_attestation(
         separators=(",", ":"),
     ).encode("utf-8")
 
-    client_data_hash = hashes.Hash(hashes.SHA256())
-    client_data_hash.update(client_data_json)
-    signature_base = auth_data + client_data_hash.finalize()
-
-    batch_private_key = ec.generate_private_key(ec.SECP256R1())
-    subject = issuer = x509.Name(
-        [
-            x509.NameAttribute(NameOID.COMMON_NAME, "Batch Certificate"),
-            x509.NameAttribute(NameOID.ORGANIZATIONAL_UNIT_NAME, "Authenticator Attestation"),
-            x509.NameAttribute(NameOID.ORGANIZATION_NAME, "Chromium"),
-            x509.NameAttribute(NameOID.COUNTRY_NAME, "US"),
-        ]
-    )
-    batch_certificate = (
-        x509.CertificateBuilder()
-        .subject_name(subject)
-        .issuer_name(issuer)
-        .public_key(batch_private_key.public_key())
-        .serial_number(x509.random_serial_number())
-        .not_valid_before(datetime(2017, 7, 14, 2, 40, 0, tzinfo=UTC))
-        .not_valid_after(datetime(2046, 2, 6, 6, 33, 7, tzinfo=UTC))
-        .sign(batch_private_key, hashes.SHA256())
-    )
-    signature_bytes = batch_private_key.sign(signature_base, ec.ECDSA(hashes.SHA256()))
-    batch_certificate_der = batch_certificate.public_bytes(encoding=serialization.Encoding.DER)
-
     attestation_object = OrderedDict(
         (
-            ("fmt", "packed"),
-            (
-                "attStmt",
-                OrderedDict(
-                    (
-                        ("alg", -7),
-                        ("sig", signature_bytes),
-                        ("x5c", [batch_certificate_der]),
-                    )
-                ),
-            ),
+            ("fmt", "none"),
+            ("attStmt", OrderedDict()),
             ("authData", auth_data),
         )
     )
@@ -556,9 +518,6 @@ def _submit_newfido(
     body = OrderedDict(
         (
             ("canary", creation_request.canary),
-            ("authenticator", "cross-platform"),
-            ("transports", "usb"),
-            ("aaguid", "00000000-0000-0000-0000-000000000000"),
             ("credentialDeviceType", "singleDevice"),
             ("credentialBackedUp", "false"),
             ("attestationParseError", ""),

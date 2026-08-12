@@ -11,7 +11,7 @@
     stateHandle, the browser Cookie request header, and the WebAuthn authenticator ID.
 
     The script uses the dynamic remediation links returned by IDX to request registration
-    options, creates an EC P-256 key in Azure Key Vault, builds a packed WebAuthn
+    options, creates an EC P-256 key in Azure Key Vault, builds a none-attested WebAuthn
     attestation, and submits it to Okta. The Key Vault private key is never exported.
 
     IDX endpoints and browser session artifacts are internal implementation details. This
@@ -258,15 +258,14 @@ $keyCreate = Invoke-RestMethod -Method Post -Uri "https://$KeyVaultName.vault.az
 $publicKeyX = [byte[]](ConvertFrom-Base64Url $keyCreate.key.x)
 $publicKeyY = [byte[]](ConvertFrom-Base64Url $keyCreate.key.y)
 
-# Credential key material is in Key Vault. The short-lived batch key below exists only to
-# create a packed attestation statement; it is disposed immediately after registration.
+# Credential key material is in Key Vault. No authenticator provenance is claimed.
 $credentialIdBytes = [byte[]]::new(32)
 [System.Security.Cryptography.RandomNumberGenerator]::Fill($credentialIdBytes)
 $credentialId = ConvertTo-Base64Url $credentialIdBytes
 $coseKey = [ordered]@{ 1 = 2; 3 = -7; -1 = 1; -2 = $publicKeyX; -3 = $publicKeyY }
 $coseKeyBytes = [byte[]](New-CBOREncoded $coseKey)
 $rpHash = [System.Security.Cryptography.SHA256]::HashData([System.Text.Encoding]::UTF8.GetBytes($rpId))
-$flags = [byte[]]@(0x45) # user present, user verified, attested credential data
+$flags = [byte[]]@(0x40) # attested credential data; no authenticator-bound UP or UV claim
 $counter = [byte[]]@(0, 0, 0, 0)
 $aaguid = [byte[]]::new(16)
 $credentialLength = [BitConverter]::GetBytes([uint16]$credentialIdBytes.Length)
@@ -282,36 +281,18 @@ $clientDataJson = [ordered]@{
     crossOrigin = $false
 } | ConvertTo-Json -Compress
 $clientDataBytes = [System.Text.Encoding]::UTF8.GetBytes($clientDataJson)
-$signatureBase = $authenticatorData + [System.Security.Cryptography.SHA256]::HashData($clientDataBytes)
-
-$batchKey = [System.Security.Cryptography.ECDsa]::Create([System.Security.Cryptography.ECCurve]::CreateFromValue('1.2.840.10045.3.1.7'))
-$certificate = $null
-try {
-    $certificateRequest = [System.Security.Cryptography.X509Certificates.CertificateRequest]::new(
-        'CN=Key Vault Passkey POC, OU=WebAuthn Attestation, O=Research Passkeys, C=US',
-        $batchKey,
-        [System.Security.Cryptography.HashAlgorithmName]::SHA256
-    )
-    $certificate = $certificateRequest.CreateSelfSigned([DateTimeOffset]::UtcNow.AddDays(-1), [DateTimeOffset]::UtcNow.AddDays(30))
-    $attestationSignature = $batchKey.SignData($signatureBase, [System.Security.Cryptography.HashAlgorithmName]::SHA256,
-        [System.Security.Cryptography.DSASignatureFormat]::Rfc3279DerSequence)
-    $attestation = [ordered]@{
-        fmt      = 'packed'
-        attStmt  = [ordered]@{ alg = -7; sig = [byte[]]$attestationSignature; x5c = @(, [byte[]]$certificate.RawData) }
-        authData = [byte[]]$authenticatorData
-    }
-    $attestationBytes = [byte[]](New-CBOREncoded $attestation)
-} finally {
-    if ($certificate) { $certificate.Dispose() }
-    $batchKey.Dispose()
+$attestation = [ordered]@{
+    fmt      = 'none'
+    attStmt  = [ordered]@{}
+    authData = [byte[]]$authenticatorData
 }
+$attestationBytes = [byte[]](New-CBOREncoded $attestation)
 
 Write-Host 'Submitting Key Vault-backed WebAuthn attestation to Okta...' -ForegroundColor Yellow
 $completion = Invoke-OktaIdxJson -Uri $finishUri -Headers $idxHeaders -WebSession $webSession -Body @{
     credentials = @{
         clientData       = [Convert]::ToBase64String($clientDataBytes)
         attestation      = [Convert]::ToBase64String($attestationBytes)
-        transports       = (@($Transport) | ConvertTo-Json -Compress)
         clientExtensions = (@{ credProps = @{ rk = $false } } | ConvertTo-Json -Compress)
     }
     stateHandle = $selectionResponse.stateHandle
@@ -332,8 +313,7 @@ $record = [ordered]@{
         keyId     = $keyCreate.key.kid
     }
     okta = [ordered]@{
-        userId    = [string]$activation.user.id
-        transport = $Transport
+        userId = [string]$activation.user.id
     }
 }
 if (-not $OutputPath) {

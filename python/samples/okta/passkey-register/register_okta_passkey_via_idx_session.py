@@ -5,14 +5,9 @@ import base64
 import json
 import secrets
 import sys
-from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
 import requests
-from cryptography import x509
-from cryptography.hazmat.primitives import hashes, serialization
-from cryptography.hazmat.primitives.asymmetric import ec
-from cryptography.x509.oid import NameOID
 
 OKTA_ROOT = Path(__file__).resolve().parents[1]
 if str(OKTA_ROOT) not in sys.path:
@@ -102,26 +97,13 @@ def main() -> int:
     public_y = b64url_decode(key["y"])
     cose_key = {1: 2, 3: -7, -1: 1, -2: public_x, -3: public_y}
     rp_hash = __import__("hashlib").sha256(rp_id.encode("utf-8")).digest()
-    auth_data = rp_hash + bytes([0x45]) + bytes(4) + bytes(16) + len(credential_id_bytes).to_bytes(2, "big") + credential_id_bytes + cbor2.dumps(cose_key)
+    auth_data = rp_hash + bytes([0x40]) + bytes(4) + bytes(16) + len(credential_id_bytes).to_bytes(2, "big") + credential_id_bytes + cbor2.dumps(cose_key)
     client_data = json.dumps({"type": "webauthn.create", "challenge": activation["challenge"], "origin": origin, "crossOrigin": False}, separators=(",", ":")).encode("utf-8")
-    batch_key = ec.generate_private_key(ec.SECP256R1())
-    subject = issuer = x509.Name([x509.NameAttribute(NameOID.COMMON_NAME, "Key Vault Passkey POC")])
-    certificate = (
-        x509.CertificateBuilder()
-        .subject_name(subject)
-        .issuer_name(issuer)
-        .public_key(batch_key.public_key())
-        .serial_number(x509.random_serial_number())
-        .not_valid_before(datetime.now(timezone.utc) - timedelta(days=1))
-        .not_valid_after(datetime.now(timezone.utc) + timedelta(days=30))
-        .sign(batch_key, hashes.SHA256())
-    )
-    attestation_signature = batch_key.sign(auth_data + __import__("hashlib").sha256(client_data).digest(), ec.ECDSA(hashes.SHA256()))
-    attestation = cbor2.dumps({"fmt": "packed", "attStmt": {"alg": -7, "sig": attestation_signature, "x5c": [certificate.public_bytes(serialization.Encoding.DER)]}, "authData": auth_data})
+    attestation = cbor2.dumps({"fmt": "none", "attStmt": {}, "authData": auth_data})
     completion = idx_post(
         session,
         same_org_url(finish["href"], origin),
-        {"credentials": {"clientData": base64.b64encode(client_data).decode(), "attestation": base64.b64encode(attestation).decode(), "transports": json.dumps([args.transport], separators=(",", ":")), "clientExtensions": json.dumps({"credProps": {"rk": False}}, separators=(",", ":"))}, "stateHandle": selected.get("stateHandle")},
+        {"credentials": {"clientData": base64.b64encode(client_data).decode(), "attestation": base64.b64encode(attestation).decode(), "clientExtensions": json.dumps({"credProps": {"rk": False}}, separators=(",", ":"))}, "stateHandle": selected.get("stateHandle")},
         headers,
     )
     if not completion.get("success"):
@@ -132,7 +114,7 @@ def main() -> int:
         "url": origin,
         "userName": str((activation.get("user") or {}).get("name") or ""),
         "keyVault": {"vaultName": args.keyvault_name, "keyName": key_name, "keyId": key["kid"]},
-        "okta": {"userId": str((activation.get("user") or {}).get("id") or ""), "transport": args.transport},
+        "okta": {"userId": str((activation.get("user") or {}).get("id") or "")},
     }
     output = Path(args.output_path or f"okta-passkey-{key_name}.json")
     output.write_text(json.dumps(record, indent=2) + "\n", encoding="utf-8")
