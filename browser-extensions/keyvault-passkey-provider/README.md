@@ -1,5 +1,7 @@
 ﻿# Key Vault Passkey Provider browser extension
 
+> Historical research snapshot. Do not load or release this copy as the current provider: it retains experimental Function-adapter, UV, and attestation behavior that was intentionally rejected during security review. The maintained implementation is `C:\GitHub\key-vault-passkey-provider\src\browser-extension`; this snapshot remains only as evidence for selectively promoted UX and broker experiments.
+
 This project is an MV3 development authenticator for the Function App samples in `research-passkeys`.
 
 Current scope:
