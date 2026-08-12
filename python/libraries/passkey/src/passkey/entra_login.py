@@ -228,13 +228,13 @@ def authenticate_with_passkey(
     if use_key_vault:
         time.sleep(0.5)
 
-    debug = _try_extract_json_payload(login_response.text)
-    current_page_id = debug.get("pgid") if isinstance(debug, dict) else None
+    debug_page = _try_extract_json_payload(login_response.text)
+    current_page_id = debug_page.get("pgid") if isinstance(debug_page, dict) else None
     last_page_id = None
     loop_count = 0
     last_response = login_response
 
-    while isinstance(debug, dict) and debug.get("pgid") in {"CmsiInterrupt", "KmsiInterrupt", "ConvergedSignIn"}:
+    while isinstance(debug_page, dict) and debug_page.get("pgid") in {"CmsiInterrupt", "KmsiInterrupt", "ConvergedSignIn"}:
         if (current_page_id == last_page_id and current_page_id != "ConvergedSignIn") or loop_count >= 10:
             raise PasskeyProtocolError(
                 "Authentication failed: stuck in interrupt loop during FIDO2 validation. "
@@ -243,18 +243,18 @@ def authenticate_with_passkey(
 
         last_page_id = current_page_id
         loop_count += 1
-        page_id = debug["pgid"]
+        page_id = debug_page["pgid"]
         if page_id == "CmsiInterrupt":
             response = session.post(
                 "https://login.microsoftonline.com/appverify",
                 data={
                     "ContinueAuth": "true",
                     "i19": 4130,
-                    "canary": debug.get("canary", ""),
+                    "canary": debug_page.get("canary", ""),
                     "iscsrfspeedbump": "false",
-                    "flowToken": debug.get("sFT", ""),
-                    "hpgrequestid": debug.get("correlationId", ""),
-                    "ctx": debug.get("sCtx", ""),
+                    "flowToken": debug_page.get("sFT", ""),
+                    "hpgrequestid": debug_page.get("correlationId", ""),
+                    "ctx": debug_page.get("sCtx", ""),
                 },
                 allow_redirects=False,
                 timeout=60,
@@ -266,10 +266,10 @@ def authenticate_with_passkey(
                 data={
                     "LoginOptions": 1,
                     "type": 28,
-                    "ctx": debug.get("sCtx", ""),
-                    "hpgrequestid": debug.get("correlationId", ""),
-                    "flowToken": debug.get("sFT", ""),
-                    "canary": debug.get("canary", ""),
+                    "ctx": debug_page.get("sCtx", ""),
+                    "hpgrequestid": debug_page.get("correlationId", ""),
+                    "flowToken": debug_page.get("sFT", ""),
+                    "canary": debug_page.get("canary", ""),
                     "i19": 4130,
                 },
                 allow_redirects=False,
@@ -277,12 +277,12 @@ def authenticate_with_passkey(
             )
             _debug_response("KmsiInterrupt", response, session, enabled=debug)
         else:
-            session_id = debug.get("sessionId")
-            arr_sessions = debug.get("arrSessions") or []
+            session_id = debug_page.get("sessionId")
+            arr_sessions = debug_page.get("arrSessions") or []
             if isinstance(arr_sessions, list) and arr_sessions and isinstance(arr_sessions[0], dict):
                 session_id = arr_sessions[0].get("id") or session_id
             response = session.get(
-                f"{debug.get('urlLogin', '')}&sessionid={session_id}",
+                f"{debug_page.get('urlLogin', '')}&sessionid={session_id}",
                 allow_redirects=False,
                 timeout=60,
             )
@@ -294,8 +294,8 @@ def authenticate_with_passkey(
         if response.status_code in (301, 302, 303, 307, 308) and location:
             last_response = _follow_completion_redirects(session, response)
             break
-        debug = _try_extract_json_payload(response.text)
-        current_page_id = debug.get("pgid") if isinstance(debug, dict) else None
+        debug_page = _try_extract_json_payload(response.text)
+        current_page_id = debug_page.get("pgid") if isinstance(debug_page, dict) else None
 
     if use_key_vault:
         time.sleep(0.5)

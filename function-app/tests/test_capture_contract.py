@@ -204,6 +204,35 @@ class CaptureContractTests(unittest.TestCase):
         self.assertIn("enableVirtualNetworkIntegration=true", deploy_script)
         self.assertIn("cannot be shared with a newly-created VNet", deploy_script)
 
+    def test_deployable_passkey_sources_match_canonical_sources(self):
+        canonical_python = ROOT / "python/libraries/passkey/src/passkey"
+        deployed_python = PYTHON_ROOT / "src/passkey"
+        canonical_files = {
+            path.relative_to(canonical_python): path.read_bytes()
+            for path in canonical_python.rglob("*")
+            if path.is_file() and "__pycache__" not in path.parts and path.suffix != ".pyc"
+        }
+        deployed_files = {
+            path.relative_to(deployed_python): path.read_bytes()
+            for path in deployed_python.rglob("*")
+            if path.is_file() and "__pycache__" not in path.parts and path.suffix != ".pyc"
+        }
+        self.assertEqual(canonical_files, deployed_files)
+
+        powershell_pairs = {
+            "modules/Passkey.Common/Passkey.Common.psm1": "modules/Passkey.Common/Passkey.Common.psm1",
+            "modules/Passkey.EntraAuth/Passkey.EntraAuth.psm1": "modules/Passkey.EntraAuth/Passkey.EntraAuth.psm1",
+            "scripts/entra/Register-EntraKeyVaultPasskey.ps1": "scripts/entra/Register-EntraKeyVaultPasskey.ps1",
+            "scripts/entra/reference/Invoke-EntraPasskeyLogin.ps1": "scripts/entra/reference/Invoke-EntraPasskeyLogin.ps1",
+            "scripts/entra/reference/Register-EntraKeyVaultPasskeyViaEstsAuth.ps1": "scripts/entra/reference/Register-EntraKeyVaultPasskeyViaEstsAuth.ps1",
+            "scripts/okta/Invoke-OktaPasskeyLogin.ps1": "scripts/okta/Invoke-OktaPasskeyLogin.ps1",
+            "scripts/okta/Register-OktaKeyVaultPasskeyViaIdxSession.ps1": "scripts/okta/Register-OktaKeyVaultPasskeyViaIdxSession.ps1",
+            "scripts/okta/Test-OktaPasskeyLoginViaIdxSession.ps1": "scripts/okta/Test-OktaPasskeyLoginViaIdxSession.ps1",
+        }
+        deployed_assets = POWERSHELL_ROOT / "src/shared/passkey-assets"
+        for canonical, deployed in powershell_pairs.items():
+            self.assertEqual((ROOT / "powershell" / canonical).read_bytes(), (deployed_assets / deployed).read_bytes())
+
 
 if __name__ == "__main__":
     unittest.main()

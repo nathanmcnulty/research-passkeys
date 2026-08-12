@@ -79,7 +79,7 @@ Current limitations:
 - the returned browser credential objects are reconstructed in page script and should still be treated as a compatibility spike until they are exercised against more relying parties
 - if a tab was already open when host access is granted or removed, that page may still need a reload to guarantee the expected document-start interception state
 - the compatibility User-Agent rule changes the HTTP header only; JavaScript-visible User-Agent and Client Hints remain the browser's real values
-- Easy Auth does not yet enforce per-user catalog ownership, so the POC delete route must not be treated as a production authorization design
+- Function-backed catalog and status routes bind records to the Easy Auth tenant/object identity; legacy records without an owner fail closed until migrated or re-registered
 
 ## Commands
 
