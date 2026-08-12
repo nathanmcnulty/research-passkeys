@@ -1026,8 +1026,12 @@ function Save-PasskeyCatalogRecord {
 function Update-PasskeyCatalogRecord {
     param(
         [Parameter(Mandatory)][hashtable]$Record,
-        [Parameter(Mandatory)][hashtable]$Configuration
+        [Parameter(Mandatory)][hashtable]$Configuration,
+        [Parameter(Mandatory)][ValidateNotNullOrEmpty()][string]$ETag
     )
+    if ($ETag -eq '*') {
+        throw 'A concrete catalog entity ETag is required for record updates.'
+    }
     $entity = [ordered]@{
         PartitionKey = ([string]$Record.keyVault.vaultName).ToLowerInvariant()
         RowKey = $Record.recordId
@@ -1047,8 +1051,18 @@ function Update-PasskeyCatalogRecord {
         RecordJson = ($Record | ConvertTo-Json -Depth 20 -Compress)
     }
     $uri = "$(Get-StorageTableServiceUri)/$(Get-PasskeyCatalogTableName)(PartitionKey='$($entity.PartitionKey)',RowKey='$($entity.RowKey)')"
-    Invoke-WebRequest -Method PUT -Uri $uri -Headers (Get-StorageTableHeaders -Configuration $Configuration) `
-        -ContentType 'application/json' -Body ($entity | ConvertTo-Json -Depth 10 -Compress) | Out-Null
+    $headers = Get-StorageTableHeaders -Configuration $Configuration
+    $headers['If-Match'] = $ETag
+    try {
+        Invoke-WebRequest -Method PUT -Uri $uri -Headers $headers -ContentType 'application/json' `
+            -Body ($entity | ConvertTo-Json -Depth 10 -Compress) | Out-Null
+    } catch {
+        $statusCode = if ($_.Exception.Response) { [int]$_.Exception.Response.StatusCode } else { $null }
+        if ($statusCode -eq 412) {
+            throw "Passkey catalog record '$($Record.recordId)' changed concurrently; reload it and retry."
+        }
+        throw
+    }
 }
 
 function Get-PasskeyCatalogRecords {
@@ -1107,7 +1121,8 @@ function Get-PasskeyCatalogRecord {
         [Parameter(Mandatory)]
         [hashtable]$Configuration,
         [Parameter(Mandatory)]
-        [string]$RecordId
+        [string]$RecordId,
+        [switch]$IncludeETag
     )
 
     Ensure-PasskeyCatalogTable -Configuration $Configuration
@@ -1115,16 +1130,25 @@ function Get-PasskeyCatalogRecord {
     $escapedRecordId = $RecordId.Replace("'", "''")
     $uri = "$(Get-StorageTableServiceUri)/$(Get-PasskeyCatalogTableName)(PartitionKey='$partitionKey',RowKey='$escapedRecordId')"
     try {
-        $entity = Invoke-RestMethod -Method GET -Uri $uri -Headers (Get-StorageTableHeaders -Configuration $Configuration)
+        $response = Invoke-WebRequest -Method GET -Uri $uri -Headers (Get-StorageTableHeaders -Configuration $Configuration)
     } catch {
         $statusCode = if ($_.Exception.Response) { [int]$_.Exception.Response.StatusCode } else { $null }
         if ($statusCode -eq 404) { return $null }
         throw
     }
+    $entity = $response.Content | ConvertFrom-Json -Depth 20
     if ([string]::IsNullOrWhiteSpace([string]$entity.RecordJson)) {
         throw "Passkey catalog record '$RecordId' is malformed."
     }
-    return [string]$entity.RecordJson | ConvertFrom-Json -AsHashtable -Depth 20
+    $record = [string]$entity.RecordJson | ConvertFrom-Json -AsHashtable -Depth 20
+    if (-not $IncludeETag) {
+        return $record
+    }
+    $etag = [string]$response.Headers['ETag']
+    if ([string]::IsNullOrWhiteSpace($etag)) {
+        throw "Passkey catalog record '$RecordId' did not include an ETag required for a safe update."
+    }
+    return [ordered]@{ Record = $record; ETag = $etag }
 }
 
 function Remove-PasskeyCatalogRecord {

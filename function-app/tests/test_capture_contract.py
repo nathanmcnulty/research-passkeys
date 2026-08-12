@@ -164,6 +164,18 @@ class CaptureContractTests(unittest.TestCase):
         self.assertIn("Get-PasskeyObjectValue -Object $Credential -Names @('signCount')", helper)
         self.assertIn("$signCount = if ($null -eq $signCountValue", helper)
 
+    def test_powershell_catalog_updates_require_current_etag(self):
+        source = (POWERSHELL_ROOT / "src/shared/PasskeyFunctionHelpers.ps1").read_text(encoding="utf-8")
+        update = source[source.index("function Update-PasskeyCatalogRecord"):source.index("function Get-PasskeyCatalogRecords")]
+        get_record = source[source.index("function Get-PasskeyCatalogRecord {"):source.index("function Remove-PasskeyCatalogRecord")]
+
+        self.assertIn("[Parameter(Mandatory)][ValidateNotNullOrEmpty()][string]$ETag", update)
+        self.assertIn("$headers['If-Match'] = $ETag", update)
+        self.assertNotIn("$headers['If-Match'] = '*'", update)
+        self.assertIn("$statusCode -eq 412", update)
+        self.assertIn("[switch]$IncludeETag", get_record)
+        self.assertIn("ETag = $etag", get_record)
+
     def test_powershell_secret_expiry_handles_unwrapped_datetime(self):
         helper = (POWERSHELL_ROOT / "src/shared/PasskeyFunctionHelpers.ps1").read_text(encoding="utf-8")
         self.assertIn("if ($null -ne $ExpiresAt)", helper)
