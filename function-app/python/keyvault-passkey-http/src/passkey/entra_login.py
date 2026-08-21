@@ -3,6 +3,7 @@ from __future__ import annotations
 import json
 import re
 import subprocess
+import sys
 import time
 from collections import OrderedDict
 from dataclasses import dataclass
@@ -15,6 +16,7 @@ from cryptography.hazmat.primitives.asymmetric import ec, utils
 
 from .common import (
     PasskeyProtocolError,
+    PasskeySecurityError,
     PasskeyValidationError,
     RP_ID,
     USER_AGENT,
@@ -76,6 +78,7 @@ def authenticate_with_passkey(
     user_agent: str = USER_AGENT,
     proxy: str | None = None,
     session: requests.Session | None = None,
+    debug: bool = False,
 ) -> PasskeyLoginResult:
     target_user = _get_required_string(credential, "userName", "username", "userPrincipalName")
     user_handle = _normalize_base64url(_get_required_string(credential, "userHandle"))
@@ -116,10 +119,9 @@ def authenticate_with_passkey(
             tenant_id=key_vault_tenant_id,
         )
 
-    session_info = _extract_json_payload(
-        session.get(auth_url, allow_redirects=False, timeout=60).text,
-        "initial authorize response",
-    )
+    authorize_response = session.get(auth_url, allow_redirects=False, timeout=60)
+    _debug_response("initial authorize", authorize_response, session, enabled=debug)
+    session_info = _extract_json_payload(authorize_response.text, "initial authorize response")
     has_fido = bool(
         (((session_info.get("oGetCredTypeResult") or {}).get("Credentials") or {}).get("HasFido"))
     )
@@ -187,6 +189,7 @@ def authenticate_with_passkey(
         allow_redirects=False,
         timeout=60,
     )
+    _debug_response("fido pre-verify", pre_verify, session, enabled=debug)
     if pre_verify.status_code >= 400:
         raise PasskeyProtocolError(
             f"Pre-verification failed: HTTP {pre_verify.status_code}. ResponseBody={pre_verify.text[:1000]}"
@@ -210,6 +213,7 @@ def authenticate_with_passkey(
         allow_redirects=False,
         timeout=60,
     )
+    _debug_response("fido login", login_response, session, enabled=debug)
     if use_key_vault:
         time.sleep(0.5)
 
@@ -220,16 +224,17 @@ def authenticate_with_passkey(
         allow_redirects=False,
         timeout=60,
     )
+    _debug_response("fido sso reload", login_response, session, enabled=debug)
     if use_key_vault:
         time.sleep(0.5)
 
-    debug = _try_extract_json_payload(login_response.text)
-    current_page_id = debug.get("pgid") if isinstance(debug, dict) else None
+    debug_page = _try_extract_json_payload(login_response.text)
+    current_page_id = debug_page.get("pgid") if isinstance(debug_page, dict) else None
     last_page_id = None
     loop_count = 0
     last_response = login_response
 
-    while isinstance(debug, dict) and debug.get("pgid") in {"CmsiInterrupt", "KmsiInterrupt", "ConvergedSignIn"}:
+    while isinstance(debug_page, dict) and debug_page.get("pgid") in {"CmsiInterrupt", "KmsiInterrupt", "ConvergedSignIn"}:
         if (current_page_id == last_page_id and current_page_id != "ConvergedSignIn") or loop_count >= 10:
             raise PasskeyProtocolError(
                 "Authentication failed: stuck in interrupt loop during FIDO2 validation. "
@@ -238,47 +243,50 @@ def authenticate_with_passkey(
 
         last_page_id = current_page_id
         loop_count += 1
-        page_id = debug["pgid"]
+        page_id = debug_page["pgid"]
         if page_id == "CmsiInterrupt":
             response = session.post(
                 "https://login.microsoftonline.com/appverify",
                 data={
                     "ContinueAuth": "true",
                     "i19": 4130,
-                    "canary": debug.get("canary", ""),
+                    "canary": debug_page.get("canary", ""),
                     "iscsrfspeedbump": "false",
-                    "flowToken": debug.get("sFT", ""),
-                    "hpgrequestid": debug.get("correlationId", ""),
-                    "ctx": debug.get("sCtx", ""),
+                    "flowToken": debug_page.get("sFT", ""),
+                    "hpgrequestid": debug_page.get("correlationId", ""),
+                    "ctx": debug_page.get("sCtx", ""),
                 },
                 allow_redirects=False,
                 timeout=60,
             )
+            _debug_response("CmsiInterrupt", response, session, enabled=debug)
         elif page_id == "KmsiInterrupt":
             response = session.post(
                 "https://login.microsoftonline.com/kmsi",
                 data={
                     "LoginOptions": 1,
                     "type": 28,
-                    "ctx": debug.get("sCtx", ""),
-                    "hpgrequestid": debug.get("correlationId", ""),
-                    "flowToken": debug.get("sFT", ""),
-                    "canary": debug.get("canary", ""),
+                    "ctx": debug_page.get("sCtx", ""),
+                    "hpgrequestid": debug_page.get("correlationId", ""),
+                    "flowToken": debug_page.get("sFT", ""),
+                    "canary": debug_page.get("canary", ""),
                     "i19": 4130,
                 },
                 allow_redirects=False,
                 timeout=60,
             )
+            _debug_response("KmsiInterrupt", response, session, enabled=debug)
         else:
-            session_id = debug.get("sessionId")
-            arr_sessions = debug.get("arrSessions") or []
+            session_id = debug_page.get("sessionId")
+            arr_sessions = debug_page.get("arrSessions") or []
             if isinstance(arr_sessions, list) and arr_sessions and isinstance(arr_sessions[0], dict):
                 session_id = arr_sessions[0].get("id") or session_id
             response = session.get(
-                f"{debug.get('urlLogin', '')}&sessionid={session_id}",
+                f"{debug_page.get('urlLogin', '')}&sessionid={session_id}",
                 allow_redirects=False,
                 timeout=60,
             )
+            _debug_response("ConvergedSignIn", response, session, enabled=debug)
 
         last_response = response
         time.sleep(0.3)
@@ -286,14 +294,19 @@ def authenticate_with_passkey(
         if response.status_code in (301, 302, 303, 307, 308) and location:
             last_response = _follow_completion_redirects(session, response)
             break
-        debug = _try_extract_json_payload(response.text)
-        current_page_id = debug.get("pgid") if isinstance(debug, dict) else None
+        debug_page = _try_extract_json_payload(response.text)
+        current_page_id = debug_page.get("pgid") if isinstance(debug_page, dict) else None
 
     if use_key_vault:
         time.sleep(0.5)
 
-    _follow_completion_redirects(session, last_response)
+    completion_response = _follow_completion_redirects(session, last_response)
+    _debug_response("completion", completion_response, session, enabled=debug)
     ests_cookies = [cookie for cookie in session.cookies if cookie.name.startswith("ESTS")]
+    if completion_response is not None:
+        ests_cookies.extend(cookie for cookie in completion_response.cookies if cookie.name.startswith("ESTS"))
+    if debug and not ests_cookies:
+        print("[passkey-debug] No ESTS cookies found after completion.", file=sys.stderr)
     if not ests_cookies:
         return PasskeyLoginResult(
             success=False,
@@ -361,6 +374,41 @@ def _ensure_query_parameter(auth_url: str, name: str, value: str) -> str:
     return f"{auth_url}{delimiter}{urlencode({name: value})}"
 
 
+def _debug_response(
+    label: str,
+    response: requests.Response | None,
+    session: requests.Session,
+    *,
+    enabled: bool,
+) -> None:
+    if not enabled:
+        return
+    if response is None:
+        print(f"[passkey-debug] {label}: no response", file=sys.stderr)
+        return
+
+    parsed_url = urlparse(response.url)
+    safe_url = f"{parsed_url.scheme}://{parsed_url.netloc}{parsed_url.path}"
+    location = response.headers.get("Location")
+    if location:
+        parsed_location = urlparse(urljoin(response.url, location))
+        safe_location = f"{parsed_location.scheme}://{parsed_location.netloc}{parsed_location.path}"
+    else:
+        safe_location = "-"
+    page = _try_extract_json_payload(response.text) if response.text else None
+    page_id = page.get("pgid") if isinstance(page, dict) else None
+    error_message = page.get("strServiceExceptionMessage") if isinstance(page, dict) else None
+    response_cookie_names = sorted(cookie.name for cookie in response.cookies)
+    session_cookie_names = sorted(cookie.name for cookie in session.cookies)
+    print(
+        f"[passkey-debug] {label}: status={response.status_code} url={safe_url} "
+        f"page={page_id or '-'} error={error_message or '-'} "
+        f"location={safe_location} responseCookies={response_cookie_names or '-'} "
+        f"sessionCookies={session_cookie_names or '-'}",
+        file=sys.stderr,
+    )
+
+
 def _follow_completion_redirects(session: requests.Session, response: requests.Response | None, max_hops: int = 10) -> requests.Response | None:
     current = response
     hops = 0
@@ -398,10 +446,10 @@ def _try_extract_json_payload(content: str) -> dict[str, Any] | None:
 
 
 def _new_authenticator_data(relying_party: str, sign_count: int) -> bytes:
-    digest = hashes.Hash(hashes.SHA256())
-    digest.update(relying_party.encode("utf-8"))
-    rp_id_hash = digest.finalize()
-    return rp_id_hash + bytes([0x05]) + int(sign_count).to_bytes(4, "big")
+    del relying_party, sign_count
+    raise PasskeySecurityError(
+        "Software-backed assertions are disabled because this process cannot prove fresh user presence or verification."
+    )
 
 
 def _new_fido_signature(

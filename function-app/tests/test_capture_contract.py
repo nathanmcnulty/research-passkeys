@@ -16,6 +16,15 @@ class CaptureContractTests(unittest.TestCase):
             with (ROOT / "contracts" / name).open(encoding="utf-8") as stream:
                 json.load(stream)
 
+    def test_logic_app_run_history_secures_secret_inputs_and_outputs(self):
+        workflow_root = ROOT / "templates/logic-app/passkey-function-http/workflows"
+        for workflow_path in workflow_root.glob("*.json"):
+            workflow = json.loads(workflow_path.read_text(encoding="utf-8"))
+            operations = list(workflow["triggers"].values()) + list(workflow["actions"].values())
+            for operation in operations:
+                properties = operation.get("runtimeConfiguration", {}).get("secureData", {}).get("properties", [])
+                self.assertEqual(set(properties), {"inputs", "outputs"}, workflow_path)
+
     def test_both_templates_define_capture_resources_and_guards(self):
         required = {
             "PASSKEY_CAPTURE_TABLE_NAME",
@@ -70,6 +79,26 @@ class CaptureContractTests(unittest.TestCase):
         self.assertIn('queue_message.pop("cookieHeader", None)', python_source)
         self.assertIn('queue_message.pop("stateHandle", None)', python_source)
 
+    def test_samples_do_not_log_or_place_secrets_in_urls_by_default(self):
+        proxy = (ROOT / "samples/proxy-entra/http_proxy.go").read_text(encoding="utf-8")
+        python_login = (ROOT / "python/samples/entra/invoke_entra_passkey_login.py").read_text(encoding="utf-8")
+        python_queue = (ROOT / "scripts/validation/submit_entra_queue_passkey_registration.py").read_text(encoding="utf-8")
+        powershell_queue = (ROOT / "scripts/validation/Invoke-EntraQueuePasskeyRegistration.ps1").read_text(encoding="utf-8")
+        powershell_live = (ROOT / "scripts/validation/Invoke-EntraLiveFunctionQueueValidation.ps1").read_text(encoding="utf-8")
+        python_function = (PYTHON_ROOT / "src/function_app.py").read_text(encoding="utf-8")
+        powershell_helper = (POWERSHELL_ROOT / "src/shared/PasskeyFunctionHelpers.ps1").read_text(encoding="utf-8")
+
+        self.assertNotIn("request body: %s", proxy)
+        self.assertIn("--show-cookie", python_login)
+        self.assertIn('if args.show_cookie else {}', python_login)
+        self.assertNotIn("code={parse.quote", python_queue)
+        self.assertIn('headers["x-functions-key"]', python_queue)
+        self.assertNotIn("code=$([uri]::EscapeDataString($FunctionKey))", powershell_queue)
+        self.assertIn("headers['x-functions-key']", powershell_queue)
+        self.assertNotIn("?code=", powershell_live)
+        self.assertIn("def _get_secret_body_value", python_function)
+        self.assertIn("function Get-SecretBodyValue", powershell_helper)
+
     def test_entra_queue_worker_replays_normalized_capture_context(self):
         powershell_worker = (
             POWERSHELL_ROOT / "src/ProcessEntraPasskeyRegistrationViaEstsAuth/run.ps1"
@@ -80,10 +109,29 @@ class CaptureContractTests(unittest.TestCase):
         python_source = (PYTHON_ROOT / "src/function_app.py").read_text(encoding="utf-8")
 
         self.assertIn("Get-EstsAuthCookieFromSource -CookieSource $capturedBody", powershell_worker)
-        self.assertIn("$message.redirectUri ?? $message.redirecturi", powershell_worker)
-        self.assertIn("Get-RequestValue -Body $Body -Request $Request -Names @('redirectUri', 'redirecturi')", powershell_helper)
+        self.assertNotIn("$message.redirectUri ?? $message.redirecturi", powershell_worker)
+        self.assertNotIn("Get-RequestValue -Body $Body -Request $Request -Names @('redirectUri', 'redirecturi')", powershell_helper)
         self.assertIn("extract_ests_auth_cookie_value(captured_payload)", python_source)
-        self.assertIn('message_payload.get("redirectUri")', python_source)
+        self.assertNotIn('message_payload.get("redirectUri")', python_source)
+
+    def test_entra_portal_origin_is_server_controlled_and_upstream_urls_are_checked(self):
+        powershell_helper = (
+            POWERSHELL_ROOT / "src/shared/PasskeyFunctionHelpers.ps1"
+        ).read_text(encoding="utf-8")
+        python_source = (PYTHON_ROOT / "src/function_app.py").read_text(encoding="utf-8")
+        python_registration = (
+            ROOT / "python/libraries/passkey/src/passkey/entra_registration.py"
+        ).read_text(encoding="utf-8")
+
+        redirect_resolver = python_source.split("def _resolve_redirect_uri", 1)[1].split("\ndef ", 1)[0]
+        self.assertNotIn("_get_request_value", redirect_resolver)
+        self.assertIn("PASSKEY_ENTRA_PORTAL_ORIGIN", redirect_resolver)
+        powershell_resolver = powershell_helper.split("function Resolve-RequestRedirectUri", 1)[1].split("\nfunction ", 1)[0]
+        self.assertNotIn("Get-RequestValue", powershell_resolver)
+        self.assertIn("PASSKEY_ENTRA_PORTAL_ORIGIN", powershell_resolver)
+        self.assertIn("def _require_allowed_service_url", python_registration)
+        self.assertIn('field_name="postBackUrl"', python_registration)
+        self.assertIn('field_name="provisionUrl"', python_registration)
 
     def test_capture_user_agent_does_not_override_ests_replay_profile(self):
         powershell_helper = (
@@ -116,6 +164,18 @@ class CaptureContractTests(unittest.TestCase):
         self.assertIn("Get-PasskeyObjectValue -Object $Credential -Names @('signCount')", helper)
         self.assertIn("$signCount = if ($null -eq $signCountValue", helper)
 
+    def test_powershell_catalog_updates_require_current_etag(self):
+        source = (POWERSHELL_ROOT / "src/shared/PasskeyFunctionHelpers.ps1").read_text(encoding="utf-8")
+        update = source[source.index("function Update-PasskeyCatalogRecord"):source.index("function Get-PasskeyCatalogRecords")]
+        get_record = source[source.index("function Get-PasskeyCatalogRecord {"):source.index("function Remove-PasskeyCatalogRecord")]
+
+        self.assertIn("[Parameter(Mandatory)][ValidateNotNullOrEmpty()][string]$ETag", update)
+        self.assertIn("$headers['If-Match'] = $ETag", update)
+        self.assertNotIn("$headers['If-Match'] = '*'", update)
+        self.assertIn("$statusCode -eq 412", update)
+        self.assertIn("[switch]$IncludeETag", get_record)
+        self.assertIn("ETag = $etag", get_record)
+
     def test_powershell_secret_expiry_handles_unwrapped_datetime(self):
         helper = (POWERSHELL_ROOT / "src/shared/PasskeyFunctionHelpers.ps1").read_text(encoding="utf-8")
         self.assertIn("if ($null -ne $ExpiresAt)", helper)
@@ -143,6 +203,35 @@ class CaptureContractTests(unittest.TestCase):
         self.assertIn("ExistingNatGatewayName", deploy_script)
         self.assertIn("enableVirtualNetworkIntegration=true", deploy_script)
         self.assertIn("cannot be shared with a newly-created VNet", deploy_script)
+
+    def test_deployable_passkey_sources_match_canonical_sources(self):
+        canonical_python = ROOT / "python/libraries/passkey/src/passkey"
+        deployed_python = PYTHON_ROOT / "src/passkey"
+        canonical_files = {
+            path.relative_to(canonical_python): path.read_bytes()
+            for path in canonical_python.rglob("*")
+            if path.is_file() and "__pycache__" not in path.parts and path.suffix != ".pyc"
+        }
+        deployed_files = {
+            path.relative_to(deployed_python): path.read_bytes()
+            for path in deployed_python.rglob("*")
+            if path.is_file() and "__pycache__" not in path.parts and path.suffix != ".pyc"
+        }
+        self.assertEqual(canonical_files, deployed_files)
+
+        powershell_pairs = {
+            "modules/Passkey.Common/Passkey.Common.psm1": "modules/Passkey.Common/Passkey.Common.psm1",
+            "modules/Passkey.EntraAuth/Passkey.EntraAuth.psm1": "modules/Passkey.EntraAuth/Passkey.EntraAuth.psm1",
+            "scripts/entra/Register-EntraKeyVaultPasskey.ps1": "scripts/entra/Register-EntraKeyVaultPasskey.ps1",
+            "scripts/entra/reference/Invoke-EntraPasskeyLogin.ps1": "scripts/entra/reference/Invoke-EntraPasskeyLogin.ps1",
+            "scripts/entra/reference/Register-EntraKeyVaultPasskeyViaEstsAuth.ps1": "scripts/entra/reference/Register-EntraKeyVaultPasskeyViaEstsAuth.ps1",
+            "scripts/okta/Invoke-OktaPasskeyLogin.ps1": "scripts/okta/Invoke-OktaPasskeyLogin.ps1",
+            "scripts/okta/Register-OktaKeyVaultPasskeyViaIdxSession.ps1": "scripts/okta/Register-OktaKeyVaultPasskeyViaIdxSession.ps1",
+            "scripts/okta/Test-OktaPasskeyLoginViaIdxSession.ps1": "scripts/okta/Test-OktaPasskeyLoginViaIdxSession.ps1",
+        }
+        deployed_assets = POWERSHELL_ROOT / "src/shared/passkey-assets"
+        for canonical, deployed in powershell_pairs.items():
+            self.assertEqual((ROOT / "powershell" / canonical).read_bytes(), (deployed_assets / deployed).read_bytes())
 
 
 if __name__ == "__main__":

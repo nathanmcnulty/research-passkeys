@@ -12,15 +12,8 @@ import { ensurePinUvLocalVerifier, getPinUvStatus, hasConfiguredPinUv, removePin
 import { evaluateSetupProgress, getSetupIncompleteMessage, isConfigReady } from "./shared/setup-state";
 import { deserializeRuntimeCredentialOptions } from "./shared/runtime-credential-options";
 import { clearLockState, ensureExtensionStateInitialized, loadExtensionState, resetLockStateTracking, saveExtensionState, setLockState, touchLastActivity, updateConfig, updateEnabled, updateInterceptTelemetry, updateInteractiveUnlockExpiresAt, updateLockTimeoutMinutes } from "./shared/storage";
-import { buildAssertionAuthenticatorDataWithFlags, buildEcP256SubjectPublicKeyInfo, buildMakeCredentialAuthenticatorData, buildNoneAttestationObject, buildPackedAttestationObject } from "./shared/webauthn-data";
+import { buildAssertionAuthenticatorDataWithFlags, buildEcP256SubjectPublicKeyInfo, buildMakeCredentialAuthenticatorData, buildNoneAttestationObject } from "./shared/webauthn-data";
 
-x509.cryptoProvider.set(globalThis.crypto);
-
-const batchAttestationSubject = "CN=Batch Certificate, OU=Authenticator Attestation, O=Chromium, C=US";
-const batchAttestationNotBefore = new Date("2017-07-14T02:40:00.000Z");
-const batchAttestationNotAfter = new Date("2046-02-06T06:33:07.000Z");
-const compatibilityPackedAttestationRpIds = new Set(["login.microsoft.com"]);
-const compatibilityAuthenticatorAaguidHex = "33867143325B48D0ADFCE7AE975FE068";
 const opaqueAuthenticatorAaguidHex = "00000000000000000000000000000000";
 
 const tokenBroker = new BrowserEntraTokenBroker();
@@ -389,11 +382,13 @@ async function handleCreateRequest(
 
   const rpId = resolveEffectiveRpId(publicKey.rp?.id, clientData.origin);
   assertRpIdAllowedForOrigin(rpId, clientData.origin);
-  const userVerified = await resolveUserVerification(config, publicKey.authenticatorSelection?.userVerification, {
-    operation: "create",
-    rpId,
-    origin: clientData.origin
-  });
+  if (publicKey.authenticatorSelection?.userVerification === "required") {
+    throw new DOMException(
+      "Registration requires authenticator-bound user verification, which this software provider cannot prove.",
+      "NotSupportedError"
+    );
+  }
+  const userVerified = false;
 
   if (!publicKey.user?.id || !publicKey.user.name) {
     throw new DOMException("User information is required.", "TypeError");
@@ -438,7 +433,7 @@ async function handleCreateRequest(
 
     const clientDataJSON = buildClientDataJson("webauthn.create", publicKey.challenge, clientData);
     const extensionOutputs = buildCreateExtensionOutputs(publicKey);
-    const authenticatorProfile = resolveAuthenticatorProfile(rpId);
+    const authenticatorProfile = resolveAuthenticatorProfile();
     const authenticatorData = await buildMakeCredentialAuthenticatorData(
       rpId,
       credentialIdBytes,
@@ -451,7 +446,7 @@ async function handleCreateRequest(
       extensionOutputs.authenticatorDataExtensions,
       authenticatorProfile.aaguidHex
     );
-    const attestationObject = await buildAttestationObject(rpId, publicKey.attestation, authenticatorData, clientDataJSON);
+    const attestationObject = buildNoneAttestationObject(authenticatorData);
     const record = buildStoredCredentialRecord(publicKey, rpId, credentialIdBytes, key.keyId);
 
     await setCreateDebugPhase("save-record");
@@ -486,63 +481,6 @@ async function handleCreateRequest(
 
     throw error;
   }
-}
-
-async function buildAttestationObject(
-  rpId: string,
-  attestationPreference: AttestationConveyancePreference | undefined,
-  authenticatorData: Uint8Array,
-  clientDataJSON: Uint8Array
-): Promise<Uint8Array> {
-  if (!shouldEmitSyntheticPackedAttestation(rpId, attestationPreference)) {
-    return buildNoneAttestationObject(authenticatorData);
-  }
-
-  const clientDataHash = new Uint8Array(await crypto.subtle.digest("SHA-256", toPlainArrayBuffer(clientDataJSON)));
-  const signedBytes = combine(authenticatorData, clientDataHash);
-  const batchMaterial = await createBatchAttestationMaterial(signedBytes);
-  return buildPackedAttestationObject(authenticatorData, batchMaterial.signature, [batchMaterial.certificate]);
-}
-
-async function createBatchAttestationMaterial(signedBytes: Uint8Array): Promise<{
-  certificate: Uint8Array;
-  signature: Uint8Array;
-}> {
-  const keyAlgorithm: EcKeyGenParams = {
-    name: "ECDSA",
-    namedCurve: "P-256"
-  };
-  const signingAlgorithm: EcdsaParams = {
-    name: "ECDSA",
-    hash: "SHA-256"
-  };
-  const keys = await crypto.subtle.generateKey(keyAlgorithm, true, ["sign", "verify"]);
-  const certificate = await x509.X509CertificateGenerator.createSelfSigned({
-    serialNumber: crypto.randomUUID().replace(/-/g, ""),
-    name: batchAttestationSubject,
-    notBefore: batchAttestationNotBefore,
-    notAfter: batchAttestationNotAfter,
-    keys,
-    signingAlgorithm,
-    extensions: [
-      new x509.KeyUsagesExtension(x509.KeyUsageFlags.digitalSignature, true),
-      await x509.SubjectKeyIdentifierExtension.create(keys.publicKey)
-    ]
-  }, globalThis.crypto);
-
-  const signature = await crypto.subtle.sign(signingAlgorithm, keys.privateKey, toPlainArrayBuffer(signedBytes));
-  const asnSignature = new x509.AsnEcSignatureFormatter().toAsnSignature(
-    { ...keyAlgorithm, hash: "SHA-256" } as EcKeyGenParams & EcdsaParams,
-    signature
-  );
-  if (!asnSignature) {
-    throw new Error("Failed to encode packed attestation signature.");
-  }
-
-  return {
-    certificate: new Uint8Array(certificate.rawData),
-    signature: new Uint8Array(asnSignature)
-  };
 }
 
 async function setCreateDebugPhase(phase: string): Promise<void> {
@@ -580,6 +518,8 @@ async function handleGetRequest(
   clientData: WebAuthnClientData,
   options: CredentialCreationOptions | CredentialRequestOptions
 ): Promise<SerializedPublicKeyCredential | CredentialSelectionDirective> {
+  rejectSoftwareBackedAssertion();
+
   const publicKey = getRequestOptions(options);
   if (!publicKey) {
     throw new DOMException("Expected publicKey request options.", "TypeError");
@@ -631,7 +571,7 @@ async function handleGetRequest(
   }
 
   const nextSignCount = selected.signCount + 1;
-  const authenticatorProfile = resolveAuthenticatorProfile(selected.rpId);
+  const authenticatorProfile = resolveAuthenticatorProfile();
   const authenticatorData = await buildAssertionAuthenticatorDataWithFlags(rpId, nextSignCount, userVerified);
   const clientDataJSON = buildClientDataJson("webauthn.get", publicKey.challenge, clientData);
   const clientDataHash = new Uint8Array(await crypto.subtle.digest("SHA-256", toPlainArrayBuffer(clientDataJSON)));
@@ -643,8 +583,7 @@ async function handleGetRequest(
     const assertion = await environment.developmentCatalog.assert(
       selected.recordId,
       rpId,
-      clientDataHash,
-      userVerified
+      clientDataHash
     );
     const signature = new x509.AsnEcSignatureFormatter().toAsnSignature(
       { name: "ECDSA", namedCurve: "P-256", hash: "SHA-256" } as EcKeyGenParams & EcdsaParams,
@@ -699,6 +638,13 @@ async function handleGetRequest(
       userHandle: selected.userHandle
     }
   };
+}
+
+function rejectSoftwareBackedAssertion(): void {
+  throw new DOMException(
+    "Software-backed assertions are disabled until a trusted native user-presence channel is available.",
+    "NotSupportedError"
+  );
 }
 
 function ensureEs256Supported(parameters: PublicKeyCredentialParameters[]): void {
@@ -1089,32 +1035,16 @@ function buildCreateExtensionOutputs(
   };
 }
 
-function resolveAuthenticatorProfile(rpId: string): {
+function resolveAuthenticatorProfile(): {
   authenticatorAttachment: AuthenticatorAttachment | null;
   transports: AuthenticatorTransport[];
   aaguidHex: string;
 } {
-  if (compatibilityPackedAttestationRpIds.has(rpId)) {
-    return {
-      authenticatorAttachment: "cross-platform",
-      transports: ["usb"],
-      aaguidHex: compatibilityAuthenticatorAaguidHex
-    };
-  }
-
   return {
     authenticatorAttachment: null,
     transports: [],
     aaguidHex: opaqueAuthenticatorAaguidHex
   };
-}
-
-function shouldEmitSyntheticPackedAttestation(
-  rpId: string,
-  attestationPreference: AttestationConveyancePreference | undefined
-): boolean {
-  return (attestationPreference ?? "none") !== "none"
-    && compatibilityPackedAttestationRpIds.has(rpId);
 }
 
 function buildKeyName(prefix: string): string {

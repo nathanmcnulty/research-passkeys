@@ -5,9 +5,10 @@ param($Request, $TriggerMetadata)
 . (Join-Path $PSScriptRoot '..\shared\PasskeyFunctionHelpers.ps1')
 
 try {
+    $owner = Get-PasskeyCallerIdentity -Request $Request
     $body = Get-RequestBodyObject -Request $Request
     $userPrincipalName = Get-RequestValue -Body $body -Request $Request -Names @('userPrincipalName', 'username', 'email')
-    $tap = Get-RequestValue -Body $body -Request $Request -Names @('tap', 'temporaryAccessPass')
+    $tap = Get-SecretBodyValue -Body $body -Names @('tap', 'temporaryAccessPass')
     $displayName = Get-RequestValue -Body $body -Request $Request -Names @('displayName')
     $keyVaultKeyName = Get-RequestValue -Body $body -Request $Request -Names @('keyVaultKeyName')
     $userAgent = Resolve-RequestUserAgent -Body $body -Request $Request
@@ -53,7 +54,7 @@ try {
 
     $credential = Invoke-PasskeyRegistrationScript -ScriptPath $scriptPath -Parameters $scriptParameters
     $extensions = Save-PasskeyLoginAndCaptureContext -Provider entra -Body $body -Credential $credential -Configuration $configuration -UserAgent $userAgent
-    $catalogRecord = Save-PasskeyCatalogRecord -Provider entra -Credential $credential -Configuration $configuration -Extensions $extensions
+    $catalogRecord = Save-PasskeyCatalogRecord -Provider entra -Credential $credential -Configuration $configuration -Owner $owner -Extensions $extensions
 
     Push-OutputBinding -Name Response -Value (New-JsonHttpResponse -StatusCode ([HttpStatusCode]::OK) -Body ([ordered]@{
         success = $true

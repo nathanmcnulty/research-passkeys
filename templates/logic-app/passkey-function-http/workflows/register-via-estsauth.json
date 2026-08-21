@@ -40,6 +40,9 @@
             "estsAuth"
           ]
         }
+      },
+      "runtimeConfiguration": {
+        "secureData": { "properties": ["inputs", "outputs"] }
       }
     }
   },
@@ -55,6 +58,9 @@
           "Content-Type": "application/json"
         },
         "body": "@triggerBody()"
+      },
+      "runtimeConfiguration": {
+        "secureData": { "properties": ["inputs", "outputs"] }
       }
     },
     "Return_result": {
@@ -70,6 +76,9 @@
       "inputs": {
         "statusCode": "@outputs('Invoke_function')?['statusCode']",
         "body": "@body('Invoke_function')"
+      },
+      "runtimeConfiguration": {
+        "secureData": { "properties": ["inputs", "outputs"] }
       }
     }
   },

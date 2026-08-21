@@ -1,6 +1,6 @@
-﻿import { encodeArray, encodeBoolean, encodeByteString, encodeInteger, encodeMap, encodeTextString } from "./cbor";
+﻿import { encodeBoolean, encodeByteString, encodeInteger, encodeMap, encodeTextString } from "./cbor";
 
-const defaultAaguidHex = "33867143325B48D0ADFCE7AE975FE068";
+const defaultAaguidHex = "00000000000000000000000000000000";
 
 export async function buildMakeCredentialAuthenticatorData(
   rpId: string,
@@ -23,7 +23,7 @@ export async function buildMakeCredentialAuthenticatorData(
   result.set(rpIdHash, offset);
   offset += rpIdHash.length;
   result[offset] = buildFlags({
-    userPresent: true,
+    userPresent: false,
     userVerified,
     attestedCredentialData: true,
     backupEligible,
@@ -61,25 +61,16 @@ export async function buildAssertionAuthenticatorDataWithFlags(
   backupState = false,
   extensions: Array<[string, Uint8Array]> = []
 ): Promise<Uint8Array> {
-  const rpIdHash = await sha256(new TextEncoder().encode(rpId));
-  const extensionsData = buildAuthenticatorExtensionsData(extensions);
-  const result = new Uint8Array(32 + 1 + 4 + extensionsData.length);
-  result.set(rpIdHash, 0);
-  result[32] = buildFlags({
-    userPresent: true,
-    userVerified,
-    attestedCredentialData: false,
-    backupEligible,
-    backupState,
-    extensionDataIncluded: extensionsData.length > 0
-  });
-  writeUint32BigEndian(result, 33, signCount);
-
-  if (extensionsData.length > 0) {
-    result.set(extensionsData, 37);
-  }
-
-  return result;
+  void rpId;
+  void signCount;
+  void userVerified;
+  void backupEligible;
+  void backupState;
+  void extensions;
+  throw new DOMException(
+    "Assertion authenticator data requires a trusted user-presence channel.",
+    "NotSupportedError"
+  );
 }
 
 export function buildCosePublicKey(x: Uint8Array, y: Uint8Array): Uint8Array {
@@ -116,30 +107,6 @@ export function buildNoneAttestationObject(authenticatorData: Uint8Array): Uint8
   return encodeMap([
     [encodeTextString("fmt"), encodeTextString("none")],
     [encodeTextString("attStmt"), encodeMap([])],
-    [encodeTextString("authData"), encodeByteString(authenticatorData)]
-  ]);
-}
-
-export function buildPackedAttestationObject(
-  authenticatorData: Uint8Array,
-  signature: Uint8Array,
-  certificates: Uint8Array[] = []
-): Uint8Array {
-  const attestationStatementEntries: Array<[Uint8Array, Uint8Array]> = [
-    [encodeTextString("alg"), encodeInteger(-7)],
-    [encodeTextString("sig"), encodeByteString(signature)]
-  ];
-
-  if (certificates.length > 0) {
-    attestationStatementEntries.push([
-      encodeTextString("x5c"),
-      encodeArray(certificates.map((certificate) => encodeByteString(certificate)))
-    ]);
-  }
-
-  return encodeMap([
-    [encodeTextString("fmt"), encodeTextString("packed")],
-    [encodeTextString("attStmt"), encodeMap(attestationStatementEntries)],
     [encodeTextString("authData"), encodeByteString(authenticatorData)]
   ]);
 }

@@ -5,6 +5,7 @@ param($Request, $TriggerMetadata)
 . (Join-Path $PSScriptRoot '..\shared\PasskeyFunctionHelpers.ps1')
 
 try {
+    $owner = Get-PasskeyCallerIdentity -Request $Request
     $body = Get-RequestBodyObject -Request $Request
     $userPrincipalName = Get-RequestValue -Body $body -Request $Request -Names @('userPrincipalName', 'username', 'email')
     $estsAuthCookie = Resolve-EstsAuthCookie -Body $body -Request $Request
@@ -38,9 +39,11 @@ try {
         captureContext = $captureContext
         userAgent = $userAgent
         redirectUri = $redirectUri
+        owner = $owner
     }
 
     Set-RegistrationStatus -RequestId $requestId -Status ([ordered]@{
+        owner = $owner
         requestId = $requestId
         status = 'queued'
         authMethod = 'estsauth'

@@ -349,7 +349,8 @@ $rpId = if ($RelyingParty) { $RelyingParty } else { $oktaHost }
 $rpHash = [System.Security.Cryptography.SHA256]::HashData([Text.Encoding]::UTF8.GetBytes($rpId))
 $counterBytes = [BitConverter]::GetBytes([uint32]$SignCount)
 if ([BitConverter]::IsLittleEndian) { [Array]::Reverse($counterBytes) }
-$authData = [byte[]]($rpHash + [byte[]]@(0x05) + $counterBytes)
+throw [System.NotSupportedException]::new('Software-backed assertions are disabled because this process cannot prove fresh user presence or verification.')
+$authData = [byte[]]($rpHash + [byte[]]@(0x00) + $counterBytes)
 $clientDataJson = [ordered]@{ type = 'webauthn.get'; challenge = [string]$challengeData.challenge; origin = $origin; crossOrigin = $false } | ConvertTo-Json -Compress
 $clientDataBytes = [Text.Encoding]::UTF8.GetBytes($clientDataJson)
 $clientHash = [System.Security.Cryptography.SHA256]::HashData($clientDataBytes)

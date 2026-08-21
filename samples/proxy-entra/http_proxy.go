@@ -106,7 +106,7 @@ func sendToWebhook(data map[string]interface{}) {
         return
     }
 
-    fmt.Printf("[webhook] request body: %s\n", string(jsonData))
+    fmt.Printf("[webhook] sending redacted event metadata (%d bytes)\n", len(jsonData))
 	
     req, err := http.NewRequest("POST", webhookURL, bytes.NewBuffer(jsonData))
     if err != nil {
@@ -124,7 +124,7 @@ func sendToWebhook(data map[string]interface{}) {
     defer resp.Body.Close()
 
     respBody, _ := ioutil.ReadAll(resp.Body)
-    fmt.Printf("[webhook] Sent to webhook (status: %d) response: %s\n", resp.StatusCode, string(respBody))
+    fmt.Printf("[webhook] sent to webhook (status: %d, response bytes: %d)\n", resp.StatusCode, len(respBody))
 }
 
 // set the value of the specified key in the JSON body

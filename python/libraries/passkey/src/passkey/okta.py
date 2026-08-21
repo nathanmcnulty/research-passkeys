@@ -5,17 +5,12 @@ import hashlib
 import json
 import re
 import secrets
-from datetime import UTC, datetime, timedelta
 from typing import Any
 from urllib.parse import urlencode, urlparse
 
 import cbor2
 import requests
-from cryptography import x509
-from cryptography.hazmat.primitives import hashes, serialization
-from cryptography.hazmat.primitives.asymmetric import ec
 from cryptography.hazmat.primitives.asymmetric.utils import encode_dss_signature
-from cryptography.x509.oid import NameOID
 
 from .common import PasskeyProtocolError, PasskeyValidationError, b64url_decode, b64url_encode, normalize_user_agent
 from .keyvault import create_ec_key, get_key_vault_access_token
@@ -146,27 +141,10 @@ def _sign_digest(*, session: requests.Session, key_vault_name: str, key_name: st
 
 
 def _assertion(*, session: requests.Session, origin: str, relying_party: str, challenge: str, sign_count: int, key_vault_name: str, key_name: str, key_id: str | None, token: str) -> dict[str, str]:
-    if sign_count < 0 or sign_count > 2**32 - 1:
-        raise PasskeyValidationError("signCount must be between 0 and 4294967295.")
-    auth_data = hashlib.sha256(relying_party.encode("utf-8")).digest() + bytes([0x05]) + sign_count.to_bytes(4, "big")
-    client_data = json.dumps(
-        {"type": "webauthn.get", "challenge": challenge, "origin": origin, "crossOrigin": False},
-        separators=(",", ":"),
-    ).encode("utf-8")
-    digest = hashlib.sha256(auth_data + hashlib.sha256(client_data).digest()).digest()
-    signature = _sign_digest(
-        session=session,
-        key_vault_name=key_vault_name,
-        key_name=key_name,
-        key_id=key_id,
-        digest=digest,
-        token=token,
+    del session, origin, relying_party, challenge, sign_count, key_vault_name, key_name, key_id, token
+    raise PasskeySecurityError(
+        "Software-backed assertions are disabled because this process cannot prove fresh user presence or verification."
     )
-    return {
-        "clientData": base64.b64encode(client_data).decode("ascii"),
-        "authenticatorData": base64.b64encode(auth_data).decode("ascii"),
-        "signatureData": base64.b64encode(signature).decode("ascii"),
-    }
 
 
 def _import_cookie_header(session: requests.Session, cookie_header: str, origin: str) -> int:
@@ -235,7 +213,7 @@ def register_okta_idx_session(
     rp_id = str((activation.get("rp") or {}).get("id") or host)
     auth_data = (
         hashlib.sha256(rp_id.encode("utf-8")).digest()
-        + bytes([0x45])
+        + bytes([0x40])
         + bytes(4)
         + bytes(16)
         + len(credential_id_bytes).to_bytes(2, "big")
@@ -246,23 +224,11 @@ def register_okta_idx_session(
         {"type": "webauthn.create", "challenge": activation["challenge"], "origin": origin, "crossOrigin": False},
         separators=(",", ":"),
     ).encode("utf-8")
-    batch_key = ec.generate_private_key(ec.SECP256R1())
-    certificate = (
-        x509.CertificateBuilder()
-        .subject_name(x509.Name([x509.NameAttribute(NameOID.COMMON_NAME, "Key Vault Passkey POC")]))
-        .issuer_name(x509.Name([x509.NameAttribute(NameOID.COMMON_NAME, "Key Vault Passkey POC")]))
-        .public_key(batch_key.public_key())
-        .serial_number(x509.random_serial_number())
-        .not_valid_before(datetime.now(UTC) - timedelta(days=1))
-        .not_valid_after(datetime.now(UTC) + timedelta(days=30))
-        .sign(batch_key, hashes.SHA256())
-    )
-    attestation_signature = batch_key.sign(auth_data + hashlib.sha256(client_data).digest(), ec.ECDSA(hashes.SHA256()))
-    attestation = cbor2.dumps({"fmt": "packed", "attStmt": {"alg": -7, "sig": attestation_signature, "x5c": [certificate.public_bytes(serialization.Encoding.DER)]}, "authData": auth_data})
+    attestation = cbor2.dumps({"fmt": "none", "attStmt": {}, "authData": auth_data})
     completion = _idx_post(
         session,
         _same_org_url(finish["href"], origin),
-        {"credentials": {"clientData": base64.b64encode(client_data).decode(), "attestation": base64.b64encode(attestation).decode(), "transports": json.dumps([transport], separators=(",", ":")), "clientExtensions": json.dumps({"credProps": {"rk": False}}, separators=(",", ":"))}, "stateHandle": selected.get("stateHandle")},
+        {"credentials": {"clientData": base64.b64encode(client_data).decode(), "attestation": base64.b64encode(attestation).decode(), "clientExtensions": json.dumps({"credProps": {"rk": False}}, separators=(",", ":"))}, "stateHandle": selected.get("stateHandle")},
         headers,
     )
     if not completion.get("success"):
@@ -273,7 +239,7 @@ def register_okta_idx_session(
         "url": origin,
         "userName": user_name,
         "keyVault": {"vaultName": vault_name, "keyName": key_name, "keyId": key.key_id},
-        "okta": {"userId": str((activation.get("user") or {}).get("id") or ""), "transport": transport},
+        "okta": {"userId": str((activation.get("user") or {}).get("id") or "")},
     }
 
 

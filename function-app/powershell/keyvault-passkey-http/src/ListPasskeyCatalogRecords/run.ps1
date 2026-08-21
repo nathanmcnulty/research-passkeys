@@ -5,6 +5,7 @@ param($Request, $TriggerMetadata)
 . (Join-Path $PSScriptRoot '..\shared\PasskeyFunctionHelpers.ps1')
 
 try {
+    $caller = Get-PasskeyCallerIdentity -Request $Request
     $body = @{}
     $provider = Get-RequestValue -Body $body -Request $Request -Names @('provider')
     $rpId = Get-RequestValue -Body $body -Request $Request -Names @('rpId', 'relyingParty')
@@ -22,11 +23,14 @@ try {
     $records = @(Get-PasskeyCatalogRecords -Configuration (Get-PasskeyFunctionConfiguration) `
         -Provider ([string]($provider ?? '')) -RpId $rpId -UserName $userName -Status ([string]($status ?? '')) `
         -CredentialId $credentialId -DisplayName $displayName -KeyVaultKeyName $keyVaultKeyName)
+    $records = @($records | Where-Object { $_.owner -is [System.Collections.IDictionary] -and [string]$_.owner.tenantId -ieq [string]$caller.tenantId -and [string]$_.owner.objectId -ieq [string]$caller.objectId })
     Push-OutputBinding -Name Response -Value (New-JsonHttpResponse -StatusCode ([HttpStatusCode]::OK) -Body ([ordered]@{
         success = $true
         count = $records.Count
         records = $records
     }))
+} catch [System.UnauthorizedAccessException] {
+    Push-OutputBinding -Name Response -Value (New-JsonHttpResponse -StatusCode Forbidden -Body @{success=$false;error=$_.Exception.Message})
 } catch [System.ArgumentException] {
     Push-OutputBinding -Name Response -Value (New-JsonHttpResponse -StatusCode ([HttpStatusCode]::BadRequest) -Body ([ordered]@{
         success = $false

@@ -4,6 +4,9 @@ param($Request,$TriggerMetadata)
 if (-not (Test-DevelopmentSecretExportEnabled)) { Push-OutputBinding -Name Response -Value (New-JsonHttpResponse -StatusCode Forbidden -NoStore -Body @{success=$false;error='Development secret export is disabled.'}); return }
 try {
     $configuration=Get-PasskeyFunctionConfiguration; $recordId=[string]$Request.Params.recordId; $captureId=[string]$Request.Params.captureId
+    $record=Get-PasskeyCatalogRecord -Configuration $configuration -RecordId $recordId
+    if (-not $record) { Push-OutputBinding -Name Response -Value (New-JsonHttpResponse -StatusCode NotFound -NoStore -Body @{success=$false;error='Passkey was not found.'}); return }
+    Assert-PasskeyRecordOwner -Record $record -Caller (Get-PasskeyCallerIdentity -Request $Request)
     $context=@(Get-PasskeyCaptureContexts -Configuration $configuration -RecordId $recordId) | Where-Object captureId -eq $captureId | Select-Object -First 1
     if (-not $context) { Push-OutputBinding -Name Response -Value (New-JsonHttpResponse -StatusCode NotFound -NoStore -Body @{success=$false;error='Capture context was not found.'}); return }
     $capture=Export-PasskeyCapturePayload -Configuration $configuration -Context $context

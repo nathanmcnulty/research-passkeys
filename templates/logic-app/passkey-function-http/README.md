@@ -40,3 +40,5 @@ Set these parameters before deployment:
 The `functionBaseUrl` should be the host root for one of the passkey Function samples, for example:
 
 - `https://func-kvpk-example.azurewebsites.net`
+
+Every trigger and action marks both inputs and outputs as secure data so TAPs, ESTSAUTH cookies, Function keys, and authentication results are redacted from run history. Timing and status metadata remains visible; restrict workflow/run-history RBAC and use the shortest practical retention period.

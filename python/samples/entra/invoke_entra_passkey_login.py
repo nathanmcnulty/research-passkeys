@@ -24,6 +24,7 @@ def main() -> int:
     parser.add_argument("--keyvault-tenant-id")
     parser.add_argument("--auth-url")
     parser.add_argument("--debug", action="store_true", help="Print safe HTTP/page/cookie diagnostics to stderr.")
+    parser.add_argument("--show-cookie", action="store_true", help="Explicitly include the ESTSAUTH cookie in stdout output.")
     args = parser.parse_args()
 
     credential = load_credential_record(
@@ -48,7 +49,7 @@ def main() -> int:
                 "userPrincipalName": result.user_principal_name,
                 "signatureMethod": result.signature_method,
                 "cookieType": result.cookie_type,
-                "estsAuthCookie": result.cookie_value,
+                **({"estsAuthCookie": result.cookie_value} if args.show_cookie else {}),
                 "keyVaultName": result.key_vault_name,
             },
             separators=(",", ":"),

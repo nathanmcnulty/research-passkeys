@@ -8,8 +8,8 @@ try {
     $body = Get-RequestBodyObject -Request $Request
     $configuration = Get-OktaFunctionConfiguration
     $credential = Get-CredentialPayload -Body $body
-    $cookieHeader = Get-RequestValue -Body $body -Request $Request -Names @('cookieHeader', 'cookie')
-    $stateHandle = Get-RequestValue -Body $body -Request $Request -Names @('stateHandle')
+    $cookieHeader = Get-SecretBodyValue -Body $body -Names @('cookieHeader', 'cookie')
+    $stateHandle = Get-SecretBodyValue -Body $body -Names @('stateHandle')
     $challenge = Get-RequestValue -Body $body -Request $Request -Names @('challenge')
     if ([string]::IsNullOrWhiteSpace($cookieHeader) -or [string]::IsNullOrWhiteSpace($stateHandle) -or [string]::IsNullOrWhiteSpace($challenge)) {
         throw [System.ArgumentException]::new("Request must include 'cookieHeader', 'stateHandle', and 'challenge'.")

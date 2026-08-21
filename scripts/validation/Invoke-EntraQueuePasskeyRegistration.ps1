@@ -81,6 +81,7 @@ function Resolve-EndpointUrl {
     )
 
     if (-not [string]::IsNullOrWhiteSpace($ExplicitUrl)) {
+        if ($ExplicitUrl -match '(?i)[?&]code=') { throw 'Function keys must be supplied in the x-functions-key header, not the URL.' }
         return $ExplicitUrl
     }
 
@@ -89,13 +90,8 @@ function Resolve-EndpointUrl {
     }
 
     $trimmedBase = $BaseUrl.TrimEnd('/')
-    $url = "$trimmedBase/api/entra/passkeys/register/estsauth/queue"
-    if (-not [string]::IsNullOrWhiteSpace($FunctionKey)) {
-        $separator = if ($url.Contains('?')) { '&' } else { '?' }
-        $url = "$url${separator}code=$([uri]::EscapeDataString($FunctionKey))"
-    }
-
-    return $url
+    $null = $FunctionKey
+    return "$trimmedBase/api/entra/passkeys/register/estsauth/queue"
 }
 
 function Resolve-CookieExportPayload {
@@ -170,12 +166,17 @@ function Invoke-QueueRegistrationRequest {
         [string]$Url,
 
         [Parameter(Mandatory)]
-        [hashtable]$Payload
+        [hashtable]$Payload,
+
+        [Parameter()]
+        [string]$FunctionKey
     )
 
     $jsonBody = $Payload | ConvertTo-Json -Depth 50
     try {
-        $response = Invoke-WebRequest -Uri $Url -Method POST -Body $jsonBody -ContentType 'application/json'
+        $headers = @{}
+        if (-not [string]::IsNullOrWhiteSpace($FunctionKey)) { $headers['x-functions-key'] = $FunctionKey }
+        $response = Invoke-WebRequest -Uri $Url -Method POST -Body $jsonBody -ContentType 'application/json' -Headers $headers
         $parsed = if ([string]::IsNullOrWhiteSpace($response.Content)) { @{} } else { $response.Content | ConvertFrom-Json -AsHashtable }
         $statusUrl = [string]($parsed.statusUrl ?? '')
         if (-not [string]::IsNullOrWhiteSpace($statusUrl) -and $statusUrl.StartsWith('/')) {
@@ -277,7 +278,7 @@ if ($Target -in @('powershell', 'both')) {
         throw 'PowerShell target selected, but no PowerShell function URL or base URL was provided.'
     }
 
-    $results += Invoke-QueueRegistrationRequest -Name 'powershell' -Url $resolvedPowerShellUrl -Payload $payload
+    $results += Invoke-QueueRegistrationRequest -Name 'powershell' -Url $resolvedPowerShellUrl -FunctionKey ($PowerShellFunctionKey ?? $CommonFunctionKey) -Payload $payload
 }
 
 if ($Target -in @('python', 'both')) {
@@ -285,7 +286,7 @@ if ($Target -in @('python', 'both')) {
         throw 'Python target selected, but no Python function URL or base URL was provided.'
     }
 
-    $results += Invoke-QueueRegistrationRequest -Name 'python' -Url $resolvedPythonUrl -Payload $payload
+    $results += Invoke-QueueRegistrationRequest -Name 'python' -Url $resolvedPythonUrl -FunctionKey ($PythonFunctionKey ?? $CommonFunctionKey) -Payload $payload
 }
 
 $summary = [ordered]@{

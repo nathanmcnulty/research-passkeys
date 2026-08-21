@@ -5,10 +5,11 @@ param($Request, $TriggerMetadata)
 . (Join-Path $PSScriptRoot '..\shared\PasskeyFunctionHelpers.ps1')
 
 try {
+    $owner = Get-PasskeyCallerIdentity -Request $Request
     $body = Get-RequestBodyObject -Request $Request
     $configuration = Get-OktaFunctionConfiguration
-    $cookieHeader = Get-RequestValue -Body $body -Request $Request -Names @('cookieHeader', 'cookie')
-    $stateHandle = Get-RequestValue -Body $body -Request $Request -Names @('stateHandle')
+    $cookieHeader = Get-SecretBodyValue -Body $body -Names @('cookieHeader', 'cookie')
+    $stateHandle = Get-SecretBodyValue -Body $body -Names @('stateHandle')
     $authenticatorId = Get-RequestValue -Body $body -Request $Request -Names @('authenticatorId')
     if ([string]::IsNullOrWhiteSpace($cookieHeader) -or [string]::IsNullOrWhiteSpace($stateHandle) -or [string]::IsNullOrWhiteSpace($authenticatorId)) {
         throw [System.ArgumentException]::new("Request must include 'cookieHeader', 'stateHandle', and 'authenticatorId'.")
@@ -31,8 +32,10 @@ try {
         captureContext = $captureContext
         keyVaultKeyName = (Get-RequestValue -Body $body -Request $Request -Names @('keyVaultKeyName'))
         transport = $transport
+        owner = $owner
     }
     Set-RegistrationStatus -RequestId $requestId -Configuration $configuration -Status ([ordered]@{
+        owner = $owner
         requestId = $requestId
         provider = 'okta'
         authMethod = 'idx'

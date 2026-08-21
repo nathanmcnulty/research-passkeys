@@ -4,6 +4,7 @@ param($Request,$TriggerMetadata)
 try {
     $configuration=Get-OktaFunctionConfiguration; $recordId=[string]$Request.Params.recordId; $record=Get-PasskeyCatalogRecord -Configuration $configuration -RecordId $recordId
     if (-not $record -or $record.provider -ne 'okta') { Push-OutputBinding -Name Response -Value (New-JsonHttpResponse -StatusCode NotFound -Body @{success=$false;error='Okta passkey was not found.'}); return }
+    Assert-PasskeyRecordOwner -Record $record -Caller (Get-PasskeyCallerIdentity -Request $Request)
     $context=Get-PasskeyLoginContext -Configuration $configuration -Record $record
     $parameters=@{OktaDomain=(Resolve-OktaDomain -Body @{} -Request ([pscustomobject]@{Query=@{}}));UserName=[string]$record.userName;CredentialId=[string]$record.credentialId;KeyVaultName=$configuration.KeyVaultName;KeyVaultKeyName=[string]$record.keyVault.keyName;KeyVaultAccessToken=(Get-KeyVaultAccessToken -Configuration $configuration);UserAgent=(Normalize-PasskeyUserAgent $context.userAgent)}
     if ($context.password) { $parameters.Password=ConvertTo-SecureString ([string]$context.password) -AsPlainText -Force }

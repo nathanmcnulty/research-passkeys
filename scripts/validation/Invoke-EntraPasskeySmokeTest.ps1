@@ -31,6 +31,12 @@ param(
     [string]$PythonFunctionLoginUrl,
 
     [Parameter()]
+    [string]$PowerShellFunctionKey,
+
+    [Parameter()]
+    [string]$PythonFunctionKey,
+
+    [Parameter()]
     [string]$PythonCommand = 'python',
 
     [Parameter()]
@@ -56,7 +62,10 @@ param(
     [switch]$SkipPythonLogin,
 
     [Parameter()]
-    [switch]$PassThru
+    [switch]$PassThru,
+
+    [Parameter()]
+    [switch]$IncludeSensitiveResults
 )
 
 $ErrorActionPreference = 'Stop'
@@ -107,7 +116,10 @@ function Invoke-TapFunctionRegistration {
         [string]$Uri,
 
         [Parameter(Mandatory)]
-        [string]$DisplayName
+        [string]$DisplayName,
+
+        [Parameter()]
+        [string]$FunctionKey
     )
 
     $body = @{
@@ -116,7 +128,9 @@ function Invoke-TapFunctionRegistration {
         displayName       = $DisplayName
     } | ConvertTo-Json
 
-    $response = Invoke-RestMethod -Uri $Uri -Method POST -Body $body -ContentType 'application/json'
+    $headers = @{}
+    if ($FunctionKey) { $headers['x-functions-key'] = $FunctionKey }
+    $response = Invoke-RestMethod -Uri $Uri -Method POST -Body $body -ContentType 'application/json' -Headers $headers
     if (-not $response.success) {
         throw "Function registration failed for $Uri"
     }
@@ -130,14 +144,19 @@ function Invoke-FunctionPasskeyLogin {
         [string]$Uri,
 
         [Parameter(Mandatory)]
-        [object]$Credential
+        [object]$Credential,
+
+        [Parameter()]
+        [string]$FunctionKey
     )
 
     $body = @{
         credential = $Credential
     } | ConvertTo-Json -Depth 20
 
-    return Invoke-RestMethod -Uri $Uri -Method POST -Body $body -ContentType 'application/json'
+    $headers = @{}
+    if ($FunctionKey) { $headers['x-functions-key'] = $FunctionKey }
+    return Invoke-RestMethod -Uri $Uri -Method POST -Body $body -ContentType 'application/json' -Headers $headers
 }
 
 function Invoke-PythonLocalRegistration {
@@ -300,7 +319,7 @@ if ($PythonLocalRegistrationMode -eq 'tap') {
 
 if ($PowerShellFunctionUrl) {
     $surfaceMatrix.powerShellFunctionRegistration.attempted = $true
-    $credential = Invoke-TapFunctionRegistration -Uri $PowerShellFunctionUrl -DisplayName 'PowerShell Function Smoke Test'
+    $credential = Invoke-TapFunctionRegistration -Uri $PowerShellFunctionUrl -FunctionKey $PowerShellFunctionKey -DisplayName 'PowerShell Function Smoke Test'
     Save-CredentialFile -CredentialObject $credential -Path $powerShellFunctionCredentialPath | Out-Null
     $registrationResults.powerShellFunction = $powerShellFunctionCredentialPath
     $surfaceMatrix.powerShellFunctionRegistration.success = $true
@@ -311,7 +330,7 @@ if ($PowerShellFunctionUrl) {
 
 if ($PythonFunctionUrl) {
     $surfaceMatrix.pythonFunctionRegistration.attempted = $true
-    $credential = Invoke-TapFunctionRegistration -Uri $PythonFunctionUrl -DisplayName 'Python Function Smoke Test'
+    $credential = Invoke-TapFunctionRegistration -Uri $PythonFunctionUrl -FunctionKey $PythonFunctionKey -DisplayName 'Python Function Smoke Test'
     Save-CredentialFile -CredentialObject $credential -Path $pythonFunctionCredentialPath | Out-Null
     $registrationResults.pythonFunction = $pythonFunctionCredentialPath
     $surfaceMatrix.pythonFunctionRegistration.success = $true
@@ -417,7 +436,7 @@ if ($PowerShellFunctionLoginUrl) {
     Wait-ForPostRegistrationPropagation -HasFreshRegistration $hasFreshRegistration -DelaySeconds $PostRegistrationLoginDelaySeconds
 
     $powerShellFunctionLoginResult = Invoke-WithRetry -Label 'PowerShell Function login' -RetryCount $PostRegistrationLoginRetryCount -DelaySeconds $PostRegistrationLoginDelaySeconds -Action {
-        Invoke-FunctionPasskeyLogin -Uri $PowerShellFunctionLoginUrl -Credential $credential
+        Invoke-FunctionPasskeyLogin -Uri $PowerShellFunctionLoginUrl -FunctionKey $PowerShellFunctionKey -Credential $credential
     }
     $surfaceMatrix.powerShellFunctionLogin.success = [bool]$powerShellFunctionLoginResult.success
     $surfaceMatrix.powerShellFunctionLogin.detail = $powerShellFunctionLoginResult.cookieType
@@ -439,7 +458,7 @@ if ($PythonFunctionLoginUrl) {
     Wait-ForPostRegistrationPropagation -HasFreshRegistration $hasFreshRegistration -DelaySeconds $PostRegistrationLoginDelaySeconds
 
     $pythonFunctionLoginResult = Invoke-WithRetry -Label 'Python Function login' -RetryCount $PostRegistrationLoginRetryCount -DelaySeconds $PostRegistrationLoginDelaySeconds -Action {
-        Invoke-FunctionPasskeyLogin -Uri $PythonFunctionLoginUrl -Credential $credential
+        Invoke-FunctionPasskeyLogin -Uri $PythonFunctionLoginUrl -FunctionKey $PythonFunctionKey -Credential $credential
     }
     $surfaceMatrix.pythonFunctionLogin.success = [bool]$pythonFunctionLoginResult.success
     $surfaceMatrix.pythonFunctionLogin.detail = $pythonFunctionLoginResult.cookieType
@@ -476,7 +495,16 @@ if (-not $preferredCredentialPath) {
     throw 'No credential file was produced. Provide at least one registration path to validate.'
 }
 
-$result = [PSCustomObject]@{
+if (-not $IncludeSensitiveResults) {
+    foreach ($loginResult in @($powerShellLoginResult, $pythonLoginResult, $powerShellFunctionLoginResult, $pythonFunctionLoginResult)) {
+        if ($null -eq $loginResult) { continue }
+        foreach ($propertyName in @('ESTSAuthCookie', 'estsAuth', 'estsAuthCookie', 'cookieValue')) {
+            $loginResult.PSObject.Properties.Remove($propertyName)
+        }
+    }
+}
+
+$resultProperties = [ordered]@{
     outputDirectory          = $OutputDirectory
     preferredCredentialPath  = $preferredCredentialPath
     registrationResults      = [PSCustomObject]$registrationResults
@@ -485,8 +513,9 @@ $result = [PSCustomObject]@{
     pythonLoginResult        = $pythonLoginResult
     powerShellFunctionLoginResult = $powerShellFunctionLoginResult
     pythonFunctionLoginResult = $pythonFunctionLoginResult
-    estsAuthCookie           = $EstsAuthCookie
 }
+if ($IncludeSensitiveResults) { $resultProperties.estsAuthCookie = $EstsAuthCookie }
+$result = [PSCustomObject]$resultProperties
 
 if ($PassThru) {
     Write-Output $result

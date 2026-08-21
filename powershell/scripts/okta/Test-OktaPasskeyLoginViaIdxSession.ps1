@@ -259,7 +259,8 @@ $webSession = New-OktaWebSession -CookieHeader $CookieHeader -Origin $Origin -Us
 $rpHash = [System.Security.Cryptography.SHA256]::HashData([System.Text.Encoding]::UTF8.GetBytes($oktaHost))
 $counterBytes = [BitConverter]::GetBytes([uint32]$SignCount)
 [Array]::Reverse($counterBytes)
-[byte[]]$authenticatorData = $rpHash + [byte[]]@(0x05) + [byte[]]$counterBytes
+throw [System.NotSupportedException]::new('Software-backed assertions are disabled because this process cannot prove fresh user presence or verification.')
+[byte[]]$authenticatorData = $rpHash + [byte[]]@(0x00) + [byte[]]$counterBytes
 
 $clientDataJson = [ordered]@{
     type        = 'webauthn.get'

@@ -5,6 +5,7 @@ param($Request, $TriggerMetadata)
 . (Join-Path $PSScriptRoot '..\shared\PasskeyFunctionHelpers.ps1')
 
 try {
+    $owner = Get-PasskeyCallerIdentity -Request $Request
     $body = Get-RequestBodyObject -Request $Request
     $userPrincipalName = Get-RequestValue -Body $body -Request $Request -Names @('userPrincipalName', 'username', 'email')
     $estsAuthCookie = Resolve-EstsAuthCookie -Body $body -Request $Request
@@ -31,7 +32,7 @@ try {
     $configuration = $registration.Configuration
     $credential = $registration.Credential
     $extensions = Save-PasskeyLoginAndCaptureContext -Provider entra -Body $body -Credential $credential -Configuration $configuration -UserAgent $userAgent
-    $catalogRecord = Save-PasskeyCatalogRecord -Provider entra -Credential $credential -Configuration $configuration -Extensions $extensions
+    $catalogRecord = Save-PasskeyCatalogRecord -Provider entra -Credential $credential -Configuration $configuration -Owner $owner -Extensions $extensions
 
     Push-OutputBinding -Name Response -Value (New-JsonHttpResponse -StatusCode ([HttpStatusCode]::OK) -Body ([ordered]@{
         success = $true

@@ -4,6 +4,7 @@ param($Request,$TriggerMetadata)
 try {
     $configuration=Get-PasskeyFunctionConfiguration; $recordId=[string]$Request.Params.recordId; $record=Get-PasskeyCatalogRecord -Configuration $configuration -RecordId $recordId
     if (-not $record -or $record.provider -ne 'entra') { Push-OutputBinding -Name Response -Value (New-JsonHttpResponse -StatusCode NotFound -Body @{success=$false;error='Entra passkey was not found.'}); return }
+    Assert-PasskeyRecordOwner -Record $record -Caller (Get-PasskeyCallerIdentity -Request $Request)
     $context=Get-PasskeyLoginContext -Configuration $configuration -Record $record; $record.keyVault.vaultName=$configuration.KeyVaultName
     $parameters=@{KeyVaultAccessToken=(Get-KeyVaultAccessToken -Configuration $configuration);KeyVaultTenantId=$configuration.TenantId;UserAgent=(Normalize-PasskeyUserAgent $context.userAgent)}
     $login=Invoke-PasskeyLoginScript -ScriptPath (Join-Path $PSScriptRoot '..\shared\passkey-assets\scripts\entra\reference\Invoke-EntraPasskeyLogin.ps1') -Credential $record -Parameters $parameters

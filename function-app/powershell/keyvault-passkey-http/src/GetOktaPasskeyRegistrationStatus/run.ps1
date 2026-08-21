@@ -30,6 +30,7 @@ try {
         Push-OutputBinding -Name Response -Value (New-JsonHttpResponse -StatusCode ([HttpStatusCode]::NotFound) -Body ([ordered]@{ success = $false; provider = 'okta'; requestId = $requestId; error = 'Registration request status was not found.' }))
         return
     }
+    Assert-PasskeyRecordOwner -Record $status -Caller (Get-PasskeyCallerIdentity -Request $Request)
     $status.success = $true
     $status.provider = 'okta'
     Push-OutputBinding -Name Response -Value (New-JsonHttpResponse -StatusCode ([HttpStatusCode]::OK) -Body $status)

@@ -35,7 +35,7 @@ param oktaRedirectUri string = ''
   'development'
   'production'
 ])
-param deploymentProfile string = 'development'
+param deploymentProfile string = 'production'
 
 @description('Opt-in VNet integration for development validation. This remains false for ordinary development deployments.')
 param enableVirtualNetworkIntegration bool = false
@@ -120,7 +120,6 @@ var registrationQueueName = 'passkey-registration'
 var oktaRegistrationQueueName = 'okta-passkey-registration'
 var captureContainerName = 'passkey-capture-context'
 
-var storageBlobDataOwnerRoleId = 'b7e6dc6d-f1e8-4753-8033-0f276bb0955b'
 var storageBlobDataContributorId = 'ba92f5b4-2d11-453d-a403-e96b0029c9fe'
 var storageQueueDataContributorId = '974c5e8b-45b9-4653-ba55-5f855dd0fb88'
 var storageTableDataContributorId = '0a9a7e1f-b9d0-4cc4-a60d-0319b160aaa3'
@@ -330,10 +329,10 @@ resource keyVault 'Microsoft.KeyVault/vaults@2024-11-01' = {
 }
 
 resource storageBlobRoleAssignment 'Microsoft.Authorization/roleAssignments@2022-04-01' = {
-  name: guid(storage.id, userAssignedIdentity.id, storageBlobDataOwnerRoleId)
+  name: guid(storage.id, userAssignedIdentity.id, storageBlobDataContributorId)
   scope: storage
   properties: {
-    roleDefinitionId: subscriptionResourceId('Microsoft.Authorization/roleDefinitions', storageBlobDataOwnerRoleId)
+    roleDefinitionId: subscriptionResourceId('Microsoft.Authorization/roleDefinitions', storageBlobDataContributorId)
     principalId: userAssignedIdentity.properties.principalId
     principalType: 'ServicePrincipal'
   }
@@ -550,10 +549,6 @@ resource functionAppAuth 'Microsoft.Web/sites/config@2024-11-01' = {
     globalValidation: {
       requireAuthentication: true
       unauthenticatedClientAction: 'Return401'
-      excludedPaths: [
-        '/api/entra/passkeys/register/estsauth/queue'
-        '/api/okta/passkeys/register/idx/queue'
-      ]
     }
     httpSettings: {
       requireHttps: true

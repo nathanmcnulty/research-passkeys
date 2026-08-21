@@ -46,6 +46,8 @@ try {
         return
     }
 
+    Assert-PasskeyRecordOwner -Record $status -Caller (Get-PasskeyCallerIdentity -Request $Request)
+
     $status.success = $true
     Push-OutputBinding -Name Response -Value (New-JsonHttpResponse -StatusCode ([HttpStatusCode]::OK) -Body $status)
 } catch [System.ArgumentException] {

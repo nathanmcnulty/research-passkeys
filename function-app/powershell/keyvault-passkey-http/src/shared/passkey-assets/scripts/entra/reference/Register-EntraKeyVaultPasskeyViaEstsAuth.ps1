@@ -629,6 +629,9 @@ $provisionUrl = $innerJson.provisionUrl
 $fidoCanary = $requestData.canary
 $serverChallenge = $requestData.serverChallenge
 $postBackUrl = $requestData.postBackUrl
+if ($postBackUrl -and ([uri]$postBackUrl).GetLeftPart([UriPartial]::Authority) -ine ([uri]$RedirectUri).GetLeftPart([UriPartial]::Authority)) { throw "Refusing untrusted postBackUrl: $postBackUrl" }
+if ($provisionUrl -and ([uri]$provisionUrl).Scheme -ne 'https') { throw "Refusing untrusted provisionUrl: $provisionUrl" }
+if ($provisionUrl -and ([uri]$provisionUrl).Host -notin @('login.microsoft.com','login.microsoftonline.com')) { throw "Refusing untrusted provisionUrl: $provisionUrl" }
 $fidoUserId = $requestData.userId
 $correlationId = [guid]::NewGuid().ToString()
 $excludeCredentials = $requestData.ExcludeNextGenCredentialsJSON
@@ -669,7 +672,7 @@ $rpId = "login.microsoft.com"
 $rpIdHash = [byte[]][System.Security.Cryptography.SHA256]::HashData(
     [System.Text.Encoding]::UTF8.GetBytes($rpId)
 )
-$authDataFlags = [byte[]]@(0x45)  # UP=1, AT=1
+$authDataFlags = [byte[]]@(0x40)  # AT=1; no authenticator-bound UP or UV claim
 $signCount = [byte[]]@(0, 0, 0, 0)
 $aaguid = [byte[]]::new(16)
 $credIdLen = [BitConverter]::GetBytes([uint16]$credentialIdBytes.Length)
@@ -689,42 +692,9 @@ $clientData = [ordered]@{
 $clientDataBytes = [System.Text.Encoding]::UTF8.GetBytes($clientData)
 $clientDataB64Url = ConvertTo-Base64Url $clientDataBytes
 
-# Sign with ephemeral batch attestation key (packed attestation)
-# Microsoft requires full attestation (x5c certificate), not self-attestation.
-# The batch key is ephemeral — it is only used here for registration and then discarded.
-# The credential private key (used for authentication) lives in Key Vault.
-[byte[]]$clientDataHash = [System.Security.Cryptography.SHA256]::HashData($clientDataBytes)
-[byte[]]$signatureBase = $authData + $clientDataHash
-
-$batchEcDsa = [System.Security.Cryptography.ECDsa]::Create(
-    [System.Security.Cryptography.ECCurve]::CreateFromValue("1.2.840.10045.3.1.7")
-)
-try {
-    $certReq = [System.Security.Cryptography.X509Certificates.CertificateRequest]::new(
-        "CN=Batch Certificate, OU=Authenticator Attestation, O=Chromium, C=US",
-        $batchEcDsa,
-        [System.Security.Cryptography.HashAlgorithmName]::SHA256
-    )
-    $batchCert = $certReq.CreateSelfSigned(
-        [DateTimeOffset]::new(2017, 7, 14, 2, 40, 0, [TimeSpan]::Zero),
-        [DateTimeOffset]::new(2046, 2, 6, 6, 33, 7, [TimeSpan]::Zero)
-    )
-    $batchCertDer = $batchCert.RawData
-
-    $signatureBytes = $batchEcDsa.SignData(
-        $signatureBase,
-        [System.Security.Cryptography.HashAlgorithmName]::SHA256,
-        [System.Security.Cryptography.DSASignatureFormat]::Rfc3279DerSequence
-    )
-} finally {
-    $batchEcDsa.Dispose()
-}
-
-# Build CBOR attestation object with x5c for full packed attestation
-$attStmt = [ordered]@{ "alg" = -7; "sig" = [byte[]]$signatureBytes; "x5c" = @(,[byte[]]$batchCertDer) }
 $attestationObj = [ordered]@{
-    "fmt"      = "packed"
-    "attStmt"  = $attStmt
+    "fmt"      = "none"
+    "attStmt"  = [ordered]@{}
     "authData" = [byte[]]$authData
 }
 $attestationObjBytes = [byte[]](New-CBOREncoded -Value $attestationObj)
@@ -791,9 +761,6 @@ $newFidoUrl = if ($postBackUrl) {
 
 $newFidoBody = [ordered]@{
     canary                  = $fidoCanary
-    authenticator           = 'cross-platform'
-    transports              = 'usb'
-    aaguid                  = '00000000-0000-0000-0000-000000000000'
     credentialDeviceType    = 'singleDevice'
     credentialBackedUp      = 'false'
     attestationParseError   = ''
@@ -942,6 +909,7 @@ if ($fidoResp.Content -match '<div\s+id="redirectUrl"\s+data-content="([^"]*)"')
 
 if ($newfidoRedirectUrl) {
     $navUrl = $newfidoRedirectUrl -replace '#.*$', ''
+    if (([uri]$navUrl).GetLeftPart([UriPartial]::Authority) -ine ([uri]$RedirectUri).GetLeftPart([UriPartial]::Authority)) { throw "Refusing untrusted redirectUrl: $navUrl" }
     Write-Host "    Loading security-info page (simulating browser redirect)..." -ForegroundColor Gray
     try {
         $navResp = Invoke-WebRequest -Uri $navUrl -Method GET -UseBasicParsing -WebSession $webSession

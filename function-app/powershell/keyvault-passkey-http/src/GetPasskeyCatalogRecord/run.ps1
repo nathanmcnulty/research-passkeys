@@ -25,10 +25,13 @@ try {
         }))
         return
     }
+    Assert-PasskeyRecordOwner -Record $record -Caller (Get-PasskeyCallerIdentity -Request $Request)
     Push-OutputBinding -Name Response -Value (New-JsonHttpResponse -StatusCode ([HttpStatusCode]::OK) -Body ([ordered]@{
         success = $true
         record = $record
     }))
+} catch [System.UnauthorizedAccessException] {
+    Push-OutputBinding -Name Response -Value (New-JsonHttpResponse -StatusCode Forbidden -Body @{success=$false;error=$_.Exception.Message})
 } catch [System.ArgumentException] {
     Push-OutputBinding -Name Response -Value (New-JsonHttpResponse -StatusCode ([HttpStatusCode]::BadRequest) -Body ([ordered]@{
         success = $false

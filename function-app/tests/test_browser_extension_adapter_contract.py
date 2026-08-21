@@ -40,25 +40,62 @@ class BrowserExtensionAdapterContractTests(unittest.TestCase):
             trigger = next(binding for binding in payload["bindings"] if binding["type"] == "httpTrigger")
             self.assertEqual(trigger["authLevel"], "function")
 
-    def test_both_templates_enable_easy_auth_with_exact_queue_exclusions(self):
-        expected_paths = (
-            "/api/entra/passkeys/register/estsauth/queue",
-            "/api/okta/passkeys/register/idx/queue",
-        )
+    def test_both_templates_require_easy_auth_for_queue_ingress(self):
         for sample in (POWERSHELL, PYTHON):
             template = (sample / "infra/main.bicep").read_text(encoding="utf-8")
             self.assertIn("name: 'authsettingsV2'", template)
             self.assertIn("requireAuthentication: true", template)
             self.assertIn("unauthenticatedClientAction: 'Return401'", template)
             self.assertIn("param browserExtensionClientId string", template)
-            for path in expected_paths:
-                self.assertIn(path, template)
+            self.assertNotIn("excludedPaths:", template)
 
-    def test_python_exposes_constrained_assertion_route(self):
+    def test_catalog_records_and_status_are_bound_to_easy_auth_owner(self):
+        python_source = (PYTHON / "src/function_app.py").read_text(encoding="utf-8")
+        powershell_helper = (POWERSHELL / "src/shared/PasskeyFunctionHelpers.ps1").read_text(encoding="utf-8")
+        schema = json.loads((ROOT / "contracts/passkey-catalog-record.schema.json").read_text(encoding="utf-8"))
+
+        self.assertIn('def _get_caller_identity', python_source)
+        self.assertIn('def _require_record_owner', python_source)
+        self.assertIn('"owner": _get_caller_identity(req)', python_source)
+        self.assertIn('function Get-PasskeyCallerIdentity', powershell_helper)
+        self.assertIn('function Assert-PasskeyRecordOwner', powershell_helper)
+        self.assertIn("$record.owner = $Owner", powershell_helper)
+        self.assertEqual(schema["properties"]["schemaVersion"]["const"], "2")
+        self.assertIn("owner", schema["required"])
+
+    def test_assertion_routes_fail_closed_without_trusted_user_presence(self):
         source = (PYTHON / "src/function_app.py").read_text(encoding="utf-8")
         self.assertIn('route="passkeys/{recordId}/assert"', source)
-        self.assertIn('"signatureFormat": "ieee-p1363"', source)
+        self.assertIn('return _json_response(501', source)
+        self.assertNotIn('user_verified = body.get("userVerified")', source)
         self.assertNotIn('route="signDigest"', source)
+
+        powershell = (POWERSHELL / "src/AssertWithStoredPasskey/run.ps1").read_text(encoding="utf-8")
+        self.assertIn("NotImplemented", powershell)
+        self.assertNotIn("userVerified", powershell)
+
+    def test_software_registrations_do_not_claim_authenticator_provenance(self):
+        sources = [
+            ROOT / "python/libraries/passkey/src/passkey/entra_registration.py",
+            ROOT / "python/libraries/passkey/src/passkey/okta.py",
+            ROOT / "powershell/scripts/entra/Register-EntraKeyVaultPasskey.ps1",
+            ROOT / "powershell/scripts/okta/Register-OktaKeyVaultPasskeyViaIdxSession.ps1",
+            ROOT / "browser-extensions/keyvault-passkey-provider/src/background.ts",
+            PYTHON / "src/passkey/entra_registration.py",
+            PYTHON / "src/passkey/okta.py",
+            POWERSHELL / "src/shared/passkey-assets/scripts/entra/Register-EntraKeyVaultPasskey.ps1",
+            POWERSHELL / "src/shared/passkey-assets/scripts/okta/Register-OktaKeyVaultPasskeyViaIdxSession.ps1",
+        ]
+        combined = "\n".join(path.read_text(encoding="utf-8") for path in sources)
+
+        self.assertNotIn('"fmt", "packed"', combined)
+        self.assertNotIn("fmt      = 'packed'", combined)
+        self.assertNotIn("CreateSelfSigned", combined)
+        self.assertNotIn("0x45", combined)
+        self.assertNotIn("authenticator           = 'cross-platform'", combined)
+        self.assertNotIn("transports              = 'usb'", combined)
+        self.assertIn('"fmt", "none"', combined)
+        self.assertIn("fmt      = 'none'", combined)
 
     def test_python_exposes_browser_context_and_delete_routes(self):
         source = (PYTHON / "src" / "function_app.py").read_text(encoding="utf-8")
@@ -82,6 +119,17 @@ class BrowserExtensionAdapterContractTests(unittest.TestCase):
         deploy = (ROOT / "scripts/deployment/Deploy-FunctionSample.ps1").read_text(encoding="utf-8")
         self.assertIn("ConvertTo-Json -InputObject $GraphDelegatedPermissions", deploy)
         self.assertNotIn("$GraphDelegatedPermissions | ConvertTo-Json", deploy)
+
+    def test_deployments_default_to_production_and_least_privilege_blob_access(self):
+        deploy = (ROOT / "scripts/deployment/Deploy-FunctionSample.ps1").read_text(encoding="utf-8")
+        self.assertIn("[string]$DeploymentProfile = 'production'", deploy)
+        for sample in (POWERSHELL, PYTHON):
+            template = (sample / "infra/main.bicep").read_text(encoding="utf-8")
+            parameters = json.loads((sample / "infra/main.parameters.sample.json").read_text(encoding="utf-8"))
+            self.assertIn("param deploymentProfile string = 'production'", template)
+            self.assertNotIn("storageBlobDataOwnerRoleId", template)
+            self.assertIn("userAssignedIdentity.id, storageBlobDataContributorId", template)
+            self.assertEqual(parameters["parameters"]["deploymentProfile"]["value"], "production")
 
 
 if __name__ == "__main__":

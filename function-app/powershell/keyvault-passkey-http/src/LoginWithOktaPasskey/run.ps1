@@ -31,7 +31,7 @@ try {
         KeyVaultAccessToken = (Get-KeyVaultAccessToken -Configuration $configuration)
     }
     if ($credential.relyingParty) { $parameters.RelyingParty = [string]$credential.relyingParty }
-    $password = Get-RequestValue -Body $body -Request $Request -Names @('password')
+    $password = Get-SecretBodyValue -Body $body -Names @('password')
     if ($password) { $parameters.Password = ConvertTo-SecureString -String $password -AsPlainText -Force }
     $clientId = Get-RequestValue -Body $body -Request $Request -Names @('clientId')
     if ($clientId) { $parameters.ClientId = $clientId }

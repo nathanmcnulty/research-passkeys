@@ -1,5 +1,7 @@
 ﻿# Key Vault Passkey Provider browser extension
 
+> Historical research snapshot. Do not load or release this copy as the current provider: it retains experimental Function-adapter, UV, and attestation behavior that was intentionally rejected during security review. The maintained implementation is `C:\GitHub\key-vault-passkey-provider\src\browser-extension`; this snapshot remains only as evidence for selectively promoted UX and broker experiments.
+
 This project is an MV3 development authenticator for the Function App samples in `research-passkeys`.
 
 Current scope:
@@ -71,13 +73,13 @@ Current lock model:
 
 Current limitations:
 
-- `userVerification = required` is satisfied by a browser-local extension PIN ceremony; without a configured PIN the extension fails closed instead of asserting UV it did not earn
+- registration and assertion ceremonies that require authenticator-bound user verification fail closed; the browser-local PIN only unlocks extension state and is not reported as WebAuthn UV
 - discoverable assertions with more than one matching account use a custom in-page chooser rather than browser-native credential mediation
-- synthetic packed attestation is now restricted to the explicit Entra compatibility path; general relying parties get `none` attestation plus opaque defaults instead of invented provenance signals
+- registrations use `none` attestation, a zero AAGUID, no attachment or transport claims, and no UP/UV flags because this software provider cannot prove authenticator provenance or a trusted local gesture
 - the returned browser credential objects are reconstructed in page script and should still be treated as a compatibility spike until they are exercised against more relying parties
 - if a tab was already open when host access is granted or removed, that page may still need a reload to guarantee the expected document-start interception state
 - the compatibility User-Agent rule changes the HTTP header only; JavaScript-visible User-Agent and Client Hints remain the browser's real values
-- Easy Auth does not yet enforce per-user catalog ownership, so the POC delete route must not be treated as a production authorization design
+- Function-backed catalog and status routes bind records to the Easy Auth tenant/object identity; legacy records without an owner fail closed until migrated or re-registered
 
 ## Commands
 

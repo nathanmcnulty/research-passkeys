@@ -6,6 +6,11 @@ Relevant browser-extension material currently lives in:
 - `key-vault-passkey-provider\docs\browser-webauthn-review.md`
 - `key-vault-passkey-provider\docs\architecture.md`
 
+Historical implementation note:
+
+- commit `ea260da` on the preserved organization branch contains the earlier Function adapter and PIN dialog work.
+- use `user-presence-and-verification.md` for the reviewed reuse decision; do not restore that source tree as a second canonical implementation.
+
 The most reusable parts to pull toward `contracts\` and `shared\` are:
 
 - credential and envelope models

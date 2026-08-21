@@ -1,5 +1,55 @@
 using namespace System.Net
 
+function Get-PasskeyRequestHeader {
+    param([Parameter(Mandatory)]$Request, [Parameter(Mandatory)][string]$Name)
+    if ($null -eq $Request.Headers) { return $null }
+    if ($Request.Headers -is [System.Collections.IDictionary]) {
+        foreach ($key in $Request.Headers.Keys) {
+            if ([string]$key -ieq $Name) { return [string]$Request.Headers[$key] }
+        }
+    } else {
+        foreach ($property in $Request.Headers.PSObject.Properties) {
+            if ($property.Name -ieq $Name) { return [string]$property.Value }
+        }
+    }
+    return $null
+}
+
+function Get-PasskeyCallerIdentity {
+    param([Parameter(Mandatory)]$Request)
+    $encoded = Get-PasskeyRequestHeader -Request $Request -Name 'X-MS-CLIENT-PRINCIPAL'
+    if ([string]::IsNullOrWhiteSpace($encoded)) {
+        throw [System.UnauthorizedAccessException]::new('An authenticated Microsoft Entra caller is required.')
+    }
+    try {
+        $principal = [Text.Encoding]::UTF8.GetString([Convert]::FromBase64String($encoded)) | ConvertFrom-Json -AsHashtable -Depth 20
+    } catch {
+        throw [System.UnauthorizedAccessException]::new('The authenticated caller identity is malformed.')
+    }
+    $claims = @{}
+    foreach ($claim in @($principal.claims)) {
+        if ($claim -is [System.Collections.IDictionary] -and -not [string]::IsNullOrWhiteSpace([string]$claim.typ)) {
+            $claims[[string]$claim.typ.ToLowerInvariant()] = [string]$claim.val
+        }
+    }
+    $objectId = [string]($claims['http://schemas.microsoft.com/identity/claims/objectidentifier'] ?? $claims['oid'] ?? (Get-PasskeyRequestHeader -Request $Request -Name 'X-MS-CLIENT-PRINCIPAL-ID'))
+    $tenantId = [string]($claims['http://schemas.microsoft.com/identity/claims/tenantid'] ?? $claims['tid'])
+    if ([string]::IsNullOrWhiteSpace($objectId) -or [string]::IsNullOrWhiteSpace($tenantId)) {
+        throw [System.UnauthorizedAccessException]::new('The authenticated caller is missing immutable tenant or object identifiers.')
+    }
+    return @{ tenantId = $tenantId.ToLowerInvariant(); objectId = $objectId.ToLowerInvariant() }
+}
+
+function Assert-PasskeyRecordOwner {
+    param([Parameter(Mandatory)][hashtable]$Record, [Parameter(Mandatory)][hashtable]$Caller)
+    if ($Record.owner -isnot [System.Collections.IDictionary]) {
+        throw [System.UnauthorizedAccessException]::new('This legacy passkey has no owner and is denied until it is migrated.')
+    }
+    if ([string]$Record.owner.tenantId -ine [string]$Caller.tenantId -or [string]$Record.owner.objectId -ine [string]$Caller.objectId) {
+        throw [System.UnauthorizedAccessException]::new('The requested passkey is not owned by the authenticated caller.')
+    }
+}
+
 function Get-RequestBodyObject {
     param(
         [Parameter(Mandatory)]
@@ -79,6 +129,16 @@ function Get-BodyValue {
         }
     }
 
+    return $null
+}
+
+function Get-SecretBodyValue {
+    param([Parameter(Mandatory)][hashtable]$Body, [Parameter(Mandatory)][string[]]$Names)
+    foreach ($name in $Names) {
+        if ($Body.ContainsKey($name) -and -not [string]::IsNullOrWhiteSpace([string]$Body[$name])) {
+            return [string]$Body[$name]
+        }
+    }
     return $null
 }
 
@@ -235,7 +295,7 @@ function Resolve-EstsAuthCookie {
         $Request
     )
 
-    $directCookie = Get-RequestValue -Body $Body -Request $Request -Names @('estsAuth', 'estsAuthCookie')
+    $directCookie = Get-SecretBodyValue -Body $Body -Names @('estsAuth', 'estsAuthCookie')
     if (-not [string]::IsNullOrWhiteSpace($directCookie)) {
         $parsedDirectCookie = Get-EstsAuthCookieFromSource -CookieSource $directCookie
         if (-not [string]::IsNullOrWhiteSpace($parsedDirectCookie)) {
@@ -249,11 +309,6 @@ function Resolve-EstsAuthCookie {
         if (-not [string]::IsNullOrWhiteSpace($parsedCookie)) {
             return $parsedCookie
         }
-    }
-
-    $queryCookie = Get-RequestValue -Body $Body -Request $Request -Names @('cookies', 'cookieExport', 'cookieJson', 'cookieData', 'browserCookies', 'tokens')
-    if (-not [string]::IsNullOrWhiteSpace($queryCookie)) {
-        return Get-EstsAuthCookieFromSource -CookieSource $queryCookie
     }
 
     return $null
@@ -368,11 +423,8 @@ function Resolve-RequestRedirectUri {
         $Request
     )
 
-    $requestRedirectUri = Get-RequestValue -Body $Body -Request $Request -Names @('redirectUri', 'redirecturi')
-    if (-not [string]::IsNullOrWhiteSpace($requestRedirectUri)) {
-        return Normalize-PasskeyRedirectUri -RedirectUri $requestRedirectUri
-    }
-
+    $null = $Body
+    $null = $Request
     return Normalize-PasskeyRedirectUri -RedirectUri ([Environment]::GetEnvironmentVariable('PASSKEY_ENTRA_PORTAL_ORIGIN'))
 }
 
@@ -664,7 +716,7 @@ function Resolve-OktaAccessToken {
         $Request
     )
 
-    $token = Get-RequestValue -Body $Body -Request $Request -Names @('accessToken', 'oktaAccessToken')
+    $token = Get-SecretBodyValue -Body $Body -Names @('accessToken', 'oktaAccessToken')
     if ([string]::IsNullOrWhiteSpace($token) -and $Request.Headers) {
         $authorization = $null
         if ($Request.Headers -is [System.Collections.IDictionary]) {
@@ -932,12 +984,17 @@ function Save-PasskeyCatalogRecord {
         [Parameter(Mandatory)]
         [hashtable]$Configuration,
 
+        [Parameter(Mandatory)]
+        [hashtable]$Owner,
+
         [Parameter()]
         [hashtable]$Extensions = @{}
     )
 
     Ensure-PasskeyCatalogTable -Configuration $Configuration
     $record = New-PasskeyCatalogRecord -Provider $Provider -Credential $Credential
+    $record.schemaVersion = '2'
+    $record.owner = $Owner
     foreach ($entry in $Extensions.GetEnumerator()) {
         $record[$entry.Key] = $entry.Value
     }
@@ -969,8 +1026,12 @@ function Save-PasskeyCatalogRecord {
 function Update-PasskeyCatalogRecord {
     param(
         [Parameter(Mandatory)][hashtable]$Record,
-        [Parameter(Mandatory)][hashtable]$Configuration
+        [Parameter(Mandatory)][hashtable]$Configuration,
+        [Parameter(Mandatory)][ValidateNotNullOrEmpty()][string]$ETag
     )
+    if ($ETag -eq '*') {
+        throw 'A concrete catalog entity ETag is required for record updates.'
+    }
     $entity = [ordered]@{
         PartitionKey = ([string]$Record.keyVault.vaultName).ToLowerInvariant()
         RowKey = $Record.recordId
@@ -990,8 +1051,18 @@ function Update-PasskeyCatalogRecord {
         RecordJson = ($Record | ConvertTo-Json -Depth 20 -Compress)
     }
     $uri = "$(Get-StorageTableServiceUri)/$(Get-PasskeyCatalogTableName)(PartitionKey='$($entity.PartitionKey)',RowKey='$($entity.RowKey)')"
-    Invoke-WebRequest -Method PUT -Uri $uri -Headers (Get-StorageTableHeaders -Configuration $Configuration) `
-        -ContentType 'application/json' -Body ($entity | ConvertTo-Json -Depth 10 -Compress) | Out-Null
+    $headers = Get-StorageTableHeaders -Configuration $Configuration
+    $headers['If-Match'] = $ETag
+    try {
+        Invoke-WebRequest -Method PUT -Uri $uri -Headers $headers -ContentType 'application/json' `
+            -Body ($entity | ConvertTo-Json -Depth 10 -Compress) | Out-Null
+    } catch {
+        $statusCode = if ($_.Exception.Response) { [int]$_.Exception.Response.StatusCode } else { $null }
+        if ($statusCode -eq 412) {
+            throw "Passkey catalog record '$($Record.recordId)' changed concurrently; reload it and retry."
+        }
+        throw
+    }
 }
 
 function Get-PasskeyCatalogRecords {
@@ -1050,7 +1121,8 @@ function Get-PasskeyCatalogRecord {
         [Parameter(Mandatory)]
         [hashtable]$Configuration,
         [Parameter(Mandatory)]
-        [string]$RecordId
+        [string]$RecordId,
+        [switch]$IncludeETag
     )
 
     Ensure-PasskeyCatalogTable -Configuration $Configuration
@@ -1058,16 +1130,25 @@ function Get-PasskeyCatalogRecord {
     $escapedRecordId = $RecordId.Replace("'", "''")
     $uri = "$(Get-StorageTableServiceUri)/$(Get-PasskeyCatalogTableName)(PartitionKey='$partitionKey',RowKey='$escapedRecordId')"
     try {
-        $entity = Invoke-RestMethod -Method GET -Uri $uri -Headers (Get-StorageTableHeaders -Configuration $Configuration)
+        $response = Invoke-WebRequest -Method GET -Uri $uri -Headers (Get-StorageTableHeaders -Configuration $Configuration)
     } catch {
         $statusCode = if ($_.Exception.Response) { [int]$_.Exception.Response.StatusCode } else { $null }
         if ($statusCode -eq 404) { return $null }
         throw
     }
+    $entity = $response.Content | ConvertFrom-Json -Depth 20
     if ([string]::IsNullOrWhiteSpace([string]$entity.RecordJson)) {
         throw "Passkey catalog record '$RecordId' is malformed."
     }
-    return [string]$entity.RecordJson | ConvertFrom-Json -AsHashtable -Depth 20
+    $record = [string]$entity.RecordJson | ConvertFrom-Json -AsHashtable -Depth 20
+    if (-not $IncludeETag) {
+        return $record
+    }
+    $etag = [string]$response.Headers['ETag']
+    if ([string]::IsNullOrWhiteSpace($etag)) {
+        throw "Passkey catalog record '$RecordId' did not include an ETag required for a safe update."
+    }
+    return [ordered]@{ Record = $record; ETag = $etag }
 }
 
 function Remove-PasskeyCatalogRecord {
@@ -1106,6 +1187,7 @@ function Invoke-ProviderPasskeyLookup {
     )
 
     try {
+        $caller = Get-PasskeyCallerIdentity -Request $Request
         $recordId = $null
         if ($Request.Params -is [System.Collections.IDictionary] -and $Request.Params.ContainsKey('recordId')) {
             $recordId = [string]$Request.Params['recordId']
@@ -1127,6 +1209,7 @@ function Invoke-ProviderPasskeyLookup {
                 }))
                 return
             }
+            Assert-PasskeyRecordOwner -Record $record -Caller $caller
             Push-OutputBinding -Name Response -Value (New-JsonHttpResponse -StatusCode ([System.Net.HttpStatusCode]::OK) -Body ([ordered]@{
                 success = $true
                 provider = $Provider
@@ -1148,6 +1231,7 @@ function Invoke-ProviderPasskeyLookup {
         $records = @(Get-PasskeyCatalogRecords -Configuration $configuration -Provider $Provider `
             -RpId $rpId -UserName $userName -Status ([string]($status ?? '')) `
             -CredentialId $credentialId -DisplayName $displayName -KeyVaultKeyName $keyVaultKeyName)
+        $records = @($records | Where-Object { $_.owner -is [System.Collections.IDictionary] -and [string]$_.owner.tenantId -ieq [string]$caller.tenantId -and [string]$_.owner.objectId -ieq [string]$caller.objectId })
         Push-OutputBinding -Name Response -Value (New-JsonHttpResponse -StatusCode ([System.Net.HttpStatusCode]::OK) -Body ([ordered]@{
             success = $true
             provider = $Provider
@@ -1268,6 +1352,14 @@ function Set-RegistrationStatus {
     }
     Ensure-RegistrationStatusContainer -Configuration $Configuration
 
+    if ($Status.owner -isnot [System.Collections.IDictionary]) {
+        $existing = Get-RegistrationStatus -RequestId $RequestId -Configuration $Configuration
+        if ($existing -and $existing.owner -is [System.Collections.IDictionary]) { $Status.owner = $existing.owner }
+    }
+    if ($Status.owner -isnot [System.Collections.IDictionary]) {
+        throw [System.UnauthorizedAccessException]::new('Registration status is missing an authenticated owner.')
+    }
+
     $status.updatedAtUtc = (Get-Date).ToUniversalTime().ToString('o')
     if (-not $Status.ContainsKey('requestId') -or [string]::IsNullOrWhiteSpace([string]$Status.requestId)) {
         $status.requestId = $RequestId
@@ -1344,32 +1436,11 @@ function Get-RegistrationStatusUrl {
     )
 
     $relativePath = "/api/$Provider/passkeys/register/status/$RequestId"
-    $code = $null
-    if ($null -ne $Request.Query) {
-        if ($Request.Query -is [System.Collections.IDictionary]) {
-            if ($Request.Query.ContainsKey('code')) {
-                $code = [string]$Request.Query['code']
-            }
-        } else {
-            $property = $Request.Query.PSObject.Properties['code']
-            if ($property) {
-                $code = [string]$property.Value
-            }
-        }
-    }
-
     if ($Request.Url) {
         $requestUri = if ($Request.Url -is [uri]) { $Request.Url } else { [uri][string]$Request.Url }
         $baseUrl = $requestUri.GetLeftPart([System.UriPartial]::Authority)
         $statusUrl = "$baseUrl$relativePath"
-        if (-not [string]::IsNullOrWhiteSpace($code)) {
-            $statusUrl += "?code=$([uri]::EscapeDataString($code))"
-        }
         return $statusUrl
-    }
-
-    if (-not [string]::IsNullOrWhiteSpace($code)) {
-        return "$relativePath?code=$([uri]::EscapeDataString($code))"
     }
 
     return $relativePath
