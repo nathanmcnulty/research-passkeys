@@ -1,0 +1,280 @@
+{
+  "schemaVersion": 1,
+  "baselineType": "development",
+  "provider": {
+    "repository": "https://github.com/nathanmcnulty/keyvault-passkey-provider.git",
+    "commit": "d7a6f357c35c14e1d5ceb06b29d7fa5e1163669c",
+    "sourcePath": "src/browser-extension",
+    "gitTree": "8ef525aa1893b6ba8e536a2598a1012fedaa134a"
+  },
+  "vendorPath": "browser-extensions/vendor/key-vault-passkey-provider/dev-d7a6f35",
+  "version": {
+    "package": "0.1.0",
+    "manifest": "0.1.0",
+    "versionName": null
+  },
+  "identity": {
+    "manifestKeySha256": "cd67e9ccb28bee49fee6725d3e2b109fb301dd2c0f4603ecd478db2eed9b8de1",
+    "extensionId": "mnghojmmlcilooejpooghcfndoclbajp"
+  },
+  "buildArtifact": null,
+  "content": {
+    "algorithm": "sha256",
+    "digest": "cc771d4356667d0575d7e7148159acfc64836f4c93e95c3f8c7fd766982f4790",
+    "files": {
+      ".gitignore": {
+        "gitMode": "100644",
+        "sha256": "9172db593742a1e3fea02284340f652a3854ad096f90f3484485cb977228ee71",
+        "size": 38
+      },
+      "README.md": {
+        "gitMode": "100644",
+        "sha256": "fd33d74bc573afbd59d5a96d867b1745fdcdef213b0357e7c1010c1f19525865",
+        "size": 9902
+      },
+      "package-lock.json": {
+        "gitMode": "100644",
+        "sha256": "21197b10d0380d454f8a9c18b823f8fcd3d971aadb6951a2e987a931d4b78d67",
+        "size": 17766
+      },
+      "package.json": {
+        "gitMode": "100644",
+        "sha256": "1ec227c724a481b47b56e391783318b4525bf8f3899c09e28cfc3536773a8310",
+        "size": 1072
+      },
+      "public/manifest.json": {
+        "gitMode": "100644",
+        "sha256": "fbee5249c0d9e687907d2c1bc1976ba3d08f2bfec91f59f38ff100c766f4410d",
+        "size": 1224
+      },
+      "public/popup.css": {
+        "gitMode": "100644",
+        "sha256": "4df7e3f8d219209399d69e63acf521b31194d27a60f6d03838ba103a7757e32d",
+        "size": 8384
+      },
+      "public/popup.html": {
+        "gitMode": "100644",
+        "sha256": "ba8eb873199dc72896c7dfc39374e4dddea7fb97a6ed4cf0994beda27e9c2b75",
+        "size": 5063
+      },
+      "public/setup.css": {
+        "gitMode": "100644",
+        "sha256": "a5726c314bb96e23ec42653c616a73d9e63a0d2e70700717e7cbbbca4141e542",
+        "size": 2038
+      },
+      "public/setup.html": {
+        "gitMode": "100644",
+        "sha256": "57579fa34e004c43fb94b74cfdba84587e02ed513fe0478f257002d70f803d01",
+        "size": 9089
+      },
+      "public/uv-dialog.html": {
+        "gitMode": "100644",
+        "sha256": "b258316485b3dedf87358ecdbbab3c84f5c5bbcd38aa5d0dcb418be512515bed",
+        "size": 1445
+      },
+      "scripts/build.mjs": {
+        "gitMode": "100644",
+        "sha256": "c0e0437df4278bfc0c1f6b41bd6910723d68b25fee4cacea01f99c58e391529c",
+        "size": 1419
+      },
+      "scripts/inspect-edge-session-state.mjs": {
+        "gitMode": "100644",
+        "sha256": "2fdfaa62a4cd7f84aaf2df06b9afdfa2e1745a1c1a1311e6ef9b30446c9b0db6",
+        "size": 3572
+      },
+      "scripts/launch-edge-extension-session.mjs": {
+        "gitMode": "100644",
+        "sha256": "73ce484f3521aa7c39ae7ea592025e75b99e273f00bea994e275c56deec1eb74",
+        "size": 13394
+      },
+      "scripts/target-scoped-extension.mjs": {
+        "gitMode": "100644",
+        "sha256": "1762bde6dbb4232020bcdc761c58df7617c7db5fabc0808829034148ce5a25ca",
+        "size": 1466
+      },
+      "scripts/validate-ceremony-authorization.mjs": {
+        "gitMode": "100644",
+        "sha256": "666077900b1b8b0493e60cf9750f8e6d520faee8e5afabc3b7d49f620d9036da",
+        "size": 5611
+      },
+      "scripts/validate-credential-lifecycle.mjs": {
+        "gitMode": "100644",
+        "sha256": "0f63fc632c4dc9b3d10d40506f36823082c935fee5fbdb500e77b4a88a00ccfa",
+        "size": 5468
+      },
+      "scripts/validate-ctap-flow.mjs": {
+        "gitMode": "100644",
+        "sha256": "cfc4cca49ac6495b8a83d4180a627117abebfcc76342b3f853f1551e8daf834e",
+        "size": 28861
+      },
+      "scripts/validate-interception.mjs": {
+        "gitMode": "100644",
+        "sha256": "7707d1ae97c713c8e724bcf1c5b706e28b3f3c63c3a62d468ebaba8aa741c4bc",
+        "size": 21429
+      },
+      "scripts/validate-lock-flow.mjs": {
+        "gitMode": "100644",
+        "sha256": "fdf1508835a9d1dbb5e9dd43f257de8edeb3310f2652283f51f529874ff29e1d",
+        "size": 16703
+      },
+      "scripts/validate-pin-attempt-policy.mjs": {
+        "gitMode": "100644",
+        "sha256": "fa079065c80bcd3ddf3bca470dd0397b8111d83ba008a96c25f5803cdb5c5e67",
+        "size": 4593
+      },
+      "scripts/validate-security-boundaries.mjs": {
+        "gitMode": "100644",
+        "sha256": "8cc6f856ddfeb85d2366f1d4332c8129d728faae3e35c75fe61ef889fc95a2c9",
+        "size": 3438
+      },
+      "scripts/validate-webauthn-flags.mjs": {
+        "gitMode": "100644",
+        "sha256": "e6dd08ef564d5ef0d26ab4b7b87e812ad1ca3fa0ebdf490a7da901dc6d86b97d",
+        "size": 2340
+      },
+      "src/background.ts": {
+        "gitMode": "100644",
+        "sha256": "ffc1ef8ab8626c168b6912632ab3fd56abb3d98675bd07758c96a48997c16c80",
+        "size": 53097
+      },
+      "src/content.ts": {
+        "gitMode": "100644",
+        "sha256": "01c72aefa16d9c5a8908d3beafa36e69389afcbd6d7f920b9871643670b4b4af",
+        "size": 5261
+      },
+      "src/page.ts": {
+        "gitMode": "100644",
+        "sha256": "6ff43f1c4bdb86ef603fe0dd809805910f362d5185e798704e367c285e8d8d23",
+        "size": 12933
+      },
+      "src/popup.ts": {
+        "gitMode": "100644",
+        "sha256": "9f2b284fdefd1fef8073d69728693dc733a70b4d87556f4fbf2b979a99ef4eac",
+        "size": 31819
+      },
+      "src/setup.ts": {
+        "gitMode": "100644",
+        "sha256": "29a04385f02202ab8a55d85abb4fb96670d318ba87b1d503e3b83f142783a2ff",
+        "size": 20716
+      },
+      "src/shared/base64url.ts": {
+        "gitMode": "100644",
+        "sha256": "9c8c1a883ff149a0640994f094533f5daa0387cc1928ed47e4f3f6f86732866b",
+        "size": 775
+      },
+      "src/shared/browser-auth.ts": {
+        "gitMode": "100644",
+        "sha256": "f0d844b701bc9504c18900fe17e7e6e27dbed79882eac0ebb31bc8471ad70a0c",
+        "size": 14163
+      },
+      "src/shared/cbor.ts": {
+        "gitMode": "100644",
+        "sha256": "ddfd09f49d86a796c6c30f9e6b7a053c1fe633704fd8967acb17bc598c1f58bd",
+        "size": 1786
+      },
+      "src/shared/ceremony-authorization-registry.ts": {
+        "gitMode": "100644",
+        "sha256": "ded646186c54540e0584f12acc8dfe3772834d699993fa2f1b91def828c733a2",
+        "size": 5598
+      },
+      "src/shared/credential-lifecycle.ts": {
+        "gitMode": "100644",
+        "sha256": "253a5eae2a578ce9d369dda0efe24377b9a3aef5fb92bdd3d1483f7125b0b797",
+        "size": 3537
+      },
+      "src/shared/key-vault-client.ts": {
+        "gitMode": "100644",
+        "sha256": "500316e0f71c660bbe5e53fb4e8a503b7fe42d48729f49734d363ce89b3baffe",
+        "size": 9068
+      },
+      "src/shared/key-vault-metadata-transport.ts": {
+        "gitMode": "100644",
+        "sha256": "77469d971e039a077d47a3d1de6e58369bc124bf5060130cbfb3660d489daad5",
+        "size": 3791
+      },
+      "src/shared/metadata-cache-store.ts": {
+        "gitMode": "100644",
+        "sha256": "d717d8b1567309b42dee4d22f788e69ba4ccc0e62ccb193f9ad09b9380190f3d",
+        "size": 4005
+      },
+      "src/shared/metadata-key-protector.ts": {
+        "gitMode": "100644",
+        "sha256": "251a284071546229ee4a276ee8c48a5cb8c0b75b1bbbfd2705e62e7a19f1cb08",
+        "size": 4419
+      },
+      "src/shared/metadata-store.ts": {
+        "gitMode": "100644",
+        "sha256": "4a86f691712c96f9824ee08b70450eed544bca23cc6194a5f094cb7becd7b28a",
+        "size": 8504
+      },
+      "src/shared/models.ts": {
+        "gitMode": "100644",
+        "sha256": "a7ba90ce5f81d34c7a740cbf30da38de7eeb9edf770a0cbc6a5ab7a56febd6d0",
+        "size": 1093
+      },
+      "src/shared/pin-attempt-limiter.ts": {
+        "gitMode": "100644",
+        "sha256": "1fcccd49ed19aa0e02b0f914b0b55d17d1e6b95532248dd20e14789a28e7bf24",
+        "size": 2607
+      },
+      "src/shared/pin-attempt-policy.ts": {
+        "gitMode": "100644",
+        "sha256": "b73299301735d8774f629a8954ebb06652e9927ca37908bee2e022d322547c5d",
+        "size": 2246
+      },
+      "src/shared/pin-uv.ts": {
+        "gitMode": "100644",
+        "sha256": "fdbb38a8560798126fa4a39c51ab0d1bb7a58685799b0188107bd7865c8c576b",
+        "size": 14810
+      },
+      "src/shared/protocol.ts": {
+        "gitMode": "100644",
+        "sha256": "7dd29dda1b0a758ce34b87d0e4b50bd21ba5be259a3dce79e97c5acc98b8f392",
+        "size": 7744
+      },
+      "src/shared/runtime-credential-options.ts": {
+        "gitMode": "100644",
+        "sha256": "f607bded26696f0a2fc67c3ce43f9da95e2784dd25ef294a2c8b93a8f7c6abe8",
+        "size": 3643
+      },
+      "src/shared/security-boundaries.ts": {
+        "gitMode": "100644",
+        "sha256": "07aaa1cda615dbea3b9909bb109f49a8a78f8c4a4db20afd24d7a125c73ee57f",
+        "size": 6706
+      },
+      "src/shared/serialized-operation-queue.ts": {
+        "gitMode": "100644",
+        "sha256": "2490aa57c3afd16f57c7dfc273412bfbe7ceb794a3d4058c9511bb08d672493e",
+        "size": 322
+      },
+      "src/shared/setup-state.ts": {
+        "gitMode": "100644",
+        "sha256": "8fb642b481137c9a8a4a3e209a21dbec39f2f72548dd25c47693e35001b0cc1e",
+        "size": 1633
+      },
+      "src/shared/storage.ts": {
+        "gitMode": "100644",
+        "sha256": "e2428d2a46ce3612b68578dd767bc4cda66a04aba085eef228dcdeefa867d414",
+        "size": 5393
+      },
+      "src/shared/webauthn-data.ts": {
+        "gitMode": "100644",
+        "sha256": "c10622c5e8d475632a8ca58437c92a392579c1203cd55b26040e2e671643c010",
+        "size": 6301
+      },
+      "src/uv-dialog.ts": {
+        "gitMode": "100644",
+        "sha256": "84e1c36a8c0a60c50da5c5dd9de069e25b36a63718aaeff0608bd5e74506b079",
+        "size": 7229
+      },
+      "tsconfig.json": {
+        "gitMode": "100644",
+        "sha256": "fe75bf4e3324102d868e243496ca2fc112c0cd15cb82d47bba6a960650e35cb3",
+        "size": 267
+      }
+    }
+  },
+  "validation": {
+    "command": "node browser-extensions/scripts/validate-upstream-provider-lock.mjs --verify-upstream"
+  }
+}

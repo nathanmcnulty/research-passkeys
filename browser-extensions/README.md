@@ -9,4 +9,10 @@ Relevant details can be brought in from existing browser-extension research, but
 - `keyvault-passkey-provider/` is a historical imported MV3 spike. Its persistent side panel informed the maintained provider, but its experimental Function, UV, attestation, and User-Agent behavior must not be treated as current or production-safe.
 - `TODO.md` records the deferred production broker design and its security requirements.
 
-Security decisions for user presence and verification are recorded in `user-presence-and-verification.md`. The implementation remains canonical in the provider repository rather than being duplicated here.
+Security decisions for user presence and verification are recorded in `user-presence-and-verification.md`. The provider repository remains canonical; the snapshots below are provenance-locked inputs rather than independently maintained copies.
+
+## Provider baselines and experiments
+
+`vendor/key-vault-passkey-provider/` contains byte-for-byte, read-only snapshots of the canonical provider extension. `upstream-provider.lock.json` binds each snapshot to its provider commit, Git tree, version, extension identity, file list, sizes, and SHA-256 digests. Run `node browser-extensions/scripts/validate-upstream-provider-lock.mjs` from the repository root for an offline content check. Add `--verify-upstream` to fetch the pinned commit from the trusted provider repository and prove that the declared source path has the locked Git tree.
+
+Do not edit a vendored snapshot. Put research-owned changes in a separately declared experiment directory and compose a beta build from the locked baseline plus that overlay. Promote one experiment at a time through a pull request in the provider repository; never copy the historical spike or a composed beta tree over the provider source.
