@@ -1,16 +1,14 @@
 import { createHash } from "node:crypto";
-import { mkdtemp, readFile, readdir, rm, stat } from "node:fs/promises";
-import { tmpdir } from "node:os";
+import { readFile, readdir, stat } from "node:fs/promises";
 import path from "node:path";
-import { spawnSync } from "node:child_process";
 import { fileURLToPath } from "node:url";
 
 const repositoryRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..", "..");
 const lockPath = path.join(repositoryRoot, "browser-extensions", "upstream-provider.lock.json");
 const lock = await readJson(lockPath);
 const argumentsList = process.argv.slice(2);
-if (argumentsList.some((argument) => argument !== "--verify-upstream")) {
-  throw new Error(`Unknown argument: ${argumentsList.find((argument) => argument !== "--verify-upstream")}`);
+if (argumentsList.length > 0) {
+  throw new Error(`Unknown argument: ${argumentsList[0]}`);
 }
 
 if (lock.schemaVersion !== 1) {
@@ -30,6 +28,7 @@ if (
 if (lock.content?.algorithm !== "sha256" || !/^[0-9a-f]{64}$/.test(lock.content?.digest ?? "")) {
   throw new Error("Unsupported or malformed content digest");
 }
+verifyGitProvenance(lock.provider);
 
 const vendorRoot = path.resolve(repositoryRoot, lock.vendorPath);
 const relativeVendor = path.relative(repositoryRoot, vendorRoot);
@@ -74,9 +73,6 @@ if (digest !== lock.content.digest) {
 const gitTree = gitTreeHash(gitEntries);
 if (gitTree !== lock.provider.gitTree) {
   throw new Error(`Vendored Git tree differs from provider.gitTree: ${gitTree}`);
-}
-if (argumentsList.includes("--verify-upstream")) {
-  await verifyUpstreamCommit(lock.provider);
 }
 
 const packageJson = await readJson(path.join(vendorRoot, "package.json"));
@@ -182,39 +178,69 @@ async function readJson(filePath) {
   return JSON.parse((await readFile(filePath, "utf8")).replace(/^\uFEFF/, ""));
 }
 
-async function verifyUpstreamCommit(provider) {
-  const temporaryRepository = await mkdtemp(path.join(tmpdir(), "research-passkeys-provider-"));
-  try {
-    runGit(["-C", temporaryRepository, "init", "--quiet"]);
-    runGit([
-      "-C",
-      temporaryRepository,
-      "fetch",
-      "--quiet",
-      "--depth=1",
-      "--filter=blob:none",
-      "--no-tags",
-      provider.repository,
-      provider.commit,
-    ]);
-    const upstreamTree = runGit([
-      "-C",
-      temporaryRepository,
-      "rev-parse",
-      `FETCH_HEAD:${provider.sourcePath}`,
-    ]).trim();
-    if (upstreamTree !== provider.gitTree) {
-      throw new Error(`Pinned provider commit resolves to a different source tree: ${upstreamTree}`);
-    }
-  } finally {
-    await rm(temporaryRepository, { recursive: true, force: true });
+function verifyGitProvenance(provider) {
+  const proof = provider.proof;
+  if (proof?.algorithm !== "git-sha1") {
+    throw new Error("Provider Git object proof is missing or unsupported");
+  }
+
+  const commitObject = decodeProofObject(proof.commitObjectBase64, "commit");
+  if (gitObjectHash("commit", commitObject) !== provider.commit) {
+    throw new Error("Provider commit object does not match provider.commit");
+  }
+  const rootMatch = /^tree ([0-9a-f]{40})$/m.exec(commitObject.toString("utf8"));
+  if (!rootMatch || rootMatch[1] !== proof.rootTree) {
+    throw new Error("Provider commit does not reference the proof root tree");
+  }
+
+  const rootTreeObject = decodeProofObject(proof.rootTreeObjectBase64, "root tree");
+  if (gitObjectHash("tree", rootTreeObject) !== proof.rootTree) {
+    throw new Error("Provider root tree object does not match its object ID");
+  }
+  const sourceEntry = findTreeEntry(rootTreeObject, "src");
+  if (sourceEntry?.mode !== "40000" || sourceEntry.oid !== proof.sourceTree) {
+    throw new Error("Provider root tree does not reference the proof source tree");
+  }
+
+  const sourceTreeObject = decodeProofObject(proof.sourceTreeObjectBase64, "source tree");
+  if (gitObjectHash("tree", sourceTreeObject) !== proof.sourceTree) {
+    throw new Error("Provider source tree object does not match its object ID");
+  }
+  const extensionEntry = findTreeEntry(sourceTreeObject, "browser-extension");
+  if (extensionEntry?.mode !== "40000" || extensionEntry.oid !== provider.gitTree) {
+    throw new Error("Pinned provider commit does not reference provider.gitTree at src/browser-extension");
   }
 }
 
-function runGit(argumentsList) {
-  const result = spawnSync("git", argumentsList, { encoding: "utf8", maxBuffer: 1024 * 1024 });
-  if (result.status !== 0) {
-    throw new Error(`Git command failed: ${result.stderr.trim() || result.stdout.trim()}`);
+function decodeProofObject(value, label) {
+  if (typeof value !== "string" || value.length === 0) {
+    throw new Error(`Provider ${label} proof is missing`);
   }
-  return result.stdout;
+  return Buffer.from(value, "base64");
+}
+
+function gitObjectHash(type, bytes) {
+  return createHash("sha1")
+    .update(Buffer.from(`${type} ${bytes.length}\0`, "utf8"))
+    .update(bytes)
+    .digest("hex");
+}
+
+function findTreeEntry(treeObject, expectedName) {
+  let offset = 0;
+  while (offset < treeObject.length) {
+    const space = treeObject.indexOf(0x20, offset);
+    const nul = treeObject.indexOf(0x00, space + 1);
+    if (space < 0 || nul < 0 || nul + 21 > treeObject.length) {
+      throw new Error("Malformed provider tree proof");
+    }
+    const mode = treeObject.subarray(offset, space).toString("ascii");
+    const name = treeObject.subarray(space + 1, nul).toString("utf8");
+    const oid = treeObject.subarray(nul + 1, nul + 21).toString("hex");
+    if (name === expectedName) {
+      return { mode, oid };
+    }
+    offset = nul + 21;
+  }
+  return null;
 }
