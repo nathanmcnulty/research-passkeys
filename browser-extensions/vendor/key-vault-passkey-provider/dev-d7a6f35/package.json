@@ -1,0 +1,26 @@
+{
+  "name": "kvpp-browser-extension",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "build": "node ./scripts/build.mjs",
+    "edge:ctap": "node ./scripts/launch-edge-extension-session.mjs https://ctap.dev",
+    "edge:extension": "node ./scripts/launch-edge-extension-session.mjs",
+    "validate:lock": "node ./scripts/validate-lock-flow.mjs",
+    "validate:ctap": "node ./scripts/validate-ctap-flow.mjs",
+    "validate:interception": "node ./scripts/validate-interception.mjs",
+    "validate:security": "node ./scripts/validate-security-boundaries.mjs && node ./scripts/validate-webauthn-flags.mjs && node ./scripts/validate-pin-attempt-policy.mjs && node ./scripts/validate-ceremony-authorization.mjs && node ./scripts/validate-credential-lifecycle.mjs",
+    "typecheck": "tsc --noEmit",
+    "watch": "node ./scripts/build.mjs --watch"
+  },
+  "devDependencies": {
+    "@types/chrome": "^0.0.299",
+    "esbuild": "^0.25.6",
+    "playwright-core": "^1.61.1",
+    "typescript": "^5.8.3"
+  },
+  "dependencies": {
+    "tldts": "^7.4.4"
+  }
+}
