@@ -1,0 +1,64 @@
+# Broker proof and lifecycle contract v1
+
+Status: design candidate, 2026-09-26. No current Function route implements this contract. In particular, this document does not authorize signing or a WebAuthn UV claim.
+
+## Implementation ownership and boundary
+
+The canonical broker implementation belongs in `research-passkeys`, in a new Python 3.11 package under `broker/` with its own authenticated API and tests. The existing Python and PowerShell Function samples remain research inputs, not production broker implementations; they contain registration/login and capture workflows with different trust assumptions. The Windows plugin in `key-vault-passkey-provider` is the first proposed native proof producer. Browser extension proof is a separate future integration. Direct Table/Key Vault client access remains a lab mode and must never be a fallback from a denied broker request.
+
+The broker alone has Key Vault signing and catalog write rights. Its API authenticates an Entra caller and checks tenant, object ID, allowed application, device and Conditional Access claims at every operation. An `owner` is an immutable `(tenantId, objectId)` pair taken from validated token claims, never a request field. A delegate may act only under a separately stored, scoped and revocable grant that identifies the owner, credential, allowed operations, and expiry. Neither a Function key nor possession of a credential ID grants owner or delegate authority. Administrator reconciliation has a distinct audited role and cannot assert as the user.
+
+All externally visible credential, reservation and operation IDs are random opaque values with at least 128 bits of entropy. They do not encode vault coordinates, usernames or tenant IDs. Key names and IDs are server-held. Responses, including denials, use `Cache-Control: no-store` and do not expose key coordinates, proof signatures, token claims or whether a different owner has a matching credential.
+
+## Ceremony transcript and trusted proof
+
+The broker creates an operation ID, a random nonce of at least 256 bits, and a short expiry (target: 60 seconds; exact bound is deployment policy). A proof has a versioned, unambiguous canonical byte encoding and includes: operation ID and create/get/delete purpose; RP ID; browser origin and top origin when applicable; credential ID or reservation ID; SHA-256 of the exact `clientDataJSON` bytes and challenge; nonce; issue and expiry times; one-use proof ID; enrolled device ID; local approval result; and the verification method. A `get` proof also binds the authenticator-data bytes that will be signed, including the allocated counter. A `create` proof binds the generated credential public key and returned attestation object. A delete proof binds the credential ID and deletion intent. Reject unknown versions, omitted fields, canonicalization ambiguity, cross-purpose use and clock skew outside policy.
+
+Only an enrolled native component may sign the proof with a device-bound key after a fresh, ceremony-specific local approval. The broker verifies the signature against the active enrollment, validates the OS/browser origin provenance rather than trusting a caller string, checks all transcript fields against the broker's pending operation, and consumes the proof ID atomically with the operation transition. The broker ignores client-supplied `userPresent` and `userVerified` flags. It sets UP only after a trusted, fresh approval; it sets UV only if the native producer supplies a verifiable Windows Hello (or equivalent) result bound to this exact transcript. If the producer cannot establish that binding or device-key custody, UV and signing remain disabled. A browser-local PIN, extension unlock and Entra login are not UV.
+
+Enrollment requires authenticated owner consent, an independently authenticated device, proof of possession of the device key, a documented key-protection level, and an auditable device-to-owner binding. Revocation takes effect at authorization time, including for pending operations. Expired/missing CA claims cause an interactive claims challenge through the normal broker/browser flow; no queued or cached operation may bypass the fresh claim check. Enrollment, revocation, origin provenance, proof serialization, and Windows Hello result verification need independent security review and live evidence before enabling signing.
+
+## Durable lifecycle
+
+For one credential, store reservation, credential, operation, consumed proof ID and idempotency records in one transactional partition. Use conditional ETags/CAS and a transaction for every authorization state change. A secondary credential lookup index may be eventually consistent; it is never an authorization source. Hash a canonical request body with SHA-256 and bind each idempotency key to owner, operation type, target ID and request hash. Reuse with the same tuple returns only the durable prior result; reuse with a different tuple is a conflict. Retain keys, proof IDs and tombstones beyond the maximum replay/offline-delivery window; the initial policy is at least 30 days and must be reviewed against actual clients before release.
+
+| Operation | Authorized transition | External side effect and recovery |
+| --- | --- | --- |
+| Reserve | Absent to `reserved`; one owner and RP fixed; allocate opaque credential and reservation IDs | No key yet. Expiry/abort makes the reservation terminal. |
+| Create key | `reserved` to `key-creating` to `key-created` | Use a server-derived unique key name and record intent before the Key Vault call. On timeout, query that exact name and verify ownership/tag/public key; never create a second key blindly. Unknown ownership is quarantined for manual review. |
+| Finalize | `key-created` to `pending-rp` to `active` | Finalization requires both a valid create proof and an authenticated, operation-bound acceptance receipt from an RP integration controlled by the RP. The authenticator cannot observe RP acceptance. Without such a receipt, remain pending and expire/abort; a browser success page or client boolean is insufficient. |
+| Abort | Any non-active registration state to `aborted` | Tombstone first, then enqueue idempotent key cleanup. Never erase the ownership/negative-state record before the replay window. An active credential requires Delete instead. |
+| Assert | `active` to `asserting` to `active` | Validate fresh authority and proof; allocate the next uint32 counter by CAS before Key Vault signing. Persist a durable operation marker before signing and a response only after signing. Retry of an ambiguous same operation returns `pending/unknown`, never signs twice with the same proof. A new ceremony may use a higher counter; gaps are acceptable. Exhaustion fails closed. |
+| Delete | `active`/`disabled` to `deleted` | Commit tombstone before attempting Key Vault deletion. Retry cleanup only for the exact verified key; preserve tombstone and audit on Key Vault failure. Reconciliation is dry-run by default and cannot sweep unknown keys. |
+
+An operation committed to `asserting` holds a per-credential lease with a finite deadline. Expiry does not authorize a second signature for the same proof or idempotency key; recovery marks the result unknown and releases the lease only after a bounded reconciliation decision. Parallel callers/devices race on the same CAS, so only one counter allocation and proof consumption wins. Successful signatures can exist without a delivered response after a crash; the allocated counter stays consumed. If a response was durably recorded, an exact idempotent retry may replay that response while it remains within policy, but it must not invoke Key Vault again.
+
+The RP receipt is deliberately an integration gate. A general public RP such as WebAuthn.io cannot issue a broker-verifiable receipt for this contract. A lab ceremony there can validate the Windows provider but cannot activate a broker-managed credential under v1.
+
+## Adversarial fixtures for the first implementation
+
+Each fixture starts from a clean durable state and must assert the resulting state, response class, Key Vault call count, counter, and audit event. No fixture may enable signing with a mock proof in a deployed environment.
+
+| Fixture | Expected result |
+| --- | --- |
+| Caller changes `owner`, uses another owner's opaque ID, or presents only a Function key | Deny without record disclosure or Key Vault call. |
+| Delegate grant expires or is revoked between reserve and finalize; device is revoked during assert | Deny at the current transition; no signing. |
+| Wrong issuer/audience/app, missing CA claim, stale token or mismatched tenant | Deny or return a claims challenge before any mutable transition. |
+| Proof replays, expires, has a different operation/RP/origin/top origin/challenge/client-data hash/counter, or uses a noncanonical encoding | Deny; consumed proof cannot authorize another transition. |
+| Client supplies UP/UV booleans or a PIN result without trusted native proof | Deny signing and never set UV. |
+| Two devices assert concurrently from counter N | One CAS wins N+1; the other must start a new ceremony or receive a conflict. |
+| Key Vault creates a key but times out; catalog write fails; key ownership is unverifiable | Quarantine/reconcile exact key; do not activate or guess ownership. |
+| Key Vault signs then broker crashes before response persistence | Counter and proof remain consumed; same operation returns unknown and cannot sign again. |
+| Same idempotency key with different request hash or owner | Conflict; no mutation or signing. |
+| RP rejects registration or no trusted receipt arrives | Never activate; tombstone and reconcile on expiry. |
+| Delete races with assertion, cleanup fails, or an old offline request replays | Tombstone wins or assertion completes under ordered CAS; afterward deny; retry exact cleanup without erasing tombstone. |
+
+## Ordered implementation briefs
+
+1. In `research-passkeys/broker/`, define the canonical request/proof encoding, stable error classes and owner/delegate policy interface. Fixtures above must run without Azure; all signing entry points return disabled.
+2. Add one-partition Table lifecycle/CAS, idempotency and reconciliation with fault injection. Review the partition transaction and lease semantics before connecting Key Vault.
+3. Add reserve/create/finalize/abort with exact-key reconciliation and an RP integration receipt verifier. Keep activation closed until a real RP adapter is available.
+4. In `key-vault-passkey-provider`, build and review the native enrolled-key/Hello proof producer against the transcript. Verify device custody, OS origin provenance and revocation on a live host. Browser extension proof remains a separate design.
+5. Add constrained assertion, counter allocation, Key Vault signing, and delete/cleanup only after the proof and RP receipt gates pass. Test all adversarial fixtures plus two devices and crash-after-signing in an isolated lab.
+
+Open decisions before signing: the concrete Windows Hello API/result and protected device-key mechanism; secure device enrollment and origin provenance; RP receipt transport and trust anchor; exact CA policy/claims-challenge behavior; maximum offline replay window and retention; and whether the chosen Azure Table transaction/lease layout withstands multi-region and failover. These require implementation evidence, not a client-controlled flag or a mock.
