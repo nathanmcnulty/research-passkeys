@@ -18,7 +18,7 @@ try {
     }
     $record = Get-PasskeyCatalogRecord -Configuration (Get-PasskeyFunctionConfiguration) -RecordId $recordId
     if ($null -eq $record) {
-        Push-OutputBinding -Name Response -Value (New-JsonHttpResponse -StatusCode ([HttpStatusCode]::NotFound) -Body ([ordered]@{
+        Push-OutputBinding -Name Response -Value (New-JsonHttpResponse -NoStore -StatusCode ([HttpStatusCode]::NotFound) -Body ([ordered]@{
             success = $false
             recordId = $recordId
             error = 'Passkey was not found.'
@@ -26,19 +26,19 @@ try {
         return
     }
     Assert-PasskeyRecordOwner -Record $record -Caller (Get-PasskeyCallerIdentity -Request $Request)
-    Push-OutputBinding -Name Response -Value (New-JsonHttpResponse -StatusCode ([HttpStatusCode]::OK) -Body ([ordered]@{
+    Push-OutputBinding -Name Response -Value (New-JsonHttpResponse -NoStore -StatusCode ([HttpStatusCode]::OK) -Body ([ordered]@{
         success = $true
         record = $record
     }))
 } catch [System.UnauthorizedAccessException] {
-    Push-OutputBinding -Name Response -Value (New-JsonHttpResponse -StatusCode Forbidden -Body @{success=$false;error=$_.Exception.Message})
+    Push-OutputBinding -Name Response -Value (New-JsonHttpResponse -NoStore -StatusCode Forbidden -Body @{success=$false;error=$_.Exception.Message})
 } catch [System.ArgumentException] {
-    Push-OutputBinding -Name Response -Value (New-JsonHttpResponse -StatusCode ([HttpStatusCode]::BadRequest) -Body ([ordered]@{
+    Push-OutputBinding -Name Response -Value (New-JsonHttpResponse -NoStore -StatusCode ([HttpStatusCode]::BadRequest) -Body ([ordered]@{
         success = $false
         error = $_.Exception.Message
     }))
 } catch {
-    Push-OutputBinding -Name Response -Value (New-JsonHttpResponse -StatusCode ([HttpStatusCode]::InternalServerError) -Body ([ordered]@{
+    Push-OutputBinding -Name Response -Value (New-JsonHttpResponse -NoStore -StatusCode ([HttpStatusCode]::InternalServerError) -Body ([ordered]@{
         success = $false
         error = $_.Exception.Message
     }))

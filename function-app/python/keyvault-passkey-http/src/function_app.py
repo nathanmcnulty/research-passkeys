@@ -1199,13 +1199,13 @@ def list_passkey_catalog_records_http(req: func.HttpRequest) -> func.HttpRespons
             key_vault_key_name=_get_request_value({}, req, "keyVaultKeyName", "keyName"),
         )
         records = [record for record in records if isinstance(record.get("owner"), dict) and record["owner"].get("tenantId", "").lower() == caller["tenantId"] and record["owner"].get("objectId", "").lower() == caller["objectId"]]
-        return _json_response(200, {"success": True, "count": len(records), "records": records})
+        return _no_store_response(200, {"success": True, "count": len(records), "records": records})
     except PasskeySecurityError as exc:
-        return _json_response(403, {"success": False, "error": str(exc)})
+        return _no_store_response(403, {"success": False, "error": str(exc)})
     except PasskeyValidationError as exc:
-        return _json_response(400, {"success": False, "error": str(exc)})
+        return _no_store_response(400, {"success": False, "error": str(exc)})
     except Exception as exc:  # noqa: BLE001
-        return _json_response(500, {"success": False, "error": str(exc)})
+        return _no_store_response(500, {"success": False, "error": str(exc)})
 
 
 @app.function_name(name="GetPasskeyCatalogRecord")
@@ -1217,14 +1217,14 @@ def get_passkey_catalog_record_http(req: func.HttpRequest) -> func.HttpResponse:
             raise PasskeyValidationError("Missing required route or query value 'recordId'.")
         record = _get_owned_catalog_record(req, record_id)
         if record is None:
-            return _json_response(404, {"success": False, "recordId": record_id, "error": "Passkey was not found."})
-        return _json_response(200, {"success": True, "record": record})
+            return _no_store_response(404, {"success": False, "recordId": record_id, "error": "Passkey was not found."})
+        return _no_store_response(200, {"success": True, "record": record})
     except PasskeySecurityError as exc:
-        return _json_response(403, {"success": False, "error": str(exc)})
+        return _no_store_response(403, {"success": False, "error": str(exc)})
     except PasskeyValidationError as exc:
-        return _json_response(400, {"success": False, "error": str(exc)})
+        return _no_store_response(400, {"success": False, "error": str(exc)})
     except Exception as exc:  # noqa: BLE001
-        return _json_response(500, {"success": False, "error": str(exc)})
+        return _no_store_response(500, {"success": False, "error": str(exc)})
 
 
 @app.function_name(name="GetPasskeyBrowserContext")

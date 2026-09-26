@@ -24,20 +24,20 @@ try {
         -Provider ([string]($provider ?? '')) -RpId $rpId -UserName $userName -Status ([string]($status ?? '')) `
         -CredentialId $credentialId -DisplayName $displayName -KeyVaultKeyName $keyVaultKeyName)
     $records = @($records | Where-Object { $_.owner -is [System.Collections.IDictionary] -and [string]$_.owner.tenantId -ieq [string]$caller.tenantId -and [string]$_.owner.objectId -ieq [string]$caller.objectId })
-    Push-OutputBinding -Name Response -Value (New-JsonHttpResponse -StatusCode ([HttpStatusCode]::OK) -Body ([ordered]@{
+    Push-OutputBinding -Name Response -Value (New-JsonHttpResponse -NoStore -StatusCode ([HttpStatusCode]::OK) -Body ([ordered]@{
         success = $true
         count = $records.Count
         records = $records
     }))
 } catch [System.UnauthorizedAccessException] {
-    Push-OutputBinding -Name Response -Value (New-JsonHttpResponse -StatusCode Forbidden -Body @{success=$false;error=$_.Exception.Message})
+    Push-OutputBinding -Name Response -Value (New-JsonHttpResponse -NoStore -StatusCode Forbidden -Body @{success=$false;error=$_.Exception.Message})
 } catch [System.ArgumentException] {
-    Push-OutputBinding -Name Response -Value (New-JsonHttpResponse -StatusCode ([HttpStatusCode]::BadRequest) -Body ([ordered]@{
+    Push-OutputBinding -Name Response -Value (New-JsonHttpResponse -NoStore -StatusCode ([HttpStatusCode]::BadRequest) -Body ([ordered]@{
         success = $false
         error = $_.Exception.Message
     }))
 } catch {
-    Push-OutputBinding -Name Response -Value (New-JsonHttpResponse -StatusCode ([HttpStatusCode]::InternalServerError) -Body ([ordered]@{
+    Push-OutputBinding -Name Response -Value (New-JsonHttpResponse -NoStore -StatusCode ([HttpStatusCode]::InternalServerError) -Body ([ordered]@{
         success = $false
         error = $_.Exception.Message
     }))
