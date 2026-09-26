@@ -457,6 +457,23 @@ foreach ($entry in $requiredOutputs.GetEnumerator()) {
         throw "Bicep deployment did not return required output '$($entry.Key)'."
     }
 }
+
+# Verify the effective front gate before deploying code or reporting a usable broker.
+. (Join-Path $PSScriptRoot 'Assert-FunctionAuthSettings.ps1')
+$cloudLoginEndpoint = [string](& az cloud show --query endpoints.activeDirectory --output tsv)
+if ($LASTEXITCODE -ne 0 -or [string]::IsNullOrWhiteSpace($cloudLoginEndpoint)) {
+    throw 'Could not resolve the active Azure cloud login endpoint for Function authentication verification.'
+}
+$authConfigUrl = "https://management.azure.com/subscriptions/$SubscriptionId/resourceGroups/$ResourceGroupName/providers/Microsoft.Web/sites/$functionAppName/config/authsettingsV2?api-version=2024-11-01"
+$authSettingsJson = & az rest --method get --url $authConfigUrl --output json
+if ($LASTEXITCODE -ne 0 -or [string]::IsNullOrWhiteSpace(($authSettingsJson -join ''))) {
+    throw "Could not read effective Function authentication for $functionAppName."
+}
+Assert-FunctionAuthSettings `
+    -AuthSettings (($authSettingsJson -join "`n") | ConvertFrom-Json) `
+    -ExpectedIssuer "$($cloudLoginEndpoint.TrimEnd('/'))/$TenantId/v2.0" `
+    -BrowserExtensionClientId $BrowserExtensionClientId
+
 if ($hasExistingVirtualNetwork -and ([string]::IsNullOrWhiteSpace($existingVirtualNetworkResourceId) -or [string]::IsNullOrWhiteSpace($existingFunctionSubnetResourceId))) {
     throw 'An existing VNet/subnet was requested, but the deployment did not return the existing network resource IDs.'
 }
