@@ -1,11 +1,13 @@
 # Function App security TODO
 
+2026-09-26 source review: both Function Bicep samples already declare global Easy Auth with issuer, audience, and allowed calling application. The checked source settings have not been verified on a deployed Function. See [the route inventory](../docs/research-route-inventory-2026-09-26.md) before changing authentication policy.
+
 The following hardening work remains for both the PowerShell and Python Function samples. Items already implemented in infrastructure or application code are intentionally excluded.
 
 ## Caller authentication and authorization
 
-- [ ] Enable App Service Authentication (`authsettingsV2`) with a dedicated Entra app registration.
-- [ ] Validate the expected tenant and application audience and return HTTP 401 for unauthenticated requests.
+- [x] Declare App Service Authentication (`authsettingsV2`) in both Bicep samples. Verify the effective deployed setting separately.
+- [x] Declare the expected tenant issuer, application audience, allowed calling application, and unauthenticated HTTP 401 response in both Bicep samples. Verify the effective deployed behavior separately.
 - [ ] Define the broker authorization contract mapping an authenticated caller to permitted catalog records and Key Vault operations.
 - [ ] Decide whether Function keys remain as defense-in-depth once Entra authentication is enforced.
 
