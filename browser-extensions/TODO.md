@@ -1,6 +1,8 @@
 # Browser extension broker TODO
 
-The POC adapter in `keyvault-passkey-provider/` now uses Easy Auth plus a constrained Function assertion operation. It deliberately stops short of the complete production broker protocol below.
+2026-09-26 source review: the Function assertion endpoints return 501, and the browser adapter rejects before making an assertion request. Both Bicep samples require Easy Auth globally without a Queue-route exclusion. Function-level keys on Queue ingress are an additional source setting; effective deployed behavior is still unverified. See [the route inventory](../docs/research-route-inventory-2026-09-26.md).
+
+The POC adapter in `keyvault-passkey-provider/` reads an Easy Auth protected Function catalog. Function assertions remain disabled until a trusted proof channel and broker contract exist.
 
 ## Broker contract
 
@@ -9,7 +11,7 @@ The POC adapter in `keyvault-passkey-provider/` now uses Easy Auth plus a constr
 - [ ] Add a finalize operation that persists the canonical catalog record only after the relying party accepts registration.
 - [ ] Add an abort/cleanup operation for abandoned reservations and orphaned Key Vault keys.
 - [ ] Add RP- and allow-list-aware credential discovery without returning records the authenticated caller cannot use.
-- [x] Add a POC assertion operation that validates the record/RP relationship, constructs authenticator data, signs with Key Vault, and advances `signCount` (Python uses Table ETag; PowerShell CAS remains below).
+- [ ] Implement a trusted-proof-gated assertion operation that validates the record/RP relationship, constructs authenticator data, signs with Key Vault, and advances `signCount`. Historical POC code is disabled with HTTP 501 and browser-side pre-network denial.
 - [ ] Add disable/delete lifecycle operations with reconciliation for the remote relying-party enrollment.
 - [ ] Return stable error codes and correlation IDs instead of raw provider or Key Vault errors.
 
@@ -17,8 +19,8 @@ Do not expose a general `signDigest` route. The broker must constrain signing to
 
 ## Authentication and policy
 
-- [x] Enable App Service Authentication with a dedicated single-tenant Entra application and validate issuer, audience, and calling application.
-- [x] Replace Function keys for browser catalog/assertion calls; keep exact Queue* ingress routes on Function keys outside Easy Auth.
+- [x] Declare App Service Authentication in both Bicep samples with a single-tenant issuer, audience, and allowed calling application. Effective deployed enforcement remains unverified.
+- [x] Use Easy Auth for browser catalog/assertion routes and retain Function keys on Queue ingress in source. The Bicep samples require Easy Auth globally, including Queue routes; the intended and deployed Queue policy still needs a decision and verification.
 - [ ] Define record ownership and administrative delegation policy, including how callers are mapped to permitted `recordId` values.
 - [ ] Require recent extension PIN/UV proof where policy needs user verification, without accepting an unverified client-supplied UV bit as authoritative.
 - [ ] Add per-user, per-record, and per-origin rate limits plus audit events for create, sign, disable, and delete operations.
@@ -33,7 +35,7 @@ Do not expose a general `signDigest` route. The broker must constrain signing to
 
 ## Extension migration
 
-- [x] Route Function-catalog assertions through a constrained broker client; registration uses native fallback for this POC.
+- [ ] Enable Function-catalog assertions only after trusted fresh user-presence proof and a reviewed broker contract; registration currently uses native fallback, and the adapter rejects Function assertions before network.
 - [x] Use broker catalog discovery for the setup-wizard path.
 - [x] Remove the Key Vault delegated scope and direct Key Vault data-plane permissions from the setup-wizard path.
 - [x] Remove development Function-key input/storage from the setup-wizard path.
