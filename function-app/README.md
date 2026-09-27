@@ -2,6 +2,8 @@
 
 Security status: the Function sites deploy with public network access disabled. Hosted Entra/Okta registration, catalog key deletion, login, and passkey-backed token handlers return 501 before side effects if invoked; their triggers are also disabled in the Bicep app settings, so a deployed request may be rejected by the platform before reaching a handler. Queue workers fail closed if invoked outside their disabled triggers. The older examples below describe historical research flows, not an enabled deployment path. Key creation needs exclusive server-owned names and an ownership reservation; deletion needs a durable tombstone and verified exact-key cleanup; login needs trusted fresh assertion proof. See `contracts/broker-proof-lifecycle-v1.md` for the replacement contract.
 
+Both templates explicitly set Easy Auth `excludedPaths: []`. Omitting the property can leave historical Queue exclusions on an existing Function App; the deployment helper rejects any effective exclusion after deployment. A read-only what-if against the isolated PowerShell lab showed the two old exclusions scheduled for removal only after this field was made explicit. That what-if did not change the lab.
+
 This folder is for Function App-specific samples and templates.
 
 The current sample is:

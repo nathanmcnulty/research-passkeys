@@ -47,7 +47,8 @@ class BrowserExtensionAdapterContractTests(unittest.TestCase):
             self.assertIn("requireAuthentication: true", template)
             self.assertIn("unauthenticatedClientAction: 'Return401'", template)
             self.assertIn("param browserExtensionClientId string", template)
-            self.assertNotIn("excludedPaths:", template)
+            # Explicit emptiness clears historical Queue bypasses on an existing app.
+            self.assertIn("excludedPaths: []", template)
 
     def test_catalog_records_and_status_are_bound_to_easy_auth_owner(self):
         python_source = (PYTHON / "src/function_app.py").read_text(encoding="utf-8")
