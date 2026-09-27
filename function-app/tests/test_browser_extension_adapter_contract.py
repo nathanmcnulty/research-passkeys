@@ -49,6 +49,10 @@ class BrowserExtensionAdapterContractTests(unittest.TestCase):
             self.assertIn("param browserExtensionClientId string", template)
             # Explicit emptiness clears historical Queue bypasses on an existing app.
             self.assertIn("excludedPaths: []", template)
+            # App Service can report alternate providers enabled by default even
+            # when they have no registration; the effective gate rejects them.
+            for provider in ("apple", "facebook", "gitHub", "google", "legacyMicrosoftAccount", "twitter"):
+                self.assertIn(f"{provider}: {{ enabled: false }}", template)
 
     def test_catalog_records_and_status_are_bound_to_easy_auth_owner(self):
         python_source = (PYTHON / "src/function_app.py").read_text(encoding="utf-8")

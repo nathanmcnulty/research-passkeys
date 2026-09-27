@@ -570,6 +570,7 @@ resource functionAppAuth 'Microsoft.Web/sites/config@2024-11-01' = {
       requireHttps: true
     }
     identityProviders: {
+      apple: { enabled: false }
       azureActiveDirectory: {
         enabled: true
         registration: {
@@ -587,6 +588,11 @@ resource functionAppAuth 'Microsoft.Web/sites/config@2024-11-01' = {
           }
         }
       }
+      facebook: { enabled: false }
+      gitHub: { enabled: false }
+      google: { enabled: false }
+      legacyMicrosoftAccount: { enabled: false }
+      twitter: { enabled: false }
     }
   }
 }
