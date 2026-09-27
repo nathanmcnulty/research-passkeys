@@ -2,6 +2,8 @@ param($QueueItem, $TriggerMetadata)
 
 . (Join-Path $PSScriptRoot '..\shared\PasskeyFunctionHelpers.ps1')
 
+throw 'Legacy Key Vault passkey registration processing is disabled pending broker lifecycle controls.'
+
 $message = $QueueItem
 if ($QueueItem -is [byte[]]) {
     $message = [System.Text.Encoding]::UTF8.GetString($QueueItem)

@@ -2,6 +2,8 @@ param($QueueItem, $TriggerMetadata)
 
 . (Join-Path $PSScriptRoot '..\shared\PasskeyFunctionHelpers.ps1')
 
+throw 'Legacy Key Vault passkey registration processing is disabled pending broker lifecycle controls.'
+
 $configuration = Get-OktaFunctionConfiguration
 $oktaDomain = Resolve-OktaDomain -Body @{} -Request ([pscustomobject]@{ Query = @{} })
 $payload = if ($QueueItem -is [string]) { $QueueItem | ConvertFrom-Json -AsHashtable -Depth 20 } else { $QueueItem | ConvertTo-Json -Depth 20 | ConvertFrom-Json -AsHashtable }

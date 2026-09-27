@@ -1,5 +1,7 @@
 # Key Vault passkey HTTP Function sample (Python)
 
+Security status: the registration, registration-queue, and catalog key-deletion routes listed below return 501 before side effects, and their Function triggers are disabled. Queue workers fail closed. These older examples are retained for research only; do not enable them to restore a lab. See `../../README.md` and the broker lifecycle contract.
+
 This sample hosts Python Azure Functions that register passkeys with Azure Key Vault-backed credential keys:
 
 - `RegisterEntraPasskeyViaTap`: accepts `userPrincipalName` or `email` plus `tap`

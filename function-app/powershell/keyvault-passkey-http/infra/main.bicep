@@ -476,6 +476,7 @@ resource functionApp 'Microsoft.Web/sites@2024-11-01' = {
   properties: {
     serverFarmId: appServicePlan.id
     httpsOnly: true
+    publicNetworkAccess: 'Disabled'
     virtualNetworkSubnetId: networkIntegrationEnabled ? functionSubnetResourceId : null
     siteConfig: {
       minTlsVersion: '1.2'
@@ -513,6 +514,14 @@ resource functionAppSettings 'Microsoft.Web/sites/config@2024-11-01' = {
     AzureWebJobsStorage__credential: 'managedidentity'
     AzureWebJobsStorage__clientId: userAssignedIdentity.properties.clientId
     PASSKEY_TENANT_ID: tenantId
+    'AzureWebJobs.DeletePasskeyCatalogRecord.Disabled': 'true'
+    'AzureWebJobs.RegisterEntraPasskeyViaTap.Disabled': 'true'
+    'AzureWebJobs.RegisterEntraPasskeyViaEstsAuth.Disabled': 'true'
+    'AzureWebJobs.QueueEntraPasskeyRegistrationViaEstsAuth.Disabled': 'true'
+    'AzureWebJobs.ProcessEntraPasskeyRegistrationViaEstsAuth.Disabled': 'true'
+    'AzureWebJobs.RegisterOktaPasskeyViaIdxSession.Disabled': 'true'
+    'AzureWebJobs.QueueOktaPasskeyRegistrationViaIdxSession.Disabled': 'true'
+    'AzureWebJobs.ProcessOktaPasskeyRegistrationViaIdxSession.Disabled': 'true'
     PASSKEY_KEYVAULT_NAME: keyVault.name
     PASSKEY_MANAGED_IDENTITY_CLIENT_ID: userAssignedIdentity.properties.clientId
     PASSKEY_OKTA_DOMAIN: oktaDomain

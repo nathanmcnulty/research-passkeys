@@ -1,5 +1,7 @@
 # Passkey catalog and key metadata
 
+The historical Function registration and catalog key-deletion routes are disabled. The lifecycle notes below explain why the catalog exists; they are not a safe currently enabled mutation contract. `contracts/broker-proof-lifecycle-v1.md` defines the reviewed replacement gates.
+
 ## Decision
 
 Use Azure Key Vault only for passkey signing keys and Azure Table Storage for the canonical passkey catalog.
