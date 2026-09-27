@@ -1,0 +1,15 @@
+# Extension component reconciliation
+
+Research is the central implementation tracker. The provider project consumes reviewed extension components and owns the installed/release artifact. The byte-identical boundary is the active vendored provider baseline; research experiments remain separate until promoted.
+
+| Surface | Current disposition | Promotion condition |
+| --- | --- | --- |
+| Provider security core, lock and credential lifecycle | 50 provider files at `9ffbe22f4b78ec8c5d1bb33fe719894dcd615eb5` are pinned byte-for-byte under `vendor/key-vault-passkey-provider/dev-9ffbe22` | Preserve this baseline for beta composition; begin new shared changes as research experiments, then promote focused diffs to the provider project |
+| Historical research extension | 40-file imported spike; 36 paths overlap the provider and 28 of those differ. Four files are research-only; 14 files exist only in the provider tree | Keep as historical/beta evidence. Do not copy its directory over the provider or call it a matching stable extension |
+| Function catalog adapter and setup path | Research-only experiment; read-only catalog discovery exists, while Function assertions are denied before network and server routes return 501 | Extract a bounded overlay against the current baseline; verify identity, permissions, owner isolation, and fail-closed assertion behavior before proposing a provider component |
+| Opening-page and User-Agent/DNR routing | Research-only experimental behavior | Keep outside a stable artifact until a separate threat review and explicit release decision |
+| Native Windows passkey provider | Installed component in the provider project, not part of this browser source snapshot | Track its contracts and evidence here where shared; release and live COM/Hello validation remain in the provider project |
+
+The active lock proves the provider baseline's commit, tree, file hashes, and extension identity without a second checkout. The historical spike is intentionally divergent. Future reconciliation should compare each overlay to the pinned baseline, record its changed paths and security invariants, then promote or retire it. A provider security fix made directly in the consuming project must be imported back into the research baseline immediately, as the lock refresh in this checkpoint does for the browser lock/recovery changes after `d7a6f35`.
+
+Next implementation slice: move the read-only Function catalog adapter out of the historical spike into a declared beta overlay on this baseline. Preserve the baseline's manifest identity and security validators; a composed beta requires its own extension identity. Keep Function assertions disabled until trusted fresh presence, broker state, RP receipt, and negative authorization evidence exist.
