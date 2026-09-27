@@ -1,6 +1,8 @@
 using namespace System.Net
 param($Request,$TriggerMetadata)
 . (Join-Path $PSScriptRoot '..\shared\PasskeyFunctionHelpers.ps1')
+Push-OutputBinding -Name Response -Value (New-JsonHttpResponse -StatusCode NotImplemented -NoStore -Body @{success=$false;error='Legacy passkey login and token exchange are disabled pending trusted assertion proof.'})
+return
 try {
     $configuration=Get-PasskeyFunctionConfiguration; $recordId=[string]$Request.Params.recordId; $record=Get-PasskeyCatalogRecord -Configuration $configuration -RecordId $recordId
     if (-not $record -or $record.provider -ne 'entra') { Push-OutputBinding -Name Response -Value (New-JsonHttpResponse -StatusCode NotFound -Body @{success=$false;error='Entra passkey was not found.'}); return }

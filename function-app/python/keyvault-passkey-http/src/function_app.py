@@ -206,6 +206,11 @@ def _legacy_key_mutation_disabled() -> func.HttpResponse:
     return _no_store_response(501, {"success": False, "error": "Legacy Key Vault passkey mutations are disabled pending broker lifecycle controls."})
 
 
+def _legacy_login_disabled() -> func.HttpResponse:
+    # A broker must prove fresh user presence/verification before any Key Vault-backed login or token exchange.
+    return _no_store_response(501, {"success": False, "error": "Legacy passkey login and token exchange are disabled pending trusted assertion proof."})
+
+
 def _utc_timestamp() -> str:
     return datetime.now(UTC).isoformat().replace("+00:00", "Z")
 
@@ -1639,6 +1644,7 @@ def get_passkey_broker_configuration_http(req: func.HttpRequest) -> func.HttpRes
 @app.function_name(name="GetEntraPasskeyAccessToken")
 @app.route(route="entra/passkeys/{recordId}/token", methods=["POST"], auth_level=func.AuthLevel.FUNCTION)
 def get_entra_passkey_access_token_http(req: func.HttpRequest) -> func.HttpResponse:
+    return _legacy_login_disabled()
     try:
         broker = _get_broker_configuration()
         token_request = _resolve_broker_token_request(_get_request_body(req), broker)
@@ -1758,6 +1764,7 @@ def export_passkey_capture_context_http(req: func.HttpRequest) -> func.HttpRespo
 @app.function_name(name="LoginWithStoredEntraPasskey")
 @app.route(route="entra/passkeys/{recordId}/login", methods=["POST"], auth_level=func.AuthLevel.FUNCTION)
 def login_with_stored_entra_passkey_http(req: func.HttpRequest) -> func.HttpResponse:
+    return _legacy_login_disabled()
     try:
         record = _get_owned_catalog_record(req, str(req.route_params.get("recordId") or ""))
         if not record or record.get("provider") != "entra":
@@ -1785,6 +1792,7 @@ def login_with_stored_entra_passkey_http(req: func.HttpRequest) -> func.HttpResp
 @app.function_name(name="LoginWithStoredOktaPasskey")
 @app.route(route="okta/passkeys/{recordId}/login", methods=["POST"], auth_level=func.AuthLevel.FUNCTION)
 def login_with_stored_okta_passkey_http(req: func.HttpRequest) -> func.HttpResponse:
+    return _legacy_login_disabled()
     try:
         record = _get_owned_catalog_record(req, str(req.route_params.get("recordId") or ""))
         if not record or record.get("provider") != "okta":
@@ -2088,6 +2096,7 @@ def get_entra_passkey_registration_status_http(req: func.HttpRequest) -> func.Ht
 @app.function_name(name="LoginWithEntraPasskey")
 @app.route(route="entra/passkeys/login", methods=["POST"], auth_level=func.AuthLevel.FUNCTION)
 def login_with_entra_passkey_http(req: func.HttpRequest) -> func.HttpResponse:
+    return _legacy_login_disabled()
     try:
         config = load_config_from_environment()
         body = _get_request_body(req)
@@ -2315,6 +2324,7 @@ def get_okta_passkey_registration_status_http(req: func.HttpRequest) -> func.Htt
 @app.function_name(name="LoginWithOktaPasskey")
 @app.route(route="okta/passkeys/login", methods=["POST"], auth_level=func.AuthLevel.FUNCTION)
 def login_with_okta_passkey_http(req: func.HttpRequest) -> func.HttpResponse:
+    return _legacy_login_disabled()
     try:
         config = load_config_from_environment()
         body = _get_request_body(req)
@@ -2343,6 +2353,7 @@ def login_with_okta_passkey_http(req: func.HttpRequest) -> func.HttpResponse:
 @app.function_name(name="TestOktaPasskeyLoginViaIdxSession")
 @app.route(route="okta/passkeys/login/idx", methods=["POST"], auth_level=func.AuthLevel.FUNCTION)
 def test_okta_passkey_login_via_idx_session_http(req: func.HttpRequest) -> func.HttpResponse:
+    return _legacy_login_disabled()
     try:
         config = load_config_from_environment()
         body = _get_request_body(req)
