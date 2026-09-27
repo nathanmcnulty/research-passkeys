@@ -34,6 +34,11 @@ BeforeEach {
         { Assert-FunctionAuthSettings -AuthSettings $auth -ExpectedIssuer $issuer -BrowserExtensionClientId $client } | Should -Throw
     }
 
+    It 'rejects file-based authentication that overrides ARM settings' {
+        $auth.properties.platform.configFilePath = '/home/site/wwwroot/auth.json'
+        { Assert-FunctionAuthSettings -AuthSettings $auth -ExpectedIssuer $issuer -BrowserExtensionClientId $client } | Should -Throw
+    }
+
     It 'rejects anonymous access and HTTP' {
         $auth.properties.globalValidation.requireAuthentication = $false
         { Assert-FunctionAuthSettings -AuthSettings $auth -ExpectedIssuer $issuer -BrowserExtensionClientId $client } | Should -Throw
