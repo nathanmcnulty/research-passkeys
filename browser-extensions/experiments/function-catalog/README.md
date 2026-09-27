@@ -1,0 +1,7 @@
+# Read-only Function catalog experiment
+
+This research-owned adapter is the first extraction from the historical extension spike. It targets the immutable provider extension baseline recorded in `overlay.json` and does not modify its vendored bytes. `catalog.mjs` only lists catalog records through the scoped Function API. It has no registration, assertion, deletion, browser-context, Key Vault signing, or WebAuthn interception entry point. It is not composed into a browser extension, so there is no beta identity, browser installation, or release claim yet.
+
+Run `node --test browser-extensions/experiments/function-catalog/catalog.test.mjs` from the repository root. The tests cover the GET-only request, scoped token use, no-store/no-redirect behavior, malformed records, duplicate credentials, missing tokens, and absent mutation methods. The request is designed to fail closed if the service returns an unexpected shape.
+
+Before composing a beta, create a separate manifest key, extension ID, redirect URI, and lab app registration; declare every overlay file and permission. Server-side owner isolation and live negative authorization through the private lab route remain unproven. Do not promote this adapter to the provider extension until those checks and its UI/metadata integration are reviewed. Function-backed assertion remains denied.

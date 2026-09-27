@@ -1,0 +1,17 @@
+{
+  "schemaVersion": 1,
+  "name": "read-only-function-catalog",
+  "status": "research-only",
+  "baselineCommit": "9ffbe22f4b78ec8c5d1bb33fe719894dcd615eb5",
+  "baselineLock": "browser-extensions/upstream-provider.lock.json",
+  "changedPaths": [
+    "browser-extensions/experiments/function-catalog/catalog.mjs",
+    "browser-extensions/experiments/function-catalog/catalog.test.mjs",
+    "browser-extensions/experiments/function-catalog/overlay.json",
+    "browser-extensions/experiments/function-catalog/README.md"
+  ],
+  "composition": "none",
+  "browserIdentity": null,
+  "allowedOperations": ["GET /api/passkeys"],
+  "blockedOperations": ["register", "assert", "delete", "browser-context"]
+}

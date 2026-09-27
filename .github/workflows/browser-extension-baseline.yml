@@ -9,6 +9,7 @@ on:
       - "browser-extensions/scripts/validate-upstream-provider-lock.mjs"
       - "browser-extensions/scripts/refresh-upstream-provider-lock.mjs"
       - "browser-extensions/vendor/**"
+      - "browser-extensions/experiments/function-catalog/**"
   push:
     branches: [main]
     paths:
@@ -18,6 +19,7 @@ on:
       - "browser-extensions/scripts/validate-upstream-provider-lock.mjs"
       - "browser-extensions/scripts/refresh-upstream-provider-lock.mjs"
       - "browser-extensions/vendor/**"
+      - "browser-extensions/experiments/function-catalog/**"
 
 permissions:
   contents: read
@@ -32,3 +34,5 @@ jobs:
         run: node browser-extensions/scripts/validate-upstream-provider-lock.mjs
       - name: Check baseline refresh command
         run: node --check browser-extensions/scripts/refresh-upstream-provider-lock.mjs
+      - name: Validate read-only catalog experiment
+        run: node --test browser-extensions/experiments/function-catalog/catalog.test.mjs
