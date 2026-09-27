@@ -522,6 +522,12 @@ resource functionAppSettings 'Microsoft.Web/sites/config@2024-11-01' = {
     'AzureWebJobs.RegisterOktaPasskeyViaIdxSession.Disabled': 'true'
     'AzureWebJobs.QueueOktaPasskeyRegistrationViaIdxSession.Disabled': 'true'
     'AzureWebJobs.ProcessOktaPasskeyRegistrationViaIdxSession.Disabled': 'true'
+    'AzureWebJobs.GetEntraPasskeyAccessToken.Disabled': 'true'
+    'AzureWebJobs.LoginWithStoredEntraPasskey.Disabled': 'true'
+    'AzureWebJobs.LoginWithStoredOktaPasskey.Disabled': 'true'
+    'AzureWebJobs.LoginWithEntraPasskey.Disabled': 'true'
+    'AzureWebJobs.LoginWithOktaPasskey.Disabled': 'true'
+    'AzureWebJobs.TestOktaPasskeyLoginViaIdxSession.Disabled': 'true'
     PASSKEY_KEYVAULT_NAME: keyVault.name
     PASSKEY_MANAGED_IDENTITY_CLIENT_ID: userAssignedIdentity.properties.clientId
     PASSKEY_OKTA_DOMAIN: oktaDomain

@@ -556,7 +556,9 @@ foreach ($functionName in @(
     'DeletePasskeyCatalogRecord', 'RegisterEntraPasskeyViaTap', 'RegisterEntraPasskeyViaEstsAuth',
     'QueueEntraPasskeyRegistrationViaEstsAuth', 'ProcessEntraPasskeyRegistrationViaEstsAuth',
     'RegisterOktaPasskeyViaIdxSession', 'QueueOktaPasskeyRegistrationViaIdxSession',
-    'ProcessOktaPasskeyRegistrationViaIdxSession'
+    'ProcessOktaPasskeyRegistrationViaIdxSession',
+    'GetEntraPasskeyAccessToken', 'LoginWithStoredEntraPasskey', 'LoginWithStoredOktaPasskey',
+    'LoginWithEntraPasskey', 'LoginWithOktaPasskey', 'TestOktaPasskeyLoginViaIdxSession'
 )) {
     $settingName = "AzureWebJobs.$functionName.Disabled"
     if ($appSettings[$settingName] -ne 'true') {

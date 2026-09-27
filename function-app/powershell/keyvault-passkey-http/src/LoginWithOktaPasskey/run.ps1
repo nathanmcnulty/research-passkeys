@@ -4,6 +4,9 @@ param($Request, $TriggerMetadata)
 
 . (Join-Path $PSScriptRoot '..\shared\PasskeyFunctionHelpers.ps1')
 
+Push-OutputBinding -Name Response -Value (New-JsonHttpResponse -StatusCode NotImplemented -NoStore -Body @{success=$false;error='Legacy passkey login and token exchange are disabled pending trusted assertion proof.'})
+return
+
 try {
     $body = Get-RequestBodyObject -Request $Request
     $configuration = Get-OktaFunctionConfiguration

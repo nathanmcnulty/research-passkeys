@@ -1,6 +1,6 @@
 # Key Vault passkey HTTP Function sample
 
-Security status: the registration, registration-queue, and catalog key-deletion routes listed below return 501 before side effects, and their Function triggers are disabled. Queue workers fail closed. These older examples are retained for research only; do not enable them to restore a lab. See `../../README.md` and the broker lifecycle contract.
+Security status: the registration, registration-queue, catalog key-deletion, login, and passkey-backed token routes listed below return 501 before side effects, and their Function triggers are disabled. Queue workers fail closed. These older examples are retained for research only; do not enable them to restore a lab. See `../../README.md` and the broker lifecycle contract.
 
 This sample hosts PowerShell Azure Functions that create passkeys by invoking the repo's PowerShell passkey scripts:
 
