@@ -38,7 +38,7 @@ This repo is meant to be the place where shared contracts, reusable helpers, tem
 - `python\samples\okta`: Python Okta examples (IDX and MyAccount flows)
 - `azure-automation\function-passkey-runbooks`: Azure Automation runbook samples that call the passkey Function endpoints
 - `templates\logic-app\passkey-function-http`: Logic App templates that proxy webhook requests into the passkey Function endpoints
-- `scripts\deployment\Deploy-FunctionSample.ps1`: one-command infra + code deployment helper for the PowerShell and Python Function starters
+- `scripts\deployment\Deploy-FunctionSample.ps1`: guarded infrastructure deployment helper for the PowerShell and Python Function starters; code push requires a private-endpoint-connected host
 - `scripts\validation\Invoke-EntraPasskeySmokeTest.ps1`: repeatable Entra registration + login smoke-test harness for direct and Function-hosted flows
 - `contracts\passkey-login-credential.schema.json`: canonical login credential contract shared by PowerShell and Python login consumers
 

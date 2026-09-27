@@ -56,7 +56,7 @@ or from the publishable starter layer:
 - `templates\function-app\python-keyvault-passkey-http`
 
 Use `scripts\packaging\Export-FunctionTemplate.ps1` to copy one of these starters into a downstream repo without importing the full repository structure.
-Use `scripts\deployment\Deploy-FunctionSample.ps1` when you want the same starter to remain in this repo but still be provisioned and deployed with one command.
+Use `scripts\deployment\Deploy-FunctionSample.ps1 -SkipCodeDeploy` when you want to provision isolated infrastructure from this repo. Code publication requires a reviewed private deployment path; `-PushCodeThroughPrivateEndpoint` is an operator opt-in and does not itself verify connectivity.
 
 ### Shared Python code
 

@@ -86,6 +86,9 @@ param(
     [switch]$SkipCodeDeploy,
 
     [Parameter()]
+    [switch]$PushCodeThroughPrivateEndpoint,
+
+    [Parameter()]
     [ValidateRange(30, 1800)]
     [int]$PermissionPropagationTimeoutSeconds = 600,
 
@@ -224,6 +227,12 @@ if ($DeploymentProfile -eq 'production' -and ($GrantCurrentUserDevelopmentAccess
 }
 if ($DeploymentProfile -eq 'production' -and $EnableDevelopmentSecretExport) {
     throw 'Development secret export cannot be enabled with DeploymentProfile=production.'
+}
+if (-not $SkipCodeDeploy -and -not $PushCodeThroughPrivateEndpoint) {
+    throw 'Function public ingress is disabled. Pass -SkipCodeDeploy for infrastructure-only deployment, or run from a verified private-endpoint-connected host with -PushCodeThroughPrivateEndpoint.'
+}
+if ($SkipCodeDeploy -and $PushCodeThroughPrivateEndpoint) {
+    throw 'Choose either -SkipCodeDeploy or -PushCodeThroughPrivateEndpoint.'
 }
 
 if ([string]::IsNullOrWhiteSpace($AzConfigDir)) {
