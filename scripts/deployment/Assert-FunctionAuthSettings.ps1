@@ -21,6 +21,21 @@ function Assert-FunctionAuthSettings {
         throw 'Effective Function authentication has an unexpected Entra issuer or client application.'
     }
 
+    $providers = $settings.identityProviders | ConvertTo-Json -Depth 20 | ConvertFrom-Json -AsHashtable
+    foreach ($providerName in $providers.Keys) {
+        if ($providerName -eq 'azureActiveDirectory') { continue }
+        $provider = $providers[$providerName]
+        if ($providerName -eq 'customOpenIdConnectProviders') {
+            foreach ($customProvider in @($provider.Values)) {
+                if ($customProvider.enabled -eq $true) {
+                    throw 'Effective Function authentication enables another identity provider.'
+                }
+            }
+        } elseif ($provider.enabled -eq $true) {
+            throw 'Effective Function authentication enables another identity provider.'
+        }
+    }
+
     $expectedAudience = "api://$BrowserExtensionClientId"
     $audiences = @($aad.validation.allowedAudiences)
     $applications = @($aad.validation.defaultAuthorizationPolicy.allowedApplications)

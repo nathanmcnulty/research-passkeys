@@ -66,7 +66,13 @@ def _get_caller_identity(req: func.HttpRequest) -> dict[str, str]:
     except (ValueError, TypeError, UnicodeDecodeError, json.JSONDecodeError, binascii.Error) as exc:
         raise PasskeySecurityError("The authenticated caller identity is malformed.") from exc
 
-    claims = principal.get("claims") if isinstance(principal, dict) else None
+    if not isinstance(principal, dict) or str(principal.get("auth_typ") or "").lower() != "aad":
+        raise PasskeySecurityError("An authenticated Microsoft Entra caller is required.")
+    header_provider = str(req.headers.get("X-MS-CLIENT-PRINCIPAL-IDP") or "").lower()
+    if header_provider and header_provider != "aad":
+        raise PasskeySecurityError("The authenticated caller has an unexpected identity provider.")
+
+    claims = principal.get("claims")
     claim_values: dict[str, str] = {}
     if isinstance(claims, list):
         for claim in claims:
@@ -75,20 +81,24 @@ def _get_caller_identity(req: func.HttpRequest) -> dict[str, str]:
             claim_type = str(claim.get("typ") or "").lower()
             claim_value = str(claim.get("val") or "").strip()
             if claim_type and claim_value:
+                if claim_type in claim_values and claim_values[claim_type].lower() != claim_value.lower():
+                    raise PasskeySecurityError("The authenticated caller has conflicting identity claims.")
                 claim_values[claim_type] = claim_value
 
-    object_id = (
-        claim_values.get("http://schemas.microsoft.com/identity/claims/objectidentifier")
-        or claim_values.get("oid")
-        or str(req.headers.get("X-MS-CLIENT-PRINCIPAL-ID") or "").strip()
-    )
-    tenant_id = (
-        claim_values.get("http://schemas.microsoft.com/identity/claims/tenantid")
-        or claim_values.get("tid")
-    )
-    if not object_id or not tenant_id:
-        raise PasskeySecurityError("The authenticated caller is missing immutable tenant or object identifiers.")
-    return {"tenantId": tenant_id.lower(), "objectId": object_id.lower()}
+    object_ids = {value.lower() for name in ("http://schemas.microsoft.com/identity/claims/objectidentifier", "oid") if (value := claim_values.get(name))}
+    tenant_ids = {value.lower() for name in ("http://schemas.microsoft.com/identity/claims/tenantid", "tid") if (value := claim_values.get(name))}
+    if len(object_ids) != 1 or len(tenant_ids) != 1:
+        raise PasskeySecurityError("The authenticated caller is missing or has conflicting immutable identifiers.")
+    object_id = next(iter(object_ids))
+    tenant_id = next(iter(tenant_ids))
+    configured_tenant = os.getenv("PASSKEY_TENANT_ID", "").strip().lower()
+    try:
+        if not configured_tenant or str(uuid.UUID(tenant_id)) != str(uuid.UUID(configured_tenant)):
+            raise PasskeySecurityError("The authenticated caller has an unexpected tenant.")
+        uuid.UUID(object_id)
+    except ValueError as exc:
+        raise PasskeySecurityError("The authenticated caller has invalid immutable identifiers.") from exc
+    return {"tenantId": str(uuid.UUID(tenant_id)), "objectId": str(uuid.UUID(object_id))}
 
 
 def _require_record_owner(record: dict[str, object], caller: dict[str, str]) -> None:

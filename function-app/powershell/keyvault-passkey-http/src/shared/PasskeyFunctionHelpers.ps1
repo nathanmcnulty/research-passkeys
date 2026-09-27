@@ -26,18 +26,41 @@ function Get-PasskeyCallerIdentity {
     } catch {
         throw [System.UnauthorizedAccessException]::new('The authenticated caller identity is malformed.')
     }
+    if ($principal -isnot [System.Collections.IDictionary] -or [string]$principal.auth_typ -ine 'aad') {
+        throw [System.UnauthorizedAccessException]::new('An authenticated Microsoft Entra caller is required.')
+    }
+    $headerProvider = Get-PasskeyRequestHeader -Request $Request -Name 'X-MS-CLIENT-PRINCIPAL-IDP'
+    if (-not [string]::IsNullOrWhiteSpace($headerProvider) -and $headerProvider -ine 'aad') {
+        throw [System.UnauthorizedAccessException]::new('The authenticated caller has an unexpected identity provider.')
+    }
     $claims = @{}
     foreach ($claim in @($principal.claims)) {
-        if ($claim -is [System.Collections.IDictionary] -and -not [string]::IsNullOrWhiteSpace([string]$claim.typ)) {
-            $claims[[string]$claim.typ.ToLowerInvariant()] = [string]$claim.val
+        if ($claim -is [System.Collections.IDictionary] -and -not [string]::IsNullOrWhiteSpace([string]$claim.typ) -and -not [string]::IsNullOrWhiteSpace([string]$claim.val)) {
+            $claimType = [string]$claim.typ.ToLowerInvariant()
+            $claimValue = [string]$claim.val
+            if ($claims.ContainsKey($claimType) -and $claims[$claimType] -ine $claimValue) {
+                throw [System.UnauthorizedAccessException]::new('The authenticated caller has conflicting identity claims.')
+            }
+            $claims[$claimType] = $claimValue
         }
     }
-    $objectId = [string]($claims['http://schemas.microsoft.com/identity/claims/objectidentifier'] ?? $claims['oid'] ?? (Get-PasskeyRequestHeader -Request $Request -Name 'X-MS-CLIENT-PRINCIPAL-ID'))
+    $objectId = [string]($claims['http://schemas.microsoft.com/identity/claims/objectidentifier'] ?? $claims['oid'])
     $tenantId = [string]($claims['http://schemas.microsoft.com/identity/claims/tenantid'] ?? $claims['tid'])
-    if ([string]::IsNullOrWhiteSpace($objectId) -or [string]::IsNullOrWhiteSpace($tenantId)) {
-        throw [System.UnauthorizedAccessException]::new('The authenticated caller is missing immutable tenant or object identifiers.')
+    if ([string]::IsNullOrWhiteSpace($objectId) -or [string]::IsNullOrWhiteSpace($tenantId) -or
+        ($claims['oid'] -and $claims['http://schemas.microsoft.com/identity/claims/objectidentifier'] -and $claims['oid'] -ine $claims['http://schemas.microsoft.com/identity/claims/objectidentifier']) -or
+        ($claims['tid'] -and $claims['http://schemas.microsoft.com/identity/claims/tenantid'] -and $claims['tid'] -ine $claims['http://schemas.microsoft.com/identity/claims/tenantid'])) {
+        throw [System.UnauthorizedAccessException]::new('The authenticated caller is missing or has conflicting immutable identifiers.')
     }
-    return @{ tenantId = $tenantId.ToLowerInvariant(); objectId = $objectId.ToLowerInvariant() }
+    $parsedTenant = [guid]::Empty
+    $parsedObject = [guid]::Empty
+    $expectedTenant = [guid]::Empty
+    if (-not [guid]::TryParse($tenantId, [ref]$parsedTenant) -or
+        -not [guid]::TryParse($objectId, [ref]$parsedObject) -or
+        -not [guid]::TryParse([string]$env:PASSKEY_TENANT_ID, [ref]$expectedTenant) -or
+        $parsedTenant -ne $expectedTenant) {
+        throw [System.UnauthorizedAccessException]::new('The authenticated caller has invalid or unexpected immutable identifiers.')
+    }
+    return @{ tenantId = $parsedTenant.ToString(); objectId = $parsedObject.ToString() }
 }
 
 function Assert-PasskeyRecordOwner {

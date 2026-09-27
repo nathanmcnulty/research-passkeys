@@ -58,4 +58,12 @@ BeforeEach {
         $auth.properties.globalValidation.excludedPaths = @('/api/entra/passkeys/*/queue')
         { Assert-FunctionAuthSettings -AuthSettings $auth -ExpectedIssuer $issuer -BrowserExtensionClientId $client } | Should -Throw
     }
+
+    It 'rejects enabled alternate and custom identity providers' {
+        $auth.properties.identityProviders.google = @{ enabled = $true }
+        { Assert-FunctionAuthSettings -AuthSettings $auth -ExpectedIssuer $issuer -BrowserExtensionClientId $client } | Should -Throw
+        $auth.properties.identityProviders.google.enabled = $false
+        $auth.properties.identityProviders.customOpenIdConnectProviders = @{ other = @{ enabled = $true } }
+        { Assert-FunctionAuthSettings -AuthSettings $auth -ExpectedIssuer $issuer -BrowserExtensionClientId $client } | Should -Throw
+    }
 }
