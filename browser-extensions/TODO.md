@@ -1,6 +1,6 @@
 # Browser extension broker TODO
 
-2026-09-26 source review: the Function assertion endpoints return 501, and the browser adapter rejects before making an assertion request. Both Bicep samples require Easy Auth globally without a Queue-route exclusion. Function-level keys on Queue ingress are an additional source setting; effective deployed behavior is still unverified. See [the route inventory](../docs/research-route-inventory-2026-09-26.md).
+2026-09-27 reconciliation: the Function assertion endpoints return 501, and the browser adapter rejects before making an assertion request. Both Bicep samples require Easy Auth globally without a Queue-route exclusion. Both isolated labs now pass management-plane verification of Entra-only Easy Auth, with 14 legacy Functions disabled and public ingress off. Live HTTP authorization behavior is still unverified. See [the route inventory](../docs/research-route-inventory-2026-09-26.md) and [extension reconciliation](reconciliation.md).
 
 The POC adapter in `keyvault-passkey-provider/` reads an Easy Auth protected Function catalog. Function assertions remain disabled until a trusted proof channel and broker contract exist.
 
@@ -19,7 +19,7 @@ Do not expose a general `signDigest` route. The broker must constrain signing to
 
 ## Authentication and policy
 
-- [x] Declare App Service Authentication in both Bicep samples with a single-tenant issuer, audience, and allowed calling application. Effective deployed enforcement remains unverified.
+- [x] Declare App Service Authentication in both Bicep samples with a single-tenant issuer, audience, and allowed calling application. Effective management-plane settings pass the validator in both isolated labs; HTTP enforcement remains unverified.
 - [x] Use Easy Auth for browser catalog/assertion routes and retain Function keys on Queue ingress in source. The Bicep samples require Easy Auth globally, including Queue routes; the intended and deployed Queue policy still needs a decision and verification.
 - [ ] Define record ownership and administrative delegation policy, including how callers are mapped to permitted `recordId` values.
 - [ ] Require recent extension PIN/UV proof where policy needs user verification, without accepting an unverified client-supplied UV bit as authoritative.
