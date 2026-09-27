@@ -177,9 +177,9 @@ az deployment group what-if --resource-group rg-passkey-func-sample-wus2 --templ
 az deployment group create --resource-group rg-passkey-func-sample-wus2 --template-file infra/main.bicep
 ```
 
-After infra deployment, deploy the function code from `src/` with your preferred Functions deployment workflow.
+Function public ingress is disabled. Publishing code from a workstation through the deployment endpoint requires an approved private endpoint and connected host; infrastructure deployment alone does not publish code.
 
-For a one-command path from this repo, use:
+For an infrastructure-only deployment from this repo, use:
 
 ```powershell
 .\scripts\deployment\Deploy-FunctionSample.ps1 `
@@ -188,7 +188,8 @@ For a one-command path from this repo, use:
   -EnvironmentName sample `
   -BrowserExtensionClientId '<browser-extension-application-id>' `
   [-TokenClientId '<public-client-application-id>'] `
-  -OktaDomain your-org.okta.com
+  -OktaDomain your-org.okta.com `
+  -SkipCodeDeploy
 ```
 
 The deployment creates the storage account, `PasskeyCredentials` table, queues/blob container support, Key Vault, managed identity, audit diagnostics, and required data-plane RBAC assignments. The Function and an optional development principal receive a custom Key Vault role limited to key read/create/delete/sign/verify and secret read/write/delete. To grant the signed-in developer direct data-plane access in a development deployment, add `-GrantCurrentUserDevelopmentAccess`. Production deployments reject direct developer assignments and restrict Storage and Key Vault to the Function integration subnet; select them with `-DeploymentProfile production`.

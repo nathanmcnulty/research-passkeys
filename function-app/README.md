@@ -50,6 +50,7 @@ pwsh -NoProfile -File ./scripts/deployment/Deploy-FunctionSample.ps1 `
   -ExistingFunctionSubnetName <existing-flex-subnet-name> `
   -GrantCurrentUserDevelopmentAccess `
   -EnableDevelopmentSecretExport `
+  -SkipCodeDeploy `
   -PassThru
 
 pwsh -NoProfile -File ./scripts/deployment/Deploy-FunctionSample.ps1 `
@@ -66,12 +67,15 @@ pwsh -NoProfile -File ./scripts/deployment/Deploy-FunctionSample.ps1 `
   -OktaDomain <your-org.okta.com> `
   -GrantCurrentUserDevelopmentAccess `
   -EnableDevelopmentSecretExport `
+  -SkipCodeDeploy `
   -PassThru
 ```
 
-`-ExistingNatGatewayName` is a preflight check: the helper verifies that the named NAT is already attached to the supplied subnet, then passes only the existing VNet/subnet to Bicep. It fails rather than trying to attach a shared NAT to a newly-created VNet. Use `-EnableVirtualNetworkIntegration` instead when testing a new, NAT-free VNet. After ARM deployment, the helper polls the required RBAC assignments and (for development grants) a storage data-plane read for up to 10 minutes before uploading code; adjust `-PermissionPropagationTimeoutSeconds` and `-PermissionPollIntervalSeconds` when needed. The development profile still leaves Storage and Key Vault publicly reachable for direct inspection and keeps the development-only access controls; production defaults are unchanged.
+`-ExistingNatGatewayName` is a preflight check: the helper verifies that the named NAT is already attached to the supplied subnet, then passes only the existing VNet/subnet to Bicep. It fails rather than trying to attach a shared NAT to a newly-created VNet. Use `-EnableVirtualNetworkIntegration` instead when testing a new, NAT-free VNet. After ARM deployment, the helper polls the required RBAC assignments and (for development grants) a storage data-plane read for up to 10 minutes; adjust `-PermissionPropagationTimeoutSeconds` and `-PermissionPollIntervalSeconds` when needed. The development profile still leaves Storage and Key Vault publicly reachable for direct inspection and keeps the development-only access controls; production defaults are unchanged.
 
-The helper validates that the referenced gateway exists and is in the requested region before deployment. It also runs Bicep what-if, deploys the Function code unless `-SkipCodeDeploy` is specified, and verifies the deployed storage resources and app settings. Delete only the disposable groups when finished:
+The helper validates that the referenced gateway exists and is in the requested region before deployment. It also runs Bicep what-if and verifies the deployed storage resources and app settings. Public Function ingress is disabled, so use `-SkipCodeDeploy` from an ordinary workstation. An operator on a host with verified private-endpoint connectivity can opt into the existing `config-zip` push with `-PushCodeThroughPrivateEndpoint`; that switch does not check connectivity, but the helper rejects an unqualified push before touching Azure. The Function app's outbound VNet integration is not private inbound connectivity. These examples provision isolated infrastructure only; they do not deploy a replacement artifact or complete the authorization gate. Delete only the disposable groups when finished:
+
+For a future PowerShell replacement, `scripts/deployment/Build-IsolatedPowerShellPackage.ps1 -OutputDirectory <empty-directory>` creates a deterministic `released-package.zip` from a clean, tracked source tree and reports its source revision and SHA-256. It omits local settings and repository metadata. The package is a candidate until its exact hash and route behavior are reviewed. `scripts/deployment/Deploy-IsolatedFunctionPackage.bicep` describes an ARM `/onedeploy` alternative that fetches a ready-to-run package from a deployment-service-accessible HTTPS URL without a client-to-SCM push. The template does not verify the existing site's authorization or package hash: check effective public access, Easy Auth, disabled Functions, package contents/hash, and a scoped what-if before using it. Supply any SAS URL as a secure parameter without printing it. The Python sample needs a separate Linux-ready dependency build; do not deploy its source-only zip through this template.
 
 ```powershell
 az group delete --name rg-phish-entra --yes --no-wait
