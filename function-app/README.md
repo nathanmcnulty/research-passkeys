@@ -1,5 +1,7 @@
 # function-app
 
+Security status: the Function sites deploy with public network access disabled. Hosted Entra/Okta registration and catalog key-deletion entry points return 501 before side effects; the corresponding Functions are also disabled in the Bicep app settings. Queue workers fail closed if invoked outside their disabled triggers. The older examples below describe historical research flows, not an enabled deployment path. Key creation needs exclusive server-owned names and an ownership reservation; deletion needs a durable tombstone and verified exact-key cleanup. See `contracts/broker-proof-lifecycle-v1.md` for the replacement contract.
+
 This folder is for Function App-specific samples and templates.
 
 The current sample is:
@@ -18,7 +20,7 @@ The Entra ESTSAUTH surface intentionally has two routes: `RegisterEntraPasskeyVi
 
 ## Development validation deployments
 
-The normal `development` profile remains public-networked and does not create a VNet. For a validation deployment that needs predictable outbound visibility, use a dedicated Flex Consumption subnet in the existing VNet that owns the NAT Gateway. Azure NAT Gateways cannot span VNets, so the helper integrates both apps with that existing subnet instead of creating a second VNet/NAT pair. It does not create another NAT Gateway, VM, or public IP. The existing VNet/subnet must be in the same subscription and Azure region as the new Function Apps.
+The `development` profile does not create a VNet, and Function public ingress remains disabled until a separate, reviewed restoration change. For a validation deployment that needs predictable outbound visibility, use a dedicated Flex Consumption subnet in the existing VNet that owns the NAT Gateway. Azure NAT Gateways cannot span VNets, so the helper integrates both apps with that existing subnet instead of creating a second VNet/NAT pair. It does not create another NAT Gateway, VM, or public IP. The existing VNet/subnet must be in the same subscription and Azure region as the new Function Apps.
 
 For the current validation subscription, the verified network names are `nat-phish` and `vm-phish-vnet` in `rg-phish` (`vm-phish-net` does not exist). The original `snet-func-kvpk-armxxd6b` is a valid delegated `/27` subnet and remains attached to the existing Function App. Two dedicated `/26` subnets were added for these disposable deployments: `snet-func-kvpk-entra` (`10.0.1.64/26`) and `snet-func-kvpk-okta` (`10.0.1.128/26`). Both are delegated to `Microsoft.App/environments` and attached to the same `nat-phish` gateway.
 

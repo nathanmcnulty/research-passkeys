@@ -201,6 +201,11 @@ def _json_response(status_code: int, payload: dict[str, object]) -> func.HttpRes
     )
 
 
+def _legacy_key_mutation_disabled() -> func.HttpResponse:
+    # The retained registration/deletion POCs lack exclusive key ownership and tombstone-first cleanup.
+    return _no_store_response(501, {"success": False, "error": "Legacy Key Vault passkey mutations are disabled pending broker lifecycle controls."})
+
+
 def _utc_timestamp() -> str:
     return datetime.now(UTC).isoformat().replace("+00:00", "Z")
 
@@ -1272,6 +1277,7 @@ def get_passkey_browser_context_http(req: func.HttpRequest) -> func.HttpResponse
 @app.function_name(name="DeletePasskeyCatalogRecord")
 @app.route(route="passkeys/{recordId}", methods=["DELETE"], auth_level=func.AuthLevel.ANONYMOUS)
 def delete_passkey_catalog_record_http(req: func.HttpRequest) -> func.HttpResponse:
+    return _legacy_key_mutation_disabled()
     try:
         record_id = str(req.route_params.get("recordId") or "").strip()
         if not record_id:
@@ -1807,6 +1813,7 @@ def login_with_stored_okta_passkey_http(req: func.HttpRequest) -> func.HttpRespo
 @app.function_name(name="RegisterEntraPasskeyViaTap")
 @app.route(route="entra/passkeys/register/tap", methods=["POST"], auth_level=func.AuthLevel.FUNCTION)
 def register_entra_passkey_via_tap_http(req: func.HttpRequest) -> func.HttpResponse:
+    return _legacy_key_mutation_disabled()
     try:
         config = load_config_from_environment()
         body = _get_request_body(req)
@@ -1853,6 +1860,7 @@ def register_entra_passkey_via_tap_http(req: func.HttpRequest) -> func.HttpRespo
 @app.function_name(name="RegisterEntraPasskeyViaEstsAuth")
 @app.route(route="entra/passkeys/register/estsauth", methods=["POST"], auth_level=func.AuthLevel.FUNCTION)
 def register_entra_passkey_via_ests_auth_http(req: func.HttpRequest) -> func.HttpResponse:
+    return _legacy_key_mutation_disabled()
     try:
         config = load_config_from_environment()
         body = _get_request_body(req)
@@ -1903,6 +1911,7 @@ def queue_entra_passkey_registration_via_ests_auth_http(
     req: func.HttpRequest,
     registration_message: func.Out[str],
 ) -> func.HttpResponse:
+    return _legacy_key_mutation_disabled()
     try:
         body = _get_request_body(req)
         user_principal_name = _get_request_value(body, req, "userPrincipalName", "username", "email")
@@ -1973,6 +1982,7 @@ def queue_entra_passkey_registration_via_ests_auth_http(
 @app.function_name(name="ProcessEntraPasskeyRegistrationViaEstsAuth")
 @app.queue_trigger(arg_name="registration_message", queue_name="%PASSKEY_REGISTRATION_QUEUE_NAME%", connection="AzureWebJobsStorage")
 def process_entra_passkey_registration_via_ests_auth_queue(registration_message: func.QueueMessage) -> None:
+    raise RuntimeError("Legacy Key Vault passkey registration processing is disabled pending broker lifecycle controls.")
     payload = json.loads(registration_message.get_body().decode("utf-8"))
     request_id = str(payload.get("requestId") or "")
     processing_started_at_utc = _utc_timestamp()
@@ -2146,6 +2156,7 @@ def start_okta_myaccount_webauthn_registration_http(req: func.HttpRequest) -> fu
 @app.function_name(name="RegisterOktaPasskeyViaIdxSession")
 @app.route(route="okta/passkeys/register/idx", methods=["POST"], auth_level=func.AuthLevel.FUNCTION)
 def register_okta_passkey_via_idx_session_http(req: func.HttpRequest) -> func.HttpResponse:
+    return _legacy_key_mutation_disabled()
     try:
         config = load_config_from_environment()
         body = _get_request_body(req)
@@ -2188,6 +2199,7 @@ def queue_okta_passkey_registration_via_idx_session_http(
     req: func.HttpRequest,
     registration_message: func.Out[str],
 ) -> func.HttpResponse:
+    return _legacy_key_mutation_disabled()
     try:
         body = _get_request_body(req)
         queue_message = _build_okta_queue_message(body=body, req=req)
@@ -2230,6 +2242,7 @@ def queue_okta_passkey_registration_via_idx_session_http(
 @app.function_name(name="ProcessOktaPasskeyRegistrationViaIdxSession")
 @app.queue_trigger(arg_name="registration_message", queue_name="%PASSKEY_OKTA_REGISTRATION_QUEUE_NAME%", connection="AzureWebJobsStorage")
 def process_okta_passkey_registration_via_idx_session_queue(registration_message: func.QueueMessage) -> None:
+    raise RuntimeError("Legacy Key Vault passkey registration processing is disabled pending broker lifecycle controls.")
     payload = json.loads(registration_message.get_body().decode("utf-8"))
     request_id = str(payload.get("requestId") or "")
     _write_registration_status(

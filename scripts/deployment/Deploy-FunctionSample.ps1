@@ -474,6 +474,12 @@ Assert-FunctionAuthSettings `
     -ExpectedIssuer "$($cloudLoginEndpoint.TrimEnd('/'))/$TenantId/v2.0" `
     -BrowserExtensionClientId $BrowserExtensionClientId
 
+$siteConfigUrl = "https://management.azure.com/subscriptions/$SubscriptionId/resourceGroups/$ResourceGroupName/providers/Microsoft.Web/sites/$functionAppName?api-version=2024-11-01"
+$siteAccess = [string](& az rest --method get --url $siteConfigUrl --query properties.publicNetworkAccess --output tsv)
+if ($LASTEXITCODE -ne 0 -or $siteAccess -ne 'Disabled') {
+    throw "Function '$functionAppName' public network access is not disabled; refusing code deployment."
+}
+
 if ($hasExistingVirtualNetwork -and ([string]::IsNullOrWhiteSpace($existingVirtualNetworkResourceId) -or [string]::IsNullOrWhiteSpace($existingFunctionSubnetResourceId))) {
     throw 'An existing VNet/subnet was requested, but the deployment did not return the existing network resource IDs.'
 }
@@ -534,6 +540,18 @@ if ($TemplateId -in @('powershell-keyvault-passkey-http', 'python-keyvault-passk
 foreach ($entry in $expectedSettings.GetEnumerator()) {
     if ($appSettings[[string]$entry.Key] -ne [string]$entry.Value) {
         throw "Function app setting '$($entry.Key)' was not configured with the expected deployed value."
+    }
+}
+
+foreach ($functionName in @(
+    'DeletePasskeyCatalogRecord', 'RegisterEntraPasskeyViaTap', 'RegisterEntraPasskeyViaEstsAuth',
+    'QueueEntraPasskeyRegistrationViaEstsAuth', 'ProcessEntraPasskeyRegistrationViaEstsAuth',
+    'RegisterOktaPasskeyViaIdxSession', 'QueueOktaPasskeyRegistrationViaIdxSession',
+    'ProcessOktaPasskeyRegistrationViaIdxSession'
+)) {
+    $settingName = "AzureWebJobs.$functionName.Disabled"
+    if ($appSettings[$settingName] -ne 'true') {
+        throw "Unsafe legacy Function '$functionName' is not disabled in effective app settings."
     }
 }
 
