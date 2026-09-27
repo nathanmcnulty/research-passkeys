@@ -2,6 +2,10 @@
 
 Research is the central implementation tracker. The provider project consumes reviewed extension components and owns the installed/release artifact. The byte-identical boundary is the active vendored provider baseline; research experiments remain separate until promoted.
 
+The working, hardened browser-extension implementation is `keyvault-passkey-provider/src/browser-extension` in the provider repository. Its 50-file Git tree is identical to the active `browser-extensions/vendor/key-vault-passkey-provider/dev-9ffbe22` snapshot. That vendor path is a source copy, not an alternate extension to edit. The older `browser-extensions/keyvault-passkey-provider` directory has 40 files, last changed in August 2026; it shares only 8 identical files with the provider tree. It also reuses the hardened extension's manifest key and identity, so loading it unpacked could replace the intended test extension. Keep it as evidence until its remaining features have an explicit disposition.
+
+The native Windows/Key Vault implementation lives in the provider repository under `src/dotnet-provider`; research's `windows-passkey-provider` directory contains documentation, not a competing native implementation. The Function samples and broker experiments live in this research repository; their security and live-authorization gates are separate from the validated native provider and browser-extension behavior.
+
 | Surface | Current disposition | Promotion condition |
 | --- | --- | --- |
 | Provider security core, lock and credential lifecycle | 50 provider files at `9ffbe22f4b78ec8c5d1bb33fe719894dcd615eb5` are pinned byte-for-byte under `vendor/key-vault-passkey-provider/dev-9ffbe22` | Preserve this baseline for beta composition; begin new shared changes as research experiments, then promote focused diffs to the provider project |

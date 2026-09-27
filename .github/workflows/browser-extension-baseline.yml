@@ -8,6 +8,7 @@ on:
       - "browser-extensions/upstream-provider.lock.json"
       - "browser-extensions/scripts/validate-upstream-provider-lock.mjs"
       - "browser-extensions/scripts/refresh-upstream-provider-lock.mjs"
+      - "browser-extensions/scripts/check-current-provider-tree.mjs"
       - "browser-extensions/vendor/**"
       - "browser-extensions/experiments/function-catalog/**"
   push:
@@ -18,6 +19,7 @@ on:
       - "browser-extensions/upstream-provider.lock.json"
       - "browser-extensions/scripts/validate-upstream-provider-lock.mjs"
       - "browser-extensions/scripts/refresh-upstream-provider-lock.mjs"
+      - "browser-extensions/scripts/check-current-provider-tree.mjs"
       - "browser-extensions/vendor/**"
       - "browser-extensions/experiments/function-catalog/**"
 
@@ -34,5 +36,7 @@ jobs:
         run: node browser-extensions/scripts/validate-upstream-provider-lock.mjs
       - name: Check baseline refresh command
         run: node --check browser-extensions/scripts/refresh-upstream-provider-lock.mjs
+      - name: Check current-tree comparison command
+        run: node --check browser-extensions/scripts/check-current-provider-tree.mjs
       - name: Validate read-only catalog experiment
         run: node --test browser-extensions/experiments/function-catalog/catalog.test.mjs
