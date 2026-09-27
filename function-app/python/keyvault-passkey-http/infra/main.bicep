@@ -561,6 +561,7 @@ resource functionAppAuth 'Microsoft.Web/sites/config@2024-11-01' = {
     platform: {
       enabled: true
       runtimeVersion: '~1'
+      configFilePath: null
     }
     globalValidation: {
       requireAuthentication: true
@@ -572,6 +573,7 @@ resource functionAppAuth 'Microsoft.Web/sites/config@2024-11-01' = {
     }
     identityProviders: {
       apple: { enabled: false }
+      azureStaticWebApps: { enabled: false }
       azureActiveDirectory: {
         enabled: true
         registration: {
@@ -594,6 +596,7 @@ resource functionAppAuth 'Microsoft.Web/sites/config@2024-11-01' = {
       google: { enabled: false }
       legacyMicrosoftAccount: { enabled: false }
       twitter: { enabled: false }
+      customOpenIdConnectProviders: {}
     }
   }
 }

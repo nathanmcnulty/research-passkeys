@@ -8,6 +8,7 @@ function Assert-FunctionAuthSettings {
 
     $settings = $AuthSettings.properties
     if ($null -eq $settings -or $settings.platform.enabled -ne $true -or
+        -not [string]::IsNullOrEmpty([string]$settings.platform.configFilePath) -or
         $settings.globalValidation.requireAuthentication -ne $true -or
         $settings.globalValidation.unauthenticatedClientAction -ne 'Return401' -or
         $settings.httpSettings.requireHttps -ne $true) {
