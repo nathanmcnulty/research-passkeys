@@ -35,8 +35,8 @@ This repo is meant to be the place where shared contracts, reusable helpers, tem
 
 ## Current starter assets
 
-- `powershell\samples\entra\device-code-bootstrap`: CA-friendly PowerShell bootstrap using Azure CLI device code flow
-- `python\samples\entra`: local Python Entra registration, login, and device-code examples over the canonical library
+- `powershell\samples\entra\device-code-bootstrap`: historical, unsupported authentication sample; do not run it for current testing
+- `python\samples\entra`: local Python Entra registration and login examples over the canonical library; its device-code example is historical and unsupported
 - `python\samples\okta`: Python Okta examples (IDX and MyAccount flows)
 - `azure-automation\function-passkey-runbooks`: Azure Automation runbook samples that call the passkey Function endpoints
 - `templates\logic-app\passkey-function-http`: Logic App templates that proxy webhook requests into the passkey Function endpoints

@@ -12,7 +12,7 @@ Current shape:
 - `modules/Passkey.Broker/`: Function-key client for Graph and Az PowerShell token handoff
 - `scripts/entra/`: Entra registration, login, TAP/ESTSAUTH, and reference scripts
 - `scripts/okta/`: Okta MyAccount and IDX registration/login proof-of-concept scripts
-- `samples/entra/device-code-bootstrap/`: CA-friendly delegated-auth bootstrap using Azure CLI device code flow
+- `samples/entra/device-code-bootstrap/`: historical, unsupported delegated-auth sample; do not run it for current testing
 
 Real fixes intentionally carried forward into the curated script include:
 

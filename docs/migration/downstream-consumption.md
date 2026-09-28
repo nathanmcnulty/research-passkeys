@@ -78,11 +78,11 @@ Downstream login consumers should target `contracts\passkey-login-credential.sch
 
 ### Validation automation
 
-For repeatable local validation, use:
+For repeatable local validation, inspect and use only the applicable current flow:
 
 - `scripts\validation\Invoke-EntraPasskeySmokeTest.ps1`
-- `powershell\samples\entra\device-code-bootstrap\Invoke-EntraDeviceCodeBootstrap.ps1`
-- `python\samples\entra\invoke_entra_device_code_bootstrap.py`
+
+The Python and PowerShell device-code bootstrap files in the rename map above are historical source, not validation commands. Use cached WAM/MSAL or normal OS/browser sign-in for current Microsoft authentication.
 
 ### Automation and Logic App starters
 

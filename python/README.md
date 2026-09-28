@@ -9,7 +9,7 @@ Current Python assets:
 
 - `libraries\passkey`: canonical Python passkey registration and login helpers
 - `function-app\python\keyvault-passkey-http`
-- `samples\entra`: Entra registration, login, and device-code examples
+- `samples\entra`: Entra registration and login examples; the device-code example is historical and unsupported
 - `samples\okta`: Okta IDX and MyAccount examples
 
 Python should follow the same rules as the other tracks:
