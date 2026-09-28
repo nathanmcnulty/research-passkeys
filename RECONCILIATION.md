@@ -28,9 +28,25 @@ The old spike has four files absent from the provider extension. Their dispositi
 
 ## Decisions still open
 
-1. **Old extension spike:** the four unique files are classified above. The 28 divergent overlapping files still need feature-by-feature review before any additional promotion or retirement. The same-identity hazard prevents using it as a second installed beta.
+1. **Old extension spike:** the four unique files are classified above. The 28 divergent overlapping files are inventoried below; their individual behavior still needs review before any additional promotion or retirement. The same-identity hazard prevents using it as a second installed beta.
 2. **Function authorization:** join the reported management-plane lab results to exact deployment IDs/configuration and test direct HTTP denial, owner isolation, and Queue identity-plus-key behavior. The source inventory and management-plane settings do not prove HTTP enforcement.
 3. **Device-code samples:** several historical samples and README entries still describe or invoke device-code authentication. They are outside the approved working path; use cached WAM/MSAL or normal browser authentication. Decide whether to archive, disable, or replace each sample in a focused change. Do not run them as part of offline validation.
 4. **Public release:** the provider's [release-readiness plan](https://github.com/nathanmcnulty/keyvault-passkey-provider/blob/main/plans/public-release-readiness.md) owns visibility, signed artifact, clean-host, security, and user-experience gates. Research results do not by themselves close those gates.
 
 Keep the preservation branch until its roadmap questions have a disposition. Do not merge it wholesale or delete the older extension solely to make the working tree look cleaner.
+
+## Overlapping old-extension drift inventory (2026-09-28)
+
+Compared the 28 shared files whose bytes differ between the historical `browser-extensions/keyvault-passkey-provider` tree and the hardened provider's `src/browser-extension` tree. This is an ownership and review map, not a claim that every line of either implementation has been audited. The provider remains authoritative; none of these files was copied or installed from research.
+
+| Review slice | Differing shared files | Disposition and next proof |
+| --- | --- | --- |
+| Package and developer workflow | `.gitignore`, `package.json`, `package-lock.json`, `README.md`, `scripts/launch-edge-extension-session.mjs`, `scripts/validate-ctap-flow.mjs` | Keep provider dependency/build and validation workflow. Compare any research-only test scenario as a focused test addition; do not overwrite the provider's security, interception, lifecycle, and lock validators. |
+| Extension identity and permissions | `public/manifest.json` | The manifest identity is the same. The old spike requests `declarativeNetRequestWithHostAccess` and optional HTTP/HTTPS access for every host; the provider omits that permission and limits optional HTTP to local loopback. Any broader routing proposal needs a separate least-privilege review and explicit user benefit before promotion. |
+| Visible setup, unlock, and popup | `public/popup.css`, `public/popup.html`, `public/setup.html`, `public/uv-dialog.html`, `src/popup.ts`, `src/setup.ts`, `src/uv-dialog.ts` | Treat as UX experiments only. Compare specific flows against the provider's current idle/restart lock and recovery evidence; preserve the provider's required-UV refusal until native proof exists. |
+| Browser ceremony interception | `src/background.ts`, `src/content.ts`, `src/page.ts` | Security-critical. Review origin/RP binding, cancellation, fallback, and create/get separately with current provider tests and live RP evidence. No wholesale promotion or second installed beta. |
+| Authentication and Key Vault calls | `src/shared/browser-auth.ts`, `src/shared/key-vault-client.ts`, `src/shared/key-vault-metadata-transport.ts` | Review token acquisition, explicit vault host permission, authorization failures, and retry behavior as independent changes. Do not reintroduce device-code auth or general-purpose remote signing. |
+| Credential storage and metadata | `src/shared/metadata-cache-store.ts`, `src/shared/metadata-store.ts`, `src/shared/models.ts`, `src/shared/storage.ts` | Review record schema and migration, Key Vault metadata recovery, and deletion semantics against the provider's current hardened lifecycle. Require compatibility and fault tests for any promotion. |
+| UV, protocol, and WebAuthn bytes | `src/shared/pin-uv.ts`, `src/shared/protocol.ts`, `src/shared/setup-state.ts`, `src/shared/webauthn-data.ts` | Treat differences as security-sensitive. Compare UV flags, local PIN limits, setup state, and assertion/attestation bytes with current provider validators and RP acceptance. Browser PIN verification does not become trusted native Hello proof. |
+
+The four old-only files above remain separately classified. This inventory closes the question of **where** shared differences live; it does not close the question of whether any individual research behavior is ready to promote. Open one bounded provider change per demonstrated improvement, validate it there, and then refresh `upstream-provider.lock.json` so research tracks the exact adopted tree.
