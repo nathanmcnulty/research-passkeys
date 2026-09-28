@@ -2,6 +2,8 @@
 
 Reviewed 2026-09-26 against research commit `662b3276f1084644111f4e79c48f7393bc3df2b5`. This is a source and local-test inventory. No deployed Function, Azure configuration, caller identity, or RP result was inspected.
 
+Later status (2026-09-28): both isolated labs are reported to pass management-plane validation of effective Entra-only Easy Auth settings with public ingress disabled. This table remains the 2026-09-26 source-only snapshot; direct HTTP authorization and caller/Queue negative tests are still open. See [Function security TODO](../function-app/TODO.md) for the current boundary.
+
 | Boundary | Source in both samples | Local evidence | Deployed evidence and remaining decision |
 | --- | --- | --- | --- |
 | Easy Auth issuer, audience, and calling application | Both `function-app/{python,powershell}/keyvault-passkey-http/infra/main.bicep` files declare `authsettingsV2`, global `requireAuthentication: true`, `Return401`, HTTPS, the selected tenant v2 issuer, `api://` audience, and allowed browser application. No `excludedPaths` is declared. | Python source-contract tests pass. This checks file shape, not platform enforcement. | Unverified. Select a deployment and test anonymous, wrong tenant/issuer, wrong audience, and wrong calling application through direct ingress. |
