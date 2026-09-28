@@ -2,8 +2,7 @@
 param(
     [string]$DisplayName = 'Research Passkeys Browser Extension',
     [string]$ExtensionManifestPath = (Join-Path $PSScriptRoot '..\public\manifest.json'),
-    [string]$OutputPath = (Join-Path $PSScriptRoot '..\.local\browser-function-app-registration.json'),
-    [switch]$UseDeviceAuthentication
+    [string]$OutputPath = (Join-Path $PSScriptRoot '..\.local\browser-function-app-registration.json')
 )
 
 Set-StrictMode -Version Latest
@@ -26,7 +25,6 @@ foreach ($byte in $hash[0..15]) {
 $browserRedirectUri = "https://$($extensionId.ToString()).chromiumapp.org/aad"
 
 $connectParameters = @{ Scopes = @('Application.ReadWrite.All'); NoWelcome = $true }
-if ($UseDeviceAuthentication) { $connectParameters.UseDeviceAuthentication = $true }
 Connect-MgGraph @connectParameters | Out-Null
 try {
     if (-not $PSCmdlet.ShouldProcess($DisplayName, 'Create single-tenant browser/API application registration')) { return }
