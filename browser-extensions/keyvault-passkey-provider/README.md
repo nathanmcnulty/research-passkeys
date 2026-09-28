@@ -1,10 +1,10 @@
 ﻿# Key Vault Passkey Provider browser extension
 
-> Historical research snapshot. Do not load or release this copy as the current provider: it retains experimental Function-adapter, UV, and attestation behavior that was intentionally rejected during security review. The maintained implementation is `C:\GitHub\key-vault-passkey-provider\src\browser-extension`; this snapshot remains only as evidence for selectively promoted UX and broker experiments.
+> Historical research snapshot. Do not run the setup steps below, load this extension, or release it as the current provider. It shares the maintained extension's identity and retains experimental Function-adapter, UV, and attestation behavior rejected during security review. The maintained implementation is `src/browser-extension` in the `keyvault-passkey-provider` repository. See [repository reconciliation](../../RECONCILIATION.md) for the promotion boundary and file disposition.
 
 This project is an MV3 development authenticator for the Function App samples in `research-passkeys`.
 
-Current scope:
+Historical scope:
 
 - inject a page-world WebAuthn shim at document start on explicitly allowed sites
 - relay `navigator.credentials.create()` and `navigator.credentials.get()` calls through content and background scripts

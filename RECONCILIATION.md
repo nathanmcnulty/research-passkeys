@@ -22,7 +22,7 @@ The old spike has four files absent from the provider extension. Their dispositi
 | Old-spike-only file | Disposition |
 | --- | --- |
 | `public/opening.html` | Opening-page/User-Agent routing experiment. Keep outside the hardened release until its navigation and origin behavior receives a separate threat review. |
-| `scripts/New-BrowserFunctionAppRegistration.ps1` | Experimental app-registration helper. It still exposes a device-authentication option and creates an app/service principal; do not promote or run it as part of provider validation. |
+| `scripts/New-BrowserFunctionAppRegistration.ps1` | Experimental app-registration helper that creates an app/service principal. The optional device-authentication switch was removed, but the historical helper is still outside provider validation and must not be run as part of it. |
 | `scripts/validate-function-catalog-adapter.mjs` | Historical validator expects a Function assertion result, while the current client deliberately rejects assertions before network. Do not use it as evidence of a working broker assertion. |
 | `src/shared/function-catalog-client.ts` | Mixes read-only catalog mapping with assertion, browser-context, and delete methods. Its safe read-only catalog slice has already been extracted to `browser-extensions/experiments/function-catalog/`; retain the old file as comparison evidence, not a provider component. |
 
