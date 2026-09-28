@@ -72,6 +72,6 @@ When a new flow is promoted beyond one-off research, the preferred shape is:
 
 This keeps host glue thin and makes parity gaps obvious.
 
-### Current exception: device code bootstrap
+### Historical exception: device code bootstrap
 
-Device code stays **local-first** by default. It is intentionally a CLI/bootstrap surface in both Python and PowerShell because it maps naturally to an interactive delegated-auth prompt. It should only grow a hosted variant if the design explicitly introduces a brokered callback or another server-side completion model.
+The Python and PowerShell device-code bootstrap files remain as historical research only. They are outside the current authentication path and must not be used for testing or expanded into a hosted variant. Use cached WAM/MSAL or ordinary OS/browser sign-in for current Microsoft authentication.
