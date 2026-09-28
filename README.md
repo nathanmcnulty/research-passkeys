@@ -1,5 +1,7 @@
 # research-passkeys
 
+Next work: [project roadmap](ROADMAP.md), reviewed 2026-09-12, with staged local, deployed Function, and Entra/Okta validation plans.
+
 Canonical passkey research and shared-code repo for consolidating passkey-related work across PowerShell, browser extensions, Windows provider experiments, Function App samples, and future languages such as Python.
 
 This repo is meant to be the place where shared contracts, reusable helpers, templates, and reference guidance live. Other repos can stay where they are and consume changes from here through source sync, submodules, subtree pulls, or published packages/artifacts.

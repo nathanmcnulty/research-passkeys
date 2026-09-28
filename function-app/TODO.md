@@ -1,5 +1,7 @@
 # Function App security TODO
 
+2026-09-12 review: this checklist has historical status drift. Current Function Bicep sources already configure Easy Auth issuer/audience/calling-app validation, and catalog handlers implement caller/owner checks. Effective deployed enforcement and complete delegation policy still need validation. Use [ROADMAP.md](../ROADMAP.md) for the reconciled sequence; do not implement authentication again based solely on unchecked items below.
+
 The following hardening work remains for both the PowerShell and Python Function samples. Items already implemented in infrastructure or application code are intentionally excluded.
 
 ## Caller authentication and authorization

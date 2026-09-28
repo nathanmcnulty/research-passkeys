@@ -1,5 +1,7 @@
 # Browser extension broker TODO
 
+2026-09-12 review: the checked POC assertion items below describe historical work, not current availability. Current Function assertions fail closed (501), and the browser adapter rejects before network until trusted native user-presence proof exists. Bicep currently requires Easy Auth globally without queue exclusions, so the key-only queue description below also needs deployed verification. Use [ROADMAP.md](../ROADMAP.md) for current source findings and execution gates.
+
 The POC adapter in `keyvault-passkey-provider/` now uses Easy Auth plus a constrained Function assertion operation. It deliberately stops short of the complete production broker protocol below.
 
 ## Broker contract
