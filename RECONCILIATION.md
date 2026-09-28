@@ -10,7 +10,7 @@ The older `E:\research-passkeys` checkout had three two-line documentation edits
 | --- | --- |
 | `README.md` link to the old roadmap | Do not copy as-is: the old roadmap points to a sibling local provider checkout and predates the current research/provisioning work. This document is the current entry point. |
 | `browser-extensions/TODO.md` warning about disabled assertions and Queue/Easy Auth drift | Superseded by the newer 2026-09-27 warning and [extension reconciliation](browser-extensions/reconciliation.md). Function assertions still return 501, and the research browser adapter denies before network. |
-| `function-app/TODO.md` warning that Bicep authentication exists but deployed behavior needs proof | The current source inventory covers the source claim. The browser TODO reports later management-plane verification in two isolated labs, while direct HTTP authorization is still unverified. Consolidate the underlying lab evidence before changing the Function TODO's deployed-status wording. |
+| `function-app/TODO.md` warning that Bicep authentication exists but deployed behavior needs proof | Aligned with the later reported management-plane validation in two isolated labs. Direct HTTP authorization is still unverified, and the dated route inventory remains source-only evidence. |
 | `ROADMAP.md` staged local, deployed Function, Entra/Okta, and broker plans | Retained for review. Its still-useful questions belong in the current [route inventory](docs/research-route-inventory-2026-09-26.md), [broker lifecycle contract](contracts/broker-proof-lifecycle-v1.md), or a focused new work item, rather than restoring a second competing roadmap wholesale. |
 
 ## Component ownership and parity

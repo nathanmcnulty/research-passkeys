@@ -1,13 +1,13 @@
 # Function App security TODO
 
-2026-09-26 source review: both Function Bicep samples already declare global Easy Auth with issuer, audience, and allowed calling application. The checked source settings have not been verified on a deployed Function. See [the route inventory](../docs/research-route-inventory-2026-09-26.md) before changing authentication policy.
+2026-09-28 reconciliation: both Function Bicep samples declare global Easy Auth with issuer, audience, and allowed calling application. The provider project's execution log and the [browser TODO](../browser-extensions/TODO.md) report that both isolated labs passed management-plane validation of effective Entra-only settings, with public ingress disabled. Direct HTTP authorization, caller isolation, and Queue identity-plus-key behavior remain unverified. The earlier [source-only route inventory](../docs/research-route-inventory-2026-09-26.md) is a dated snapshot; keep its evidence boundary when changing authentication policy.
 
 The following hardening work remains for both the PowerShell and Python Function samples. Items already implemented in infrastructure or application code are intentionally excluded.
 
 ## Caller authentication and authorization
 
-- [x] Declare App Service Authentication (`authsettingsV2`) in both Bicep samples. Verify the effective deployed setting separately.
-- [x] Declare the expected tenant issuer, application audience, allowed calling application, and unauthenticated HTTP 401 response in both Bicep samples. Verify the effective deployed behavior separately.
+- [x] Declare App Service Authentication (`authsettingsV2`) in both Bicep samples. Effective management-plane settings passed the isolated-lab validator; direct HTTP enforcement remains open.
+- [x] Declare the expected tenant issuer, application audience, allowed calling application, and unauthenticated HTTP 401 response in both Bicep samples. Prove those denials through a private HTTP test route before opening ingress.
 - [ ] Define the broker authorization contract mapping an authenticated caller to permitted catalog records and Key Vault operations.
 - [ ] Decide whether Function keys remain as defense-in-depth once Entra authentication is enforced.
 
