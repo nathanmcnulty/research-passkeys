@@ -25,4 +25,3 @@ The hardened native provider and browser extension live in `keyvault-passkey-pro
 4. **Public release:** the provider's [release-readiness plan](https://github.com/nathanmcnulty/keyvault-passkey-provider/blob/main/plans/public-release-readiness.md) owns visibility, signed artifact, clean-host, security, and user-experience gates. Research results do not by themselves close those gates.
 
 Keep the preservation branch until its roadmap questions have a disposition. Do not merge it wholesale or delete the older extension solely to make the working tree look cleaner.
-
