@@ -1,0 +1,36 @@
+﻿<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>Authorize Passkey Request</title>
+    <link rel="stylesheet" href="popup.css">
+  </head>
+  <body>
+    <main class="shell">
+      <header class="hero">
+        <p class="eyebrow">User Presence</p>
+        <h1 id="uvTitle">Confirm Passkey Request</h1>
+        <p class="subtitle">Review the relying party and approve this one passkey operation. This confirms presence, not identity.</p>
+      </header>
+
+      <section class="panel">
+        <pre id="uvDetails" class="detail-block">Loading verification details...</pre>
+        <fieldset id="credentialSelection" class="credential-selection" hidden>
+          <legend>Choose a passkey account</legend>
+          <p>The relying party requested a discoverable credential. Account details stay inside this extension window.</p>
+          <div id="credentialOptions" class="credential-options"></div>
+        </fieldset>
+        <div class="actions stacked-actions">
+          <div class="button-row">
+            <button id="verify" type="button">Approve Request</button>
+            <button id="cancel" type="button" class="secondary">Cancel</button>
+          </div>
+          <p id="status" class="status" aria-live="polite">Ready.</p>
+        </div>
+      </section>
+    </main>
+
+    <script src="uv-dialog.js"></script>
+  </body>
+</html>
