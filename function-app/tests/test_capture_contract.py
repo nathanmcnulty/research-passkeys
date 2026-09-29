@@ -196,7 +196,7 @@ class CaptureContractTests(unittest.TestCase):
         python_source = (PYTHON_ROOT / "src/function_app.py").read_text(encoding="utf-8")
         helper = (POWERSHELL_ROOT / "src/shared/PasskeyFunctionHelpers.ps1").read_text(encoding="utf-8")
         self.assertIn('"Cache-Control": "no-store"', python_source)
-        self.assertIn("$response.Headers['Cache-Control'] = 'no-store'", helper)
+        self.assertIn("'Cache-Control' = 'no-store'", helper)
 
     def test_development_nat_validation_is_opt_in(self):
         deploy_script = (ROOT / "scripts/deployment/Deploy-FunctionSample.ps1").read_text(encoding="utf-8")
