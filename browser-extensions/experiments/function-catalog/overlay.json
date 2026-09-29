@@ -2,7 +2,7 @@
   "schemaVersion": 1,
   "name": "read-only-function-catalog",
   "status": "research-only",
-  "baselineCommit": "9ffbe22f4b78ec8c5d1bb33fe719894dcd615eb5",
+  "baselineCommit": "0836466d361ee24258bf14c39f50f7a82ac74bf8",
   "baselineLock": "browser-extensions/upstream-provider.lock.json",
   "changedPaths": [
     "browser-extensions/experiments/function-catalog/catalog.mjs",
