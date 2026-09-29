@@ -158,8 +158,8 @@ function Get-BodyValue {
 function Get-SecretBodyValue {
     param([Parameter(Mandatory)][hashtable]$Body, [Parameter(Mandatory)][string[]]$Names)
     foreach ($name in $Names) {
-        if ($Body.ContainsKey($name) -and -not [string]::IsNullOrWhiteSpace([string]$Body[$name])) {
-            return [string]$Body[$name]
+        if ($Body.ContainsKey($name) -and $Body[$name] -is [string] -and -not [string]::IsNullOrWhiteSpace($Body[$name])) {
+            return $Body[$name].Trim()
         }
     }
     return $null
@@ -733,33 +733,12 @@ function Resolve-OktaDomain {
 function Resolve-OktaAccessToken {
     param(
         [Parameter(Mandatory)]
-        [hashtable]$Body,
-
-        [Parameter(Mandatory)]
-        $Request
+        [hashtable]$Body
     )
 
     $token = Get-SecretBodyValue -Body $Body -Names @('accessToken', 'oktaAccessToken')
-    if ([string]::IsNullOrWhiteSpace($token) -and $Request.Headers) {
-        $authorization = $null
-        if ($Request.Headers -is [System.Collections.IDictionary]) {
-            if ($Request.Headers.ContainsKey('Authorization')) {
-                $authorization = [string]$Request.Headers['Authorization']
-            }
-        } else {
-            $property = $Request.Headers.PSObject.Properties['Authorization']
-            if ($property) {
-                $authorization = [string]$property.Value
-            }
-        }
-
-        if ($authorization -and $authorization -match '^(?i)Bearer\s+(.+)$') {
-            $token = $Matches[1].Trim()
-        }
-    }
-
     if ([string]::IsNullOrWhiteSpace($token)) {
-        throw [System.ArgumentException]::new("Missing Okta user access token. Provide 'accessToken' or a Bearer Authorization header.")
+        throw [System.ArgumentException]::new("Missing Okta user access token. Provide 'accessToken' or 'oktaAccessToken' in the request body.")
     }
 
     return $token
@@ -1900,6 +1879,7 @@ function New-JsonHttpResponse {
         [Parameter(Mandatory)]
         $Body,
 
+        # Retained for existing callers; all JSON responses are now non-cacheable.
         [Parameter()]
         [switch]$NoStore
     )
@@ -1908,12 +1888,10 @@ function New-JsonHttpResponse {
         StatusCode = $StatusCode
         Headers = @{
             'Content-Type' = 'application/json'
+            'Cache-Control' = 'no-store'
+            'Pragma' = 'no-cache'
         }
         Body = ($Body | ConvertTo-Json -Depth 20)
-    }
-    if ($NoStore) {
-        $response.Headers['Cache-Control'] = 'no-store'
-        $response.Headers['Pragma'] = 'no-cache'
     }
 
     if ('HttpResponseContext' -as [type]) {

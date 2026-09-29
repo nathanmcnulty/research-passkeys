@@ -124,7 +124,7 @@ Post that payload to `/api/entra/passkeys/register/estsauth/queue` to return `20
 
 ## Okta routes
 
-- `POST /api/okta/passkeys/register/myaccount`: starts `POST /idp/myaccount/webauthn/registration`; provide a user-scoped Okta access token in `accessToken` or a Bearer header.
+- `POST /api/okta/passkeys/register/myaccount`: starts `POST /idp/myaccount/webauthn/registration`; provide a user-scoped Okta access token in the request-body `accessToken` or `oktaAccessToken` field. The Function authorization header is never forwarded to Okta.
 - `POST /api/okta/passkeys/register/idx`: completes an IDX browser-session registration using `cookieHeader`, `stateHandle`, `authenticatorId`, and Key Vault configuration.
 - `POST /api/okta/passkeys/register/idx/queue`: queues the same IDX registration and returns an Okta status URL.
 - `GET /api/okta/passkeys/register/status/{requestId}`: reads queued Okta registration status.

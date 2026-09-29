@@ -182,14 +182,10 @@ def _resolve_okta_domain(body: dict[str, object], req: func.HttpRequest) -> str:
     return domain
 
 
-def _resolve_okta_access_token(body: dict[str, object], req: func.HttpRequest) -> str:
+def _resolve_okta_access_token(body: dict[str, object]) -> str:
     token = _get_secret_body_value(body, "accessToken", "oktaAccessToken")
     if not token:
-        authorization = req.headers.get("Authorization", "")
-        if authorization.lower().startswith("bearer "):
-            token = authorization[7:].strip()
-    if not token:
-        raise PasskeyValidationError("Missing Okta user access token. Provide 'accessToken' or a Bearer Authorization header.")
+        raise PasskeyValidationError("Missing Okta user access token. Provide 'accessToken' or 'oktaAccessToken' in the request body.")
     return token
 
 
@@ -198,6 +194,7 @@ def _json_response(status_code: int, payload: dict[str, object]) -> func.HttpRes
         json.dumps(payload, separators=(",", ":")),
         status_code=status_code,
         mimetype="application/json",
+        headers={"Cache-Control": "no-store", "Pragma": "no-cache"},
     )
 
 
@@ -1410,12 +1407,7 @@ def get_passkey_capture_context_http(req: func.HttpRequest) -> func.HttpResponse
 
 
 def _no_store_response(status_code: int, payload: dict[str, object]) -> func.HttpResponse:
-    return func.HttpResponse(
-        json.dumps(payload, separators=(",", ":")),
-        status_code=status_code,
-        mimetype="application/json",
-        headers={"Cache-Control": "no-store", "Pragma": "no-cache"},
-    )
+    return _json_response(status_code, payload)
 
 
 def _get_broker_configuration() -> dict[str, object]:
@@ -2153,7 +2145,7 @@ def start_okta_myaccount_webauthn_registration_http(req: func.HttpRequest) -> fu
         body = _get_request_body(req)
         result = start_myaccount_registration(
             okta_domain=_resolve_okta_domain(body, req),
-            access_token=_resolve_okta_access_token(body, req),
+            access_token=_resolve_okta_access_token(body),
         )
         return _json_response(200, {"success": True, "provider": "okta", "registration": result})
     except PasskeyValidationError as exc:

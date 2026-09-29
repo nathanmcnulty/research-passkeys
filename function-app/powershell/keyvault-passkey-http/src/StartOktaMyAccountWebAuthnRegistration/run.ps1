@@ -7,7 +7,7 @@ param($Request, $TriggerMetadata)
 try {
     $body = Get-RequestBodyObject -Request $Request
     $domain = Resolve-OktaDomain -Body $body -Request $Request
-    $accessToken = Resolve-OktaAccessToken -Body $body -Request $Request
+    $accessToken = Resolve-OktaAccessToken -Body $body
     $origin = if ($domain -match '^[a-zA-Z][a-zA-Z0-9+.-]*://') { $domain.TrimEnd('/') } else { "https://$($domain.TrimEnd('/'))" }
     $originUri = [Uri]$origin
     if ($originUri.Scheme -ne 'https' -or $originUri.AbsolutePath -ne '/' -or $originUri.Query -or $originUri.Fragment -or $originUri.UserInfo) {
