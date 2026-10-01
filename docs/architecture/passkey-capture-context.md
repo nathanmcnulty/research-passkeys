@@ -15,6 +15,6 @@ The AES-GCM additional authenticated data is `passkey-capture:v1:{provider}:{cap
 - `GET /api/passkeys/{recordId}/contexts/{captureId}` returns one metadata record.
 - `POST /api/entra/passkeys/{recordId}/login` and `POST /api/okta/passkeys/{recordId}/login` resolve the catalog and login context internally.
 - `GET /api/passkeys/{recordId}/login-context/export` and `GET /api/passkeys/{recordId}/contexts/{captureId}/export` return secret material only when the deployment profile is `development` and `PASSKEY_ENABLE_DEV_SECRET_EXPORT=true`. Responses use `Cache-Control: no-store` and `Pragma: no-cache`.
-- `DELETE /api/passkeys/{recordId}/login-context` soft-deletes the durable Key Vault secret and clears its catalog availability flags.
+- `DELETE /api/passkeys/{recordId}/login-context` returns 501 and is disabled in the deployment templates pending broker lifecycle controls. Re-enabling deletion requires generation-unique secret names, a conditional catalog update using a concrete ETag, and retryable cleanup after the catalog transition commits.
 
 Queued registration encrypts the submitted payload before enqueueing. Queue messages contain only the encrypted capture reference and non-secret registration identifiers; workers decrypt the capture, register the passkey, and persist the final catalog/capture association.

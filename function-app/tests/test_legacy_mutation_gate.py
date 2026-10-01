@@ -7,6 +7,7 @@ ROOT = Path(__file__).resolve().parents[2]
 SOURCE = ROOT / "function-app/python/keyvault-passkey-http/src/function_app.py"
 HTTP_FUNCTIONS = (
     "delete_passkey_catalog_record_http",
+    "delete_passkey_login_context_http",
     "register_entra_passkey_via_tap_http",
     "register_entra_passkey_via_ests_auth_http",
     "queue_entra_passkey_registration_via_ests_auth_http",
@@ -34,7 +35,7 @@ class LegacyMutationGateTests(unittest.TestCase):
         exec(compile(ast.fix_missing_locations(module), str(SOURCE), "exec"), cls.namespace)
 
     def test_http_mutations_return_before_touching_request_or_queue(self):
-        self.assertEqual(len(HTTP_FUNCTIONS), 6)
+        self.assertEqual(len(HTTP_FUNCTIONS), 7)
         for name in HTTP_FUNCTIONS:
             with self.subTest(name=name):
                 arguments = (None, None) if name.startswith("queue_") else (None,)
@@ -48,7 +49,8 @@ class LegacyMutationGateTests(unittest.TestCase):
 
     def test_both_templates_disable_mutation_functions(self):
         function_names = (
-            "DeletePasskeyCatalogRecord", "RegisterEntraPasskeyViaTap", "RegisterEntraPasskeyViaEstsAuth",
+            "DeletePasskeyCatalogRecord", "DeletePasskeyLoginContext", "RegisterEntraPasskeyViaTap",
+            "RegisterEntraPasskeyViaEstsAuth",
             "QueueEntraPasskeyRegistrationViaEstsAuth", "ProcessEntraPasskeyRegistrationViaEstsAuth",
             "RegisterOktaPasskeyViaIdxSession", "QueueOktaPasskeyRegistrationViaIdxSession",
             "ProcessOktaPasskeyRegistrationViaIdxSession",

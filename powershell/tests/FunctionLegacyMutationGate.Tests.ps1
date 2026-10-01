@@ -1,8 +1,8 @@
 BeforeAll {
     $source = Join-Path $PSScriptRoot '..\..\function-app\powershell\keyvault-passkey-http\src'
     $httpFunctions = @(
-        'DeletePasskeyCatalogRecord', 'RegisterEntraPasskeyViaTap', 'RegisterEntraPasskeyViaEstsAuth',
-        'QueueEntraPasskeyRegistrationViaEstsAuth', 'RegisterOktaPasskeyViaIdxSession',
+        'DeletePasskeyCatalogRecord', 'DeletePasskeyLoginContext', 'RegisterEntraPasskeyViaTap',
+        'RegisterEntraPasskeyViaEstsAuth', 'QueueEntraPasskeyRegistrationViaEstsAuth', 'RegisterOktaPasskeyViaIdxSession',
         'QueueOktaPasskeyRegistrationViaIdxSession'
     )
     $workers = @('ProcessEntraPasskeyRegistrationViaEstsAuth', 'ProcessOktaPasskeyRegistrationViaIdxSession')
