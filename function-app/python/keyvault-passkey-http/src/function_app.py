@@ -1708,25 +1708,7 @@ def export_passkey_login_context_http(req: func.HttpRequest) -> func.HttpRespons
 @app.function_name(name="DeletePasskeyLoginContext")
 @app.route(route="passkeys/{recordId}/login-context", methods=["DELETE"], auth_level=func.AuthLevel.FUNCTION)
 def delete_passkey_login_context_http(req: func.HttpRequest) -> func.HttpResponse:
-    try:
-        record = _get_owned_catalog_record(req, str(req.route_params.get("recordId") or ""))
-        if not record:
-            return _json_response(404, {"success": False, "error": "Passkey was not found."})
-        secret_name = str(record.get("loginContextSecretName") or "")
-        deleted = bool(secret_name and _delete_key_vault_secret(load_config_from_environment(), secret_name))
-        credential = dict(record)
-        credential["relyingParty"] = record.get("rpId")
-        credential[str(record.get("provider"))] = record.get("providerMetadata") or {}
-        extensions = {"schemaVersion": "2", "owner": record["owner"], "loginContextSecretName": None, "hasStoredPassword": False, "hasStoredUserAgent": False}
-        if record.get("latestCaptureId"):
-            extensions["latestCaptureId"] = record["latestCaptureId"]
-        _save_catalog_record(str(record.get("provider")), credential, extensions)
-        logging.warning("Login context deletion recordId=%s deleted=%s", record.get("recordId"), deleted)
-        return _json_response(200, {"success": True, "recordId": record.get("recordId"), "deleted": deleted})
-    except PasskeySecurityError as exc:
-        return _json_response(403, {"success": False, "error": str(exc)})
-    except Exception as exc:  # noqa: BLE001
-        return _json_response(500, {"success": False, "error": str(exc)})
+    return _legacy_key_mutation_disabled()
 
 
 @app.function_name(name="ExportPasskeyCaptureContext")

@@ -26,6 +26,10 @@ The old spike has four files absent from the provider extension. Their dispositi
 | `scripts/validate-function-catalog-adapter.mjs` | Historical validator expects a Function assertion result, while the current client deliberately rejects assertions before network. Do not use it as evidence of a working broker assertion. |
 | `src/shared/function-catalog-client.ts` | Mixes read-only catalog mapping with assertion, browser-context, and delete methods. Its safe read-only catalog slice has already been extracted to `browser-extensions/experiments/function-catalog/`; retain the old file as comparison evidence, not a provider component. |
 
+## Login-context deletion gate (2026-10-01)
+
+The Python and PowerShell `DELETE /api/passkeys/{recordId}/login-context` samples deleted the versionless `pklogin-{recordId}` secret before an unconditional catalog upsert. That ordering could delete a concurrent secret version and overwrite newer catalog state. The route now returns 501 before reading the request, and both deployment templates disable the function. Any future implementation must use generation-unique secret names, make a conditional catalog update with a concrete ETag its linearization point, and clean up only the previously referenced generation after commit with durable retries.
+
 ## Decisions still open
 
 1. **Old extension spike:** the four unique files are classified above. The 28 divergent overlapping files are inventoried below; their individual behavior still needs review before any additional promotion or retirement. The same-identity hazard prevents using it as a second installed beta.

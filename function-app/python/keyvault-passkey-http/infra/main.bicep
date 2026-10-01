@@ -516,6 +516,7 @@ resource functionAppSettings 'Microsoft.Web/sites/config@2024-11-01' = {
     AzureWebJobsStorage__clientId: userAssignedIdentity.properties.clientId
     PASSKEY_TENANT_ID: tenantId
     'AzureWebJobs.DeletePasskeyCatalogRecord.Disabled': 'true'
+    'AzureWebJobs.DeletePasskeyLoginContext.Disabled': 'true'
     'AzureWebJobs.RegisterEntraPasskeyViaTap.Disabled': 'true'
     'AzureWebJobs.RegisterEntraPasskeyViaEstsAuth.Disabled': 'true'
     'AzureWebJobs.QueueEntraPasskeyRegistrationViaEstsAuth.Disabled': 'true'
