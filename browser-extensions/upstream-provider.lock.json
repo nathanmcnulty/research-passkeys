@@ -3,19 +3,19 @@
   "baselineType": "development",
   "provider": {
     "repository": "https://github.com/nathanmcnulty/keyvault-passkey-provider.git",
-    "commit": "4c0539acfffec6e55b7a8b7b76d6ec0eeaa18df3",
+    "commit": "7db1b4466672f9b86986985d756a27599a5c79cc",
     "sourcePath": "src/browser-extension",
-    "gitTree": "f2649602b78325b02faea7f6c53780dc41c82756",
+    "gitTree": "d4a18e9e99b16597663471d6e3aae61ceb82c022",
     "proof": {
       "algorithm": "git-sha1",
-      "commitObjectBase64": "dHJlZSBkODBiYmNhNzdlYmQzMWE0N2RkMDc3MzBjOGJlYTlhYzIzOTQ5NmIxCnBhcmVudCAwMGZkOGU4NzAxZmEyOGJkNDIxMjZhZGFkZGRjYjdhMzIxNzIxZTVhCmF1dGhvciBOYXRoYW4gTWNOdWx0eSA8NjY1MzQzMituYXRoYW5tY251bHR5QHVzZXJzLm5vcmVwbHkuZ2l0aHViLmNvbT4gMTc5MDY0NzUwMCAtMDgwMApjb21taXR0ZXIgR2l0SHViIDxub3JlcGx5QGdpdGh1Yi5jb20+IDE3OTA2NDc1MDAgLTA4MDAKZ3Bnc2lnIC0tLS0tQkVHSU4gUEdQIFNJR05BVFVSRS0tLS0tCiAKIHdzRmNCQUFCQ0FBUUJRSnF1eHpNQ1JDMWFRN3V1NVVobEFBQUF2b1FBQmFqRW10eXJKS25oaXdsVU1waTY3by8KIDlJbnRQYmM3cDQrckc0QTRkMGFLamJKcDgzVWpTVmVmYzJvelFwa3lUQ09UaDZKMFRGL1lPeUZtdzYrQnhncmgKIHFqMXpLeEYrazlqNGFXYVV4VEdPVnNxb2VHVDFRY0FMQmNyQkZMVG14NG1YRkNRRThsanJUMGxGZTFQZGdvZ1kKIFE1RlNOTVdaZ0RhUkdkWUt2YkluajJsWng2cmRPbmxqWG16aU5iWW5VRXZETFlQRTJXWElXbEZmc0pWL0srUmIKIGg3MU41d3FKeUsyek9TaFYxTEl5Y2NiVEFyRjZGenh2Yk5YRlN1eEhYNHZWZ1JMRVE3L0NhVjQ4TUVGUk9NZGsKIEVlWG9KeTh0WEFEcXkzMVhTYjJPd2JpL3VFdS9SQUhHUUZ5eDFCNlNzbjRjR2ZyM2VKb29MY3c1YlF3WUIrVXcKIHJtc2lORmh0Lzd5MDBiV2YycldjUmptRmtZa1prUWFlS1p2dXN3YzMxSnliMU91WGd4U042QVJZMjE5WHNoNTcKIFRTSGJRTEZNRkJ0WmJ2RG51ZkswcHBOUVk1WHpRLzQwWWo3RXlFY3Q2cEhhMWFkdFozQkVXa2pjRlVpOTltYnYKIElrRllQMTBPbnY5MDlrSjh1N0hVQnp0dHZLaEtPU3ZydUdIeUJRQXluZWN4YzVpRldXOGhwZnVVaDZuVDZhcjQKIGFzL3FtQkpvTjJ4S1g3QWRPOUM0Yml5QVlUVmwyTzJleUpFc3MwSGNjb0gxUzdvTG5WSkkxdGZCdXI2N2Vrb3kKIFY1UFd0UTJXY0ZwUlVWRTlUMVFyTE1mZVRla0I5U2dQUktpdUdidDF5elZ0K3BQV2RoV3JUWStYR0pTaXVkN20KIDkwWGk1bDN5R3RPbGl2aHNBYndmCiA9N09RLwogLS0tLS1FTkQgUEdQIFNJR05BVFVSRS0tLS0tCiAKCk1pbmltaXplIGJyb3dzZXIgZGlhZ25vc3RpY3MgYW5kIHJlY29yZCBjb21wb25lbnQgc2VjdXJpdHkgcmV2aWV3ICgjNjMpCgpDby1hdXRob3JlZC1ieTogTmF0aGFuIE1jTnVsdHkgPG5hdGhhbm1jbnVsdHlAdXNlcnMubm9yZXBseS5naXRodWIuY29tPg==",
-      "rootTree": "d80bbca77ebd31a47dd07730c8bea9ac239496b1",
-      "rootTreeObjectBase64": "NDAwMDAgLmdpdGh1YgBhpAVPlJTCcstWNwuA2CsY7jimBzEwMDY0NCAuZ2l0aWdub3JlAPpdxBqGS85SqFePDrkwnSsLx3ckMTAwNjQ0IENIQU5HRUxPRy5tZAA5tnoJ8WZ/+FHJD1GaEoucCto/izEwMDY0NCBLZXlWYXVsdFBhc3NrZXlQcm92aWRlci5zbG54AIkLdocXZB/+I+ssc7QNXp0egCQ3MTAwNjQ0IFJFQURNRS5tZADkEjVUS/ey+pOhzA6LW35G8hSphDEwMDY0NCBTRUNVUklUWS5tZACbxTKlyU2+mOrsXqGCMWvM4dbu5jEwMDY0NCBVTkxJQ0VOU0UA77mAiBZPV4axfoPtOElx/Dx0+Tw0MDAwMCBkb2NzAGvQAgDCb7fIJx4xXy/hKCz+LVIZMTAwNjQ0IGdsb2JhbC5qc29uAIKH04da+mJDp/8gSvmVKB/R+8aDMTAwNjQ0IG51Z2V0LmNvbmZpZwBNc2wZ7F/0dWCRgr8RUmM8Vm0UWDQwMDAwIHBhY2thZ2luZwAccPj969mBdJNKEJjXHkjihzXc+jQwMDAwIHBsYW5zABYJKWdyjRiO26A/+TgdqPjgGAYHNDAwMDAgc2NyaXB0cwCfgnAZvjazD14hukGEAn5kjpHZUjQwMDAwIHNyYwDqrv3fef2fezKOheJ8LqSAQbaW9TQwMDAwIHRlc3RzAI9NxvyPdkFwT+sUrj2iuDIgpjZF",
-      "sourceTree": "eaaefddf79fd9f7b328e85e27c2ea48041b696f5",
-      "sourceTreeObjectBase64": "NDAwMDAgYnJvd3Nlci1leHRlbnNpb24A8mSWAreDJbAvrqf2xTeA3EHIJ1Y0MDAwMCBjcHAtcHJvdmlkZXIASVeDg7AEO1r3U3V7/d++K0LIxbo0MDAwMCBkb3RuZXQtcHJvdmlkZXIA8smUmGOWcohR0b1STSVw9cPNucI0MDAwMCB3aW51aS1wcm92aWRlcgBxVt6rGY/bi31fxL4Qi6qmZIF+Lw=="
+      "commitObjectBase64": "dHJlZSA1ZWM5NmU4ZTllM2M3Zjg5NGU3NDYwZDg0ODM4ZmI4YmNiYzk2NzUyCnBhcmVudCA2YjhmNzI2NjRlNjZhOWI4MzA3ZTUzODQ5Y2EyM2I5ZDQ5NGJlZDIyCmF1dGhvciBOYXRoYW4gTWNOdWx0eSA8NjY1MzQzMituYXRoYW5tY251bHR5QHVzZXJzLm5vcmVwbHkuZ2l0aHViLmNvbT4gMTc5MDg0Mjk5NiAtMDgwMApjb21taXR0ZXIgR2l0SHViIDxub3JlcGx5QGdpdGh1Yi5jb20+IDE3OTA4NDI5OTYgLTA4MDAKZ3Bnc2lnIC0tLS0tQkVHSU4gUEdQIFNJR05BVFVSRS0tLS0tCiAKIHdzRmNCQUFCQ0FBUUJRSnF2aGgwQ1JDMWFRN3V1NVVobEFBQTJIa1FBSXkvY29ubDBuMTY5Skc1NC9QL0NXR28KIG5lbmgybExLL0gzQlFqeC9zR1lKbUdmblBZWFFMcVY4citROG5XR2JrZVFIQnB0UHptdVN1ZUVrYlN0WGdNSHkKIE1HRk5zeTY3K0t6bTFHei9vRDY4WGhlWFBSeFM1NEp3Wi9nNEhXM040cU9QYzhKSVhCaWlNcUN5SWxXbmpGc1IKIE1zVWIzcGJTdHdqdTBpTzM2MmN5ekhZZUxaRmlGcndIVG5PbGhISmt1a3ZrRHozZ2Vzb3NsVmpXSWc2eTdPRHUKIGZUYlhhSFljdE1nNEZuTmdwMmRiVEV1dnBvR0V5QVcwS3ljeHlJb3FneUhHNEVoa0RpRkFXUkMxM0g5QnRSU2EKIHVOWG1rMW9BMndxb3J5bGswUTdtNWhveGIvMHdtYXpncDNQdDkzelc3SXhFdW90ZjlsOEpxaWs5SlpLSXlnbGMKIG9BY3lhcDM0bkFSRmorYlBNR0ptYVdRTHVkSDBWY1l6bDRSM2U2Z1ZZL2FXZzZZclN6ckNmNnA1OVBxQU9PcmQKIGlQU2QrcmNJK3FYYm1EL3pqZzMxSHMzTnM5d1RoN1FrNHJheG84MzJXMTF5eFNVUUc0VDFaOWkxVEZ4MlBtcC8KIDdoWXk5V2FyTXBSNnk2ak0vaTJSa2ZBTWRJTHhvZW5Mb0F3dWk0VVh4bnJ3dU5CaFFvVjNvZlZKZGg3c0lSM00KIHdUN2ppYUh3K1dYcXo1RThVbnR0bWx0c1prMldtclBLV21lMk56UGlvRGZOVWxzMGtSek5iVTMxWDl4ZEdEWDUKIGF2QitwZ0t5dFBVZDNWRlFocFVtNUVSbnQvODc5cFd6eTUzSXNZcjliZ1p4NVk3VlNxTUYrMkhYcS8yT0RhQngKIGJWQnFXdkxBaldCenNwQ1Rtb2dPCiA9SDNoVwogLS0tLS1FTkQgUEdQIFNJR05BVFVSRS0tLS0tCiAKClByZXNlcnZlIHRoaXJkLXBhcnR5IGxpY2Vuc2Ugbm90aWNlcyBpbiBwYWNrYWdlZCBvdXRwdXRzICgjNjcpCgpDby1hdXRob3JlZC1ieTogTmF0aGFuIE1jTnVsdHkgPG5hdGhhbm1jbnVsdHlAdXNlcnMubm9yZXBseS5naXRodWIuY29tPg==",
+      "rootTree": "5ec96e8e9e3c7f894e7460d84838fb8bcbc96752",
+      "rootTreeObjectBase64": "MTAwNjQ0IC5naXRhdHRyaWJ1dGVzANxBeg56vdg24w9WN//piOTBfd24NDAwMDAgLmdpdGh1YgCGxCgMdqAwFH6wyR06PqzrCbEwYTEwMDY0NCAuZ2l0aWdub3JlAPpdxBqGS85SqFePDrkwnSsLx3ckMTAwNjQ0IENIQU5HRUxPRy5tZAA5tnoJ8WZ/+FHJD1GaEoucCto/izEwMDY0NCBLZXlWYXVsdFBhc3NrZXlQcm92aWRlci5zbG54AIkLdocXZB/+I+ssc7QNXp0egCQ3MTAwNjQ0IFJFQURNRS5tZADkEjVUS/ey+pOhzA6LW35G8hSphDEwMDY0NCBTRUNVUklUWS5tZACbxTKlyU2+mOrsXqGCMWvM4dbu5jEwMDY0NCBVTkxJQ0VOU0UA77mAiBZPV4axfoPtOElx/Dx0+Tw0MDAwMCBkb2NzAEu7pSMOgoitHnd77Mi7q7TulMLYMTAwNjQ0IGdsb2JhbC5qc29uAIKH04da+mJDp/8gSvmVKB/R+8aDMTAwNjQ0IG51Z2V0LmNvbmZpZwBNc2wZ7F/0dWCRgr8RUmM8Vm0UWDQwMDAwIHBhY2thZ2luZwBlxH4MJGoXid9k3c6LICGAbsF/BzQwMDAwIHBsYW5zAOzIvHMMxK92aX1O5G95id0JVPGeNDAwMDAgc2NyaXB0cwBwECZjl52+095fVkUZuxwiMjpjNDQwMDAwIHNyYwDpmjsby44ueiv2wIrhIftXI2uaczQwMDAwIHRlc3RzAEfpqnlzLbTlVc6+whXGNtD3xPcf",
+      "sourceTree": "e99a3b1bcb8e2e7a2bf6c08ae121fb57236b9a73",
+      "sourceTreeObjectBase64": "NDAwMDAgYnJvd3Nlci1leHRlbnNpb24A1KGOnpmxZZdmNHHW46rmHOuCwCI0MDAwMCBjcHAtcHJvdmlkZXIASVeDg7AEO1r3U3V7/d++K0LIxbo0MDAwMCBkb3RuZXQtcHJvdmlkZXIA8smUmGOWcohR0b1STSVw9cPNucI0MDAwMCB3aW51aS1wcm92aWRlcgBxVt6rGY/bi31fxL4Qi6qmZIF+Lw=="
     }
   },
-  "vendorPath": "browser-extensions/vendor/key-vault-passkey-provider/dev-4c0539a",
+  "vendorPath": "browser-extensions/vendor/key-vault-passkey-provider/dev-7db1b44",
   "version": {
     "package": "0.1.0",
     "manifest": "0.1.0",
@@ -28,7 +28,7 @@
   "buildArtifact": null,
   "content": {
     "algorithm": "sha256",
-    "digest": "ab6750c114fb8ba5e724f55fcb56c3e87cf590188d9372911a724971fa144b8b",
+    "digest": "58dfe292f165231cfc9913aab9737771b5100616b2e905253c369b01f9573a49",
     "files": {
       ".gitignore": {
         "gitMode": "100644",
@@ -47,8 +47,18 @@
       },
       "package.json": {
         "gitMode": "100644",
-        "sha256": "1ec227c724a481b47b56e391783318b4525bf8f3899c09e28cfc3536773a8310",
-        "size": 1072
+        "sha256": "8972e1152b03a1fddd9c5aa04df53fe74a206254a55f34316ab01347a650a8f6",
+        "size": 1120
+      },
+      "public/THIRD-PARTY-NOTICES.txt": {
+        "gitMode": "100644",
+        "sha256": "c64182d48160db948b6aa97a984f1a32974ce4d2053900361264cd33853796cb",
+        "size": 1078
+      },
+      "public/UNLICENSE": {
+        "gitMode": "100644",
+        "sha256": "b5065838cbac452dfc855ba6e6e031481ad2c68406f70d21ead9321374653e6c",
+        "size": 1212
       },
       "public/manifest.json": {
         "gitMode": "100644",
@@ -120,6 +130,11 @@
         "sha256": "58cb87c90f263d7fbd733c23d847ea119d4a34b8e980e33f4ae0feb999ca3be4",
         "size": 23514
       },
+      "scripts/validate-key-vault-client.mjs": {
+        "gitMode": "100644",
+        "sha256": "dd24049e7a080cbabd036960a072b6a9620f5953b73a893ea0babfb5814844e2",
+        "size": 4065
+      },
       "scripts/validate-lock-flow.mjs": {
         "gitMode": "100644",
         "sha256": "c72fb4100c95bf73dd2cc372b05cf1f1830a27759deedc39211497fce19ebb35",
@@ -142,8 +157,8 @@
       },
       "src/background.ts": {
         "gitMode": "100644",
-        "sha256": "b9cc048edc07128b315426d95d139743275ef9e3413e4baab9e79f7f42fe8d47",
-        "size": 53426
+        "sha256": "2585ac1997cde95701e34673226548c18529c9084ae60169547215117b185de6",
+        "size": 53307
       },
       "src/content.ts": {
         "gitMode": "100644",
@@ -192,8 +207,8 @@
       },
       "src/shared/key-vault-client.ts": {
         "gitMode": "100644",
-        "sha256": "500316e0f71c660bbe5e53fb4e8a503b7fe42d48729f49734d363ce89b3baffe",
-        "size": 9068
+        "sha256": "017d125dc6d57bab25ecaff29901d88d6399a99454f3a2b3f2649c9d4798bc0e",
+        "size": 9361
       },
       "src/shared/key-vault-metadata-transport.ts": {
         "gitMode": "100644",
@@ -247,8 +262,8 @@
       },
       "src/shared/security-boundaries.ts": {
         "gitMode": "100644",
-        "sha256": "07aaa1cda615dbea3b9909bb109f49a8a78f8c4a4db20afd24d7a125c73ee57f",
-        "size": 6706
+        "sha256": "80139efb10c91749599b4cbabc46308e3939cb9f9b41ca581cea6fddf31e70d5",
+        "size": 7254
       },
       "src/shared/serialized-operation-queue.ts": {
         "gitMode": "100644",
@@ -267,8 +282,8 @@
       },
       "src/shared/webauthn-data.ts": {
         "gitMode": "100644",
-        "sha256": "c10622c5e8d475632a8ca58437c92a392579c1203cd55b26040e2e671643c010",
-        "size": 6301
+        "sha256": "0c4920d108338691757829475a2d408ab26065c5e3e533909a2ae2297bef4221",
+        "size": 7008
       },
       "src/uv-dialog.ts": {
         "gitMode": "100644",
