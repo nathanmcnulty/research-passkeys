@@ -33,13 +33,18 @@ $current = ConvertTo-SourceVersion $currentText $versionFile
 $mergeBase = @(& git -C $root merge-base HEAD $BaseRef 2>$null)
 if ($LASTEXITCODE -ne 0 -or $mergeBase.Count -ne 1) { throw "Cannot resolve a merge base for '$BaseRef'. Fetch the base history first." }
 $base = [string]$mergeBase[0]
-$oldLines = @(& git -C $root show "${base}:$versionFile" 2>$null)
-$oldExists = $LASTEXITCODE -eq 0
+# Missing historical files are expected during first introduction. ls-tree returns
+# zero for absence, so GitHub's pwsh LASTEXITCODE wrapper can report real success.
+$oldVersionPaths = @(& git -C $root ls-tree --name-only $base -- $versionFile 2>$null)
+if ($LASTEXITCODE -ne 0) { throw 'Unable to inspect the base source version file.' }
+$oldExists = $oldVersionPaths -contains $versionFile
 if (-not $oldExists) {
     if ($currentText -ne '0.1.0') { throw 'The initial source version must be 0.1.0.' }
     Write-Host 'Initial source version 0.1.0 accepted.'
     return
 }
+$oldLines = @(& git -C $root show "${base}:$versionFile" 2>$null)
+if ($LASTEXITCODE -ne 0) { throw 'Unable to read the base source version file.' }
 $old = ConvertTo-SourceVersion (($oldLines -join "`n").Trim()) "$base`:$versionFile"
 if ($current -lt $old) { throw "Source version cannot decrease: $old -> $current." }
 
@@ -51,8 +56,11 @@ function Get-ArtifactPaths {
 }
 $artifactPaths = [System.Collections.Generic.HashSet[string]]::new([System.StringComparer]::Ordinal)
 foreach ($path in Get-ArtifactPaths $targets) { $null = $artifactPaths.Add($path) }
-$oldTargetsText = @(& git -C $root show "${base}:build/targets.psd1" 2>$null)
-if ($LASTEXITCODE -eq 0) {
+$oldTargetPaths = @(& git -C $root ls-tree --name-only $base -- 'build/targets.psd1' 2>$null)
+if ($LASTEXITCODE -ne 0) { throw 'Unable to inspect the base target inventory.' }
+if ($oldTargetPaths -contains 'build/targets.psd1') {
+    $oldTargetsText = @(& git -C $root show "${base}:build/targets.psd1" 2>$null)
+    if ($LASTEXITCODE -ne 0) { throw 'Unable to read the base target inventory.' }
     $tokens = $null
     $parseErrors = $null
     $oldAst = [System.Management.Automation.Language.Parser]::ParseInput(($oldTargetsText -join "`n"), [ref]$tokens, [ref]$parseErrors)

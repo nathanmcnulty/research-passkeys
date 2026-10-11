@@ -56,8 +56,14 @@ jobs:
         env:
           BASE_SHA: ${{ github.event.pull_request.base.sha || github.event.merge_group.base_sha || github.event.before }}
           DEFAULT_BRANCH: ${{ github.event.repository.default_branch }}
+          EVENT_NAME: ${{ github.event_name }}
+          REF_NAME: ${{ github.ref_name }}
         run: |
           $baseRef = $env:BASE_SHA
+          # Feature pushes belong to one reviewed package change, as do its PR commits.
+          if ($env:EVENT_NAME -eq 'push' -and $env:REF_NAME -ne $env:DEFAULT_BRANCH) {
+            $baseRef = $null
+          }
           if ([string]::IsNullOrWhiteSpace($baseRef) -or $baseRef -match '^0+$') {
             $defaultRef = "refs/remotes/origin/$env:DEFAULT_BRANCH"
             $defaultCommit = @(git rev-parse --verify "$defaultRef^{commit}" 2>$null)

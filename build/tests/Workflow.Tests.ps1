@@ -52,26 +52,40 @@ Describe 'Credential-free passkey CI contract' {
         $workflow | Should -Match 'NotRunCount -gt 0'
     }
 
-    It 'uses the default branch rather than an old root for a new-branch push' {
+    It 'selects the reviewed package base for <Scenario>' -ForEach @(
+        @{ Scenario = 'new feature push'; EventName = 'push'; RefName = 'feature/package'; Before = '0000000000000000000000000000000000000000'; Expected = 'refs/remotes/origin/main'; GitCalls = 1 },
+        @{ Scenario = 'later feature push'; EventName = 'push'; RefName = 'feature/package'; Before = 'bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb'; Expected = 'refs/remotes/origin/main'; GitCalls = 1 },
+        @{ Scenario = 'pull request'; EventName = 'pull_request'; RefName = '42/merge'; Before = 'cccccccccccccccccccccccccccccccccccccccc'; Expected = 'cccccccccccccccccccccccccccccccccccccccc'; GitCalls = 0 },
+        @{ Scenario = 'merge queue'; EventName = 'merge_group'; RefName = 'gh-readonly-queue/main/package'; Before = 'dddddddddddddddddddddddddddddddddddddddd'; Expected = 'dddddddddddddddddddddddddddddddddddddddd'; GitCalls = 0 },
+        @{ Scenario = 'default branch push'; EventName = 'push'; RefName = 'main'; Before = 'eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee'; Expected = 'eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee'; GitCalls = 0 }
+    ) {
         $script = Get-WorkflowRunBlock 'Check deliberate source version'
         $oldBase = $env:BASE_SHA
         $oldDefault = $env:DEFAULT_BRANCH
+        $oldEvent = $env:EVENT_NAME
+        $oldRef = $env:REF_NAME
         try {
-            $env:BASE_SHA = '0000000000000000000000000000000000000000'
+            $env:BASE_SHA = $Before
             $env:DEFAULT_BRANCH = 'main'
+            $env:EVENT_NAME = $EventName
+            $env:REF_NAME = $RefName
             Mock git { 'aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa' }
-            # Resolve only the base-selection AST, without invoking the version gate.
+            # Execute only base selection, preserving the exact workflow code.
             $tokens = $null; $errors = $null
             $ast = [Management.Automation.Language.Parser]::ParseInput($script, [ref]$tokens, [ref]$errors)
             $errors.Count | Should -Be 0
-            $body = @($ast.EndBlock.Statements)[0..1] | ForEach-Object { $_.Extent.Text }
+            $statements = @($ast.EndBlock.Statements)
+            $statements[-1].Extent.Text | Should -Be './build/check-version.ps1 -BaseRef $baseRef'
+            $body = $statements[0..($statements.Count - 2)] | ForEach-Object { $_.Extent.Text }
             $global:LASTEXITCODE = 0
             . ([scriptblock]::Create($body -join "`n"))
-            $baseRef | Should -Be 'refs/remotes/origin/main'
-            Should -Invoke git -Times 1 -Exactly
+            $baseRef | Should -Be $Expected
+            Should -Invoke git -Times $GitCalls -Exactly
         } finally {
             $env:BASE_SHA = $oldBase
             $env:DEFAULT_BRANCH = $oldDefault
+            $env:EVENT_NAME = $oldEvent
+            $env:REF_NAME = $oldRef
         }
     }
 

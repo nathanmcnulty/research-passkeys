@@ -1,23 +1,23 @@
 BeforeAll {
+    $oldCalls = $env:PASSKEY_TEST_CALLS
+    $oldMode = $env:PASSKEY_TEST_CLI_MODE
     $root = Split-Path $PSScriptRoot -Parent
     $registration = "$root/Register-GitHubPasskeyViaTAP.ps1"
     $repo = Split-Path (Split-Path $root -Parent) -Parent
     $manifest = Import-PowerShellDataFile "$repo/build/targets.psd1"
     $registrationSources = ($manifest.Scripts | Where-Object Path -EQ 'github/adapters/Register-GitHubPasskeyViaTAP.ps1').Sources
-    $fakeGh = Join-Path $TestDrive 'gh'
+    . (Join-Path $PSScriptRoot 'fixtures/New-FakeGitHubCli.ps1')
     $ghCalls = Join-Path $TestDrive 'gh-calls.txt'
-    # Fixture subprocess discards stdin and records public arguments only; never contacts GitHub.
-    @'
-#!/bin/sh
-cat >/dev/null
-printf '%s\n' "$*" >> "$PASSKEY_TEST_CALLS"
-'@ | Set-Content $fakeGh -NoNewline
-    & chmod +x $fakeGh
-    $oldCalls = $env:PASSKEY_TEST_CALLS
+    $fakeGh = New-FakeGitHubCli -Directory (Join-Path $TestDrive 'native-gh')
     $env:PASSKEY_TEST_CALLS = $ghCalls
+    $env:PASSKEY_TEST_CLI_MODE = 'record'
     $global:PasskeyOfflineFixture = @{}
 }
-AfterAll { $env:PASSKEY_TEST_CALLS = $oldCalls; Remove-Variable PasskeyOfflineFixture -Scope Global }
+AfterAll {
+    $env:PASSKEY_TEST_CALLS = $oldCalls
+    $env:PASSKEY_TEST_CLI_MODE = $oldMode
+    Remove-Variable PasskeyOfflineFixture -Scope Global -ErrorAction SilentlyContinue
+}
 Describe 'Complete TAP registration transcript through <Surface>' -ForEach @(@{ Surface = 'Source' }, @{ Surface = 'Module' }, @{ Surface = 'Standalone' }) {
     BeforeEach {
         $mockScope = @{}
@@ -107,7 +107,11 @@ Describe 'Complete TAP registration transcript through <Surface>' -ForEach @(@{ 
     It 'rejects invalid response without any secret write' -ForEach @('badstate','consent','badclient','badtenant','baduser','createfail','mismatch','protocolerror','httperror') {
         $global:PasskeyOfflineFixture.Mode = $_
         { & $registrationCommand @params } | Should -Throw
-        @((Get-Content $ghCalls) | Where-Object { $_ -match '^secret set ' }).Count | Should -Be 0
+        # Both read-only preflight invocations reached the real platform-native fixture.
+        $calls = @(Get-Content $ghCalls -ErrorAction Stop)
+        $calls.Count | Should -Be 2
+        $calls[0] | Should -Be 'auth status --hostname github.com'
+        @($calls | Where-Object { $_ -match '^secret set ' }).Count | Should -Be 0
         if ($_ -in @('badstate','consent')) { $global:PasskeyOfflineFixture.TokenRequests | Should -Be 0 }
     }
 }

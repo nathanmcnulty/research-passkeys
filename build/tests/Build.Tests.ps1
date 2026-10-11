@@ -54,6 +54,8 @@ param([string]$Name = 'fixture')
 # Invoke public command
 Get-PasskeyGreeting @PSBoundParameters
 '@
+        Copy-Item -LiteralPath $versionGate -Destination (Join-Path $Path 'build/check-version.ps1')
+        Copy-Item -LiteralPath $builder -Destination (Join-Path $Path 'build/build.ps1')
         return $Path
     }
 
@@ -72,6 +74,39 @@ Get-PasskeyGreeting @PSBoundParameters
         & git -C $Root commit --quiet -m 'Offline test base'
         if ($LASTEXITCODE -ne 0) { throw 'Fixture Git commit failed.' }
         return [string](& git -C $Root rev-parse HEAD)
+    }
+
+    function Invoke-GitHubExitWrapper {
+        param([string]$Root, [string]$BaseRef, [switch]$StrictNativeErrors, [switch]$BuildCheck)
+        $wrapper = Join-Path $TestDrive ([guid]::NewGuid().ToString('N') + '.ps1')
+        $scriptText = @'
+$ErrorActionPreference = 'Stop'
+if ([Microsoft.PowerShell.Telemetry.ApplicationInsightsTelemetry]::CanSendTelemetry) {
+    throw 'Telemetry must be disabled before PowerShell starts.'
+}
+__NATIVE_PREFERENCE__
+Set-Location '__ROOT__'
+__TOOL_COMMAND__
+'@
+        $toolCommand = if ($BuildCheck) { './build/build.ps1 -Check; if(Test-Path variable:\LASTEXITCODE){exit $LASTEXITCODE}' } else { './build/check-version.ps1 -BaseRef ''__BASE__''; if(Test-Path variable:\LASTEXITCODE){exit $LASTEXITCODE}' }
+        $scriptText = $scriptText.Replace('__TOOL_COMMAND__', $toolCommand)
+        $preference = if ($StrictNativeErrors) { '$PSNativeCommandUseErrorActionPreference = $true' } else { '$PSNativeCommandUseErrorActionPreference = $false' }
+        $scriptText = $scriptText.Replace('__NATIVE_PREFERENCE__', $preference).Replace('__ROOT__', $Root.Replace("'", "''")).Replace('__BASE__', $BaseRef.Replace("'", "''"))
+        [IO.File]::WriteAllText($wrapper, $scriptText, $utf8)
+        $executable = Join-Path $PSHOME $(if ($IsWindows) { 'pwsh.exe' } else { 'pwsh' })
+        $oldTelemetry = $env:POWERSHELL_TELEMETRY_OPTOUT
+        $oldDotnetTelemetry = $env:DOTNET_CLI_TELEMETRY_OPTOUT
+        try {
+            $env:POWERSHELL_TELEMETRY_OPTOUT = '1'
+            $env:DOTNET_CLI_TELEMETRY_OPTOUT = '1'
+            # Nonzero child exit is returned for assertions instead of terminating Pester.
+            $PSNativeCommandUseErrorActionPreference = $false
+            $output = @(& $executable -NoLogo -NoProfile -File $wrapper 2>&1)
+            return [pscustomobject]@{ ExitCode = $LASTEXITCODE; Output = $output -join "`n" }
+        } finally {
+            $env:POWERSHELL_TELEMETRY_OPTOUT = $oldTelemetry
+            $env:DOTNET_CLI_TELEMETRY_OPTOUT = $oldDotnetTelemetry
+        }
     }
 
     function Get-ArtifactHashes {
@@ -96,6 +131,31 @@ Describe 'Deterministic passkey build' {
         (Get-ArtifactHashes $fixture) | Should -Be $first
         $first[2] | Should -Be $first[3]
         { & $builder -Check -RepositoryRoot $fixture } | Should -Not -Throw
+    }
+
+    It 'returns process zero for Check under the GitHub exit wrapper without historical targets' -ForEach @(
+        @{ StrictNativeErrors = $false }, @{ StrictNativeErrors = $true }
+    ) {
+        $null = Initialize-FixtureGit $fixture -WithoutVersion
+        & $builder -RepositoryRoot $fixture
+        $result = Invoke-GitHubExitWrapper -Root $fixture -BuildCheck -StrictNativeErrors:$StrictNativeErrors
+        $result.Output | Should -Match 'Generated artifact check passed'
+        $result.ExitCode | Should -Be 0
+    }
+
+    It 'preserves no-commit Git repository builds under the GitHub exit wrapper' -ForEach @(
+        @{ StrictNativeErrors = $false }, @{ StrictNativeErrors = $true }
+    ) {
+        & git -C $fixture init --quiet
+        & $builder -RepositoryRoot $fixture
+        $result = Invoke-GitHubExitWrapper -Root $fixture -BuildCheck -StrictNativeErrors:$StrictNativeErrors
+        $result.Output | Should -Match 'Generated artifact check passed'
+        $result.ExitCode | Should -Be 0
+    }
+
+    It 'does not mask a broken Git repository as an absent historical inventory' {
+        $null = New-Item -ItemType Directory -Path (Join-Path $fixture '.git')
+        { & $builder -Check -RepositoryRoot $fixture } | Should -Throw '*Unable to inspect*'
     }
 
     It 'uses UTF-8 without BOM, LF endings, source boundaries and version metadata' {
@@ -253,6 +313,37 @@ Describe 'Deliberate source version gate' {
         { & $versionGate -RepositoryRoot $fixture -BaseRef $base } | Should -Throw '*deliberate version bump*'
     }
 
+    It 'keeps initial 0.1.0 valid across successive feature pushes against the default branch' {
+        $initial = New-BuildFixture (Join-Path $TestDrive 'initial-feature-pushes')
+        $defaultBase = Initialize-FixtureGit $initial -WithoutVersion
+        & git -C $initial branch default-base $defaultBase
+        & git -C $initial add .
+        & git -C $initial commit --quiet -m 'Introduce package 0.1.0'
+        $beforePush = [string](& git -C $initial rev-parse HEAD)
+        Add-Content (Join-Path $initial 'powershell/src/public/Get-PasskeyGreeting.ps1') '# same reviewed package correction'
+        & git -C $initial add .
+        & git -C $initial commit --quiet -m 'Correct prerelease package tooling'
+        { & $versionGate -RepositoryRoot $initial -BaseRef default-base } | Should -Not -Throw
+        { & $versionGate -RepositoryRoot $initial -BaseRef $beforePush } | Should -Throw '*deliberate version bump*'
+    }
+
+    It 'keeps one future deliberate bump valid across successive feature corrections' {
+        & git -C $fixture branch default-base $base
+        Add-Content (Join-Path $fixture 'powershell/src/public/Get-PasskeyGreeting.ps1') '# reviewed behavior change'
+        Write-FixtureFile $fixture 'build/VERSION' "0.1.1`n"
+        & git -C $fixture add .
+        & git -C $fixture commit --quiet -m 'Bump package 0.1.1'
+        Add-Content (Join-Path $fixture 'powershell/src/public/Get-PasskeyGreeting.ps1') '# same package correction'
+        { & $versionGate -RepositoryRoot $fixture -BaseRef default-base } | Should -Not -Throw
+    }
+
+    It 'still requires a deliberate bump against a default-branch push previous commit' {
+        Add-Content (Join-Path $fixture 'powershell/src/public/Get-PasskeyGreeting.ps1') '# main behavior change'
+        { & $versionGate -RepositoryRoot $fixture -BaseRef $base } | Should -Throw '*deliberate version bump*'
+        Write-FixtureFile $fixture 'build/VERSION' "0.1.1`n"
+        { & $versionGate -RepositoryRoot $fixture -BaseRef $base } | Should -Not -Throw
+    }
+
     It 'accepts an increased version for a behavior change' {
         Add-Content (Join-Path $fixture 'powershell/src/public/Get-PasskeyGreeting.ps1') '# change'
         Write-FixtureFile $fixture 'build/VERSION' "0.1.1`n"
@@ -282,6 +373,56 @@ Describe 'Deliberate source version gate' {
         Write-FixtureFile $fixture 'build/VERSION' "$_`n"
         { & $versionGate -RepositoryRoot $fixture -BaseRef $base } | Should -Throw
         if ($_ -ne '0.0.9') { { & $builder -RepositoryRoot $fixture } | Should -Throw }
+    }
+
+    It 'returns process zero for first introduction under the exact GitHub exit wrapper' -ForEach @(
+        @{ StrictNativeErrors = $false }, @{ StrictNativeErrors = $true }
+    ) {
+        $initial = New-BuildFixture (Join-Path $TestDrive ('initial-wrapper-' + [guid]::NewGuid().ToString('N')))
+        $initialBase = Initialize-FixtureGit $initial -WithoutVersion
+        $result = Invoke-GitHubExitWrapper -Root $initial -BaseRef $initialBase -StrictNativeErrors:$StrictNativeErrors
+        $result.Output | Should -Match 'Initial source version 0\.1\.0 accepted'
+        $result.ExitCode | Should -Be 0
+    }
+
+    It 'returns process zero for an unchanged existing version under the GitHub exit wrapper' {
+        $result = Invoke-GitHubExitWrapper -Root $fixture -BaseRef $base -StrictNativeErrors
+        $result.Output | Should -Match 'Version check passed'
+        $result.ExitCode | Should -Be 0
+    }
+
+    It 'returns process zero when the historical target inventory is absent' {
+        $targetText = [IO.File]::ReadAllText((Join-Path $fixture 'build/targets.psd1'))
+        Remove-Item (Join-Path $fixture 'build/targets.psd1')
+        & git -C $fixture add build/targets.psd1
+        & git -C $fixture commit --quiet -m 'Base without target inventory'
+        $withoutTargetsBase = [string](& git -C $fixture rev-parse HEAD)
+        Write-FixtureFile $fixture 'build/targets.psd1' $targetText
+        Write-FixtureFile $fixture 'build/VERSION' "0.1.1`n"
+        $result = Invoke-GitHubExitWrapper -Root $fixture -BaseRef $withoutTargetsBase -StrictNativeErrors
+        $result.Output | Should -Match 'Version check passed'
+        $result.ExitCode | Should -Be 0
+    }
+
+    It 'still returns process failure for version policy errors under the GitHub exit wrapper' -ForEach @('SourceChange', 'InvalidVersion', 'MissingBase') {
+        $wrapperBase = $base
+        switch ($_) {
+            'SourceChange' { Add-Content (Join-Path $fixture 'powershell/src/public/Get-PasskeyGreeting.ps1') '# source change' }
+            'InvalidVersion' { Write-FixtureFile $fixture 'build/VERSION' "v0.1.0`n" }
+            'MissingBase' { $wrapperBase = 'missing-base' }
+        }
+        (Invoke-GitHubExitWrapper -Root $fixture -BaseRef $wrapperBase).ExitCode | Should -Not -Be 0
+    }
+
+    It 'returns process failure for missing current VERSION against <History> history' -ForEach @(
+        @{ History = 'initial' }, @{ History = 'versioned' }
+    ) {
+        if ($History -eq 'initial') {
+            $fixture = New-BuildFixture (Join-Path $TestDrive 'missing-initial-version')
+            $base = Initialize-FixtureGit $fixture -WithoutVersion
+        }
+        Remove-Item (Join-Path $fixture 'build/VERSION')
+        (Invoke-GitHubExitWrapper -Root $fixture -BaseRef $base).ExitCode | Should -Not -Be 0
     }
 
     It 'accepts exactly 0.1.0 for first introduction and rejects other initial versions' {

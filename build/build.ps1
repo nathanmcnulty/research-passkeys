@@ -242,28 +242,50 @@ foreach ($file in Get-ChildItem -LiteralPath $root -File -Recurse -Force -Includ
     }
 }
 $git = Get-Command git -ErrorAction SilentlyContinue
-if ($null -ne $git) {
-    $previousText = @(& git -C $root show 'HEAD:build/targets.psd1' 2>$null)
-    if ($LASTEXITCODE -eq 0) {
-        $previousAst = Get-ParsedScript ($previousText -join "`n") 'HEAD:build/targets.psd1'
-        $hashAst = @($previousAst.EndBlock.Statements)
-        if ($hashAst.Count -ne 1 -or $hashAst[0] -isnot [System.Management.Automation.Language.PipelineAst] -or
-            $hashAst[0].PipelineElements.Count -ne 1 -or
-            $hashAst[0].PipelineElements[0] -isnot [System.Management.Automation.Language.CommandExpressionAst] -or
-            $hashAst[0].PipelineElements[0].Expression -isnot [System.Management.Automation.Language.HashtableAst]) {
-            throw 'Previous target inventory is not a static PowerShell data file.'
-        }
-        $previous = $hashAst[0].PipelineElements[0].Expression.SafeGetValue()
-        if ($previous -is [System.Collections.IDictionary]) {
-            foreach ($oldTarget in @($previous.Scripts)) {
-                if ([System.IO.File]::Exists((Resolve-RepoPath $oldTarget.Path))) { $null = $observed.Add([string]$oldTarget.Path) }
+if ($null -ne $git -and (Test-Path -LiteralPath (Join-Path $root '.git'))) {
+    # An unborn HEAD is also expected in a newly initialized source repository.
+    # Probe it without promoting its known absence to a strict-native error.
+    $nativePreference = $PSNativeCommandUseErrorActionPreference
+    try {
+        $PSNativeCommandUseErrorActionPreference = $false
+        $previousHead = @(& git -C $root rev-parse --verify --quiet HEAD 2>$null)
+        $headExitCode = $LASTEXITCODE
+    } finally {
+        $PSNativeCommandUseErrorActionPreference = $nativePreference
+    }
+    if ($headExitCode -eq 1) {
+        $null = & git -C $root rev-parse --git-dir 2>$null
+        if ($LASTEXITCODE -ne 0) { throw 'Unable to inspect the Git source repository.' }
+    } elseif ($headExitCode -eq 0 -and $previousHead.Count -eq 1) {
+        # Absence is expected on first introduction; ls-tree succeeds without leaving
+        # a failing native exit code for GitHub's pwsh wrapper to propagate.
+        $previousPaths = @(& git -C $root ls-tree --name-only HEAD -- 'build/targets.psd1' 2>$null)
+        if ($LASTEXITCODE -ne 0) { throw 'Unable to inspect the previous target inventory.' }
+        if ($previousPaths -contains 'build/targets.psd1') {
+            $previousText = @(& git -C $root show 'HEAD:build/targets.psd1' 2>$null)
+            if ($LASTEXITCODE -ne 0) { throw 'Unable to read the previous target inventory.' }
+            $previousAst = Get-ParsedScript ($previousText -join "`n") 'HEAD:build/targets.psd1'
+            $hashAst = @($previousAst.EndBlock.Statements)
+            if ($hashAst.Count -ne 1 -or $hashAst[0] -isnot [System.Management.Automation.Language.PipelineAst] -or
+                $hashAst[0].PipelineElements.Count -ne 1 -or
+                $hashAst[0].PipelineElements[0] -isnot [System.Management.Automation.Language.CommandExpressionAst] -or
+                $hashAst[0].PipelineElements[0].Expression -isnot [System.Management.Automation.Language.HashtableAst]) {
+                throw 'Previous target inventory is not a static PowerShell data file.'
             }
-            $oldModule = [string]$previous.ModulePath
-            $oldName = Split-Path -Leaf $oldModule
-            foreach ($oldPath in @("$oldModule/$oldName.psm1", "$oldModule/$oldName.psd1")) {
-                if ([System.IO.File]::Exists((Resolve-RepoPath $oldPath))) { $null = $observed.Add($oldPath) }
+            $previous = $hashAst[0].PipelineElements[0].Expression.SafeGetValue()
+            if ($previous -is [System.Collections.IDictionary]) {
+                foreach ($oldTarget in @($previous.Scripts)) {
+                    if ([System.IO.File]::Exists((Resolve-RepoPath $oldTarget.Path))) { $null = $observed.Add([string]$oldTarget.Path) }
+                }
+                $oldModule = [string]$previous.ModulePath
+                $oldName = Split-Path -Leaf $oldModule
+                foreach ($oldPath in @("$oldModule/$oldName.psm1", "$oldModule/$oldName.psd1")) {
+                    if ([System.IO.File]::Exists((Resolve-RepoPath $oldPath))) { $null = $observed.Add($oldPath) }
+                }
             }
         }
+    } else {
+        throw 'Unable to inspect the previous target inventory.'
     }
 }
 $extra = @($observed | Where-Object { -not $artifacts.Contains($_) } | Sort-Object)
