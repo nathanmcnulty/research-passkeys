@@ -1,0 +1,39 @@
+﻿name: Test Passkey Login (Private Key)
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  test-private-key:
+    runs-on: windows-latest
+
+    steps:
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6
+
+      - name: Run local action with private key fallback
+        id: passkey
+        uses: ./
+        with:
+          credential-id: ${{ secrets['PASSKEY_PRIVATE_CREDENTIAL_ID'] }}
+          user-handle: ${{ secrets['PASSKEY_PRIVATE_USER_HANDLE'] }}
+          user-principal-name: ${{ secrets['PASSKEY_PRIVATE_USER_PRINCIPAL_NAME'] }}
+          private-key: ${{ secrets['PASSKEY_PRIVATE_KEY'] }}
+
+      - name: Validate outputs without printing the cookie
+        shell: pwsh
+        env:
+          ESTS_COOKIE: ${{ steps.passkey.outputs.auth-cookie }}
+        run: |
+          if ('${{ steps.passkey.outputs.authenticated }}' -ne 'true') {
+            throw 'Passkey authentication did not complete successfully.'
+          }
+
+          if ([string]::IsNullOrWhiteSpace($env:ESTS_COOKIE)) {
+            throw 'The action did not return an auth-cookie output.'
+          }
+
+          Write-Host "Authentication succeeded for ${{ steps.passkey.outputs.user-principal-name }} using ${{ steps.passkey.outputs.signature-method }}."
+          Write-Host "Returned cookie type: ${{ steps.passkey.outputs.cookie-name }}"

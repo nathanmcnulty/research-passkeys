@@ -36,6 +36,7 @@ Track folders exist so experiments can stay explicit without flattening everythi
 - `windows-passkey-provider/`
 - `function-app/`
 - `python/`
+- `github/`: maintained GitHub adapters and complete action source
 
 Track-specific code should stay in its track folder unless it becomes broadly reusable enough to promote into `shared/` and `contracts/`.
 
@@ -45,6 +46,10 @@ Track-specific code should stay in its track folder unless it becomes broadly re
 - `samples/` contains focused end-to-end scenarios
 
 Templates should be minimal and stable. Samples can be more opinionated and scenario-specific.
+
+## Preserved downstream entry points
+
+`compatibility/nathanmcnulty/Entra/passkeys` owns preserved historical public paths and generated compatibility entry points. It is not the guarded reference implementation. `scripts/sync` declares the exact byte/hash export map and verifies generated files before a manual local export. See [the ownership map](../migration/personal-passkeys-map.md). No scheduled synchronization or workflow activation is installed.
 
 ## Intake rules
 

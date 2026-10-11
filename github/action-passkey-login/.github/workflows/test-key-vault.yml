@@ -1,0 +1,54 @@
+﻿name: Test Passkey Login (Key Vault)
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  id-token: write
+
+jobs:
+  test-key-vault:
+    runs-on: windows-latest
+
+    steps:
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6
+
+      - name: Azure login via OIDC
+        uses: azure/login@2dd0bbf4064d5a1812889dc200bb8eed2597f82a # v3
+        with:
+          client-id: ${{ secrets.AZURE_CLIENT_ID }}
+          tenant-id: ${{ secrets.AZURE_TENANT_ID }}
+          allow-no-subscriptions: true
+
+      - name: Run local action with Key Vault signing
+        id: passkey
+        uses: ./
+        with:
+          credential-id: ${{ secrets.PASSKEY_CREDENTIAL_ID }}
+          user-handle: ${{ secrets.PASSKEY_USER_HANDLE }}
+          user-principal-name: ${{ secrets.PASSKEY_USER_PRINCIPAL_NAME }}
+          key-vault-name: ${{ secrets.PASSKEY_KEY_VAULT_NAME }}
+          key-vault-key-name: ${{ secrets.PASSKEY_KEY_VAULT_KEY_NAME }}
+          key-vault-tenant-id: ${{ secrets.AZURE_TENANT_ID }}
+
+      - name: Validate outputs without printing the cookie
+        shell: pwsh
+        env:
+          ESTS_COOKIE: ${{ steps.passkey.outputs.auth-cookie }}
+        run: |
+          if ('${{ steps.passkey.outputs.authenticated }}' -ne 'true') {
+            throw 'Passkey authentication did not complete successfully.'
+          }
+
+          if ('${{ steps.passkey.outputs.signature-method }}' -ne 'Azure Key Vault') {
+            throw 'Expected the Key Vault test workflow to use Azure Key Vault signing.'
+          }
+
+          if ([string]::IsNullOrWhiteSpace($env:ESTS_COOKIE)) {
+            throw 'The action did not return an auth-cookie output.'
+          }
+
+          Write-Host "Authentication succeeded for ${{ steps.passkey.outputs.user-principal-name }} using ${{ steps.passkey.outputs.signature-method }}."
+          Write-Host "Returned cookie type: ${{ steps.passkey.outputs.cookie-name }}"
+          Write-Host "Key Vault used: ${{ steps.passkey.outputs.key-vault-name }}"

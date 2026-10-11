@@ -1,0 +1,195 @@
+name: "Passkey Login"
+description: "Reusable GitHub Action to obtain an ESTS authentication cookie from an Entra passkey, preferring Azure Key Vault-backed signing and falling back to a local private key."
+author: "nathanmcnulty"
+inputs:
+  credential-id:
+    description: 'FIDO2 CredentialId (base64url or UUID)'
+    required: true
+  private-key:
+    description: 'Local private key in PEM format or base64 encoded. Prefer Azure Key Vault instead.'
+    required: false
+  user-handle:
+    description: 'FIDO2 UserHandle (base64url)'
+    required: true
+  user-principal-name:
+    description: 'User principal name (UPN) to authenticate (e.g. user@domain.com)'
+    required: true
+  key-vault-name:
+    description: 'Azure Key Vault name holding the signing key for the passkey.'
+    required: false
+  key-vault-key-name:
+    description: 'Azure Key Vault key name used to sign the passkey assertion.'
+    required: false
+  key-vault-access-token:
+    description: 'Pre-obtained Key Vault access token. Usually not needed when azure/login has already run.'
+    required: false
+  key-vault-client-id:
+    description: 'Fallback service principal client ID for Key Vault access when not using azure/login.'
+    required: false
+  key-vault-client-secret:
+    description: 'Fallback service principal client secret for Key Vault access when not using azure/login.'
+    required: false
+  key-vault-tenant-id:
+    description: 'Tenant ID for Azure CLI token scoping or service principal fallback.'
+    required: false
+  auth-url:
+    description: 'Optional override for the Entra authorize URL.'
+    required: false
+  confirm-application:
+    description: 'Explicitly confirm the intended application at CmsiInterrupt; this is not OAuth permission consent.'
+    required: false
+    default: 'false'
+  expected-client-id:
+    description: 'Authorization client ID allowed for explicit application confirmation.'
+    required: false
+    default: '04b07795-8ddb-461a-bbee-02f9e1bf7b46'
+  proxy:
+    description: 'Optional proxy URL for outbound requests.'
+    required: false
+  export-auth-cookie:
+    description: 'When true, masks and exports the authenticated ESTS cookie as an action output for later steps. Enabled by default because this action exists to obtain that cookie.'
+    required: false
+    default: 'true'
+outputs:
+  authenticated:
+    description: 'True when the script verified an authenticated ESTS cookie.'
+    value: ${{ steps.run-passkey.outputs.authenticated }}
+  cookie-name:
+    description: 'The ESTS cookie name returned by Entra when authentication succeeds.'
+    value: ${{ steps.run-passkey.outputs.cookie-name }}
+  user-principal-name:
+    description: 'The authenticated user principal name.'
+    value: ${{ steps.run-passkey.outputs.user-principal-name }}
+  signature-method:
+    description: 'The signature method used for the FIDO assertion.'
+    value: ${{ steps.run-passkey.outputs.signature-method }}
+  key-vault-name:
+    description: 'The Key Vault used for signing, when applicable.'
+    value: ${{ steps.run-passkey.outputs.key-vault-name }}
+  auth-cookie:
+    description: 'The masked ESTS cookie value unless export-auth-cookie is set to false.'
+    value: ${{ steps.run-passkey.outputs.auth-cookie }}
+branding:
+  icon: lock
+  color: blue
+
+runs:
+  using: "composite"
+  steps:
+    - name: Verify embedded script
+      shell: pwsh
+      run: |
+        $script = Join-Path $env:GITHUB_ACTION_PATH 'PasskeyLogin.ps1'
+        if (-not (Test-Path $script)) {
+          Write-Error "Embedded script not found: $script"
+          exit 1
+        }
+
+    - name: Run PasskeyLogin.ps1
+      id: run-passkey
+      shell: pwsh
+      env:
+        CREDENTIAL_ID: ${{ inputs.credential-id }}
+        PRIVATE_KEY: ${{ inputs.private-key }}
+        USER_HANDLE: ${{ inputs.user-handle }}
+        USER_PRINCIPAL_NAME: ${{ inputs.user-principal-name }}
+        KEY_VAULT_NAME: ${{ inputs.key-vault-name }}
+        KEY_VAULT_KEY_NAME: ${{ inputs.key-vault-key-name }}
+        KEY_VAULT_ACCESS_TOKEN: ${{ inputs.key-vault-access-token }}
+        KEY_VAULT_CLIENT_ID: ${{ inputs.key-vault-client-id }}
+        KEY_VAULT_CLIENT_SECRET: ${{ inputs.key-vault-client-secret }}
+        KEY_VAULT_TENANT_ID: ${{ inputs.key-vault-tenant-id }}
+        AUTH_URL: ${{ inputs.auth-url }}
+        CONFIRM_APPLICATION: ${{ inputs.confirm-application }}
+        EXPECTED_CLIENT_ID: ${{ inputs.expected-client-id }}
+        PROXY: ${{ inputs.proxy }}
+        EXPORT_AUTH_COOKIE: ${{ inputs.export-auth-cookie }}
+      run: |
+        $script = Join-Path $env:GITHUB_ACTION_PATH 'PasskeyLogin.ps1'
+
+        function Set-ActionOutput {
+          param(
+            [Parameter(Mandatory)]
+            [string]$Name,
+            [AllowNull()]
+            [string]$Value
+          )
+
+          $delimiter = [guid]::NewGuid().ToString('N')
+          Add-Content -Path $env:GITHUB_OUTPUT -Value "$Name<<$delimiter"
+          Add-Content -Path $env:GITHUB_OUTPUT -Value ($Value ?? '')
+          Add-Content -Path $env:GITHUB_OUTPUT -Value $delimiter
+        }
+
+        function Add-OptionalParameter {
+          param(
+            [Parameter(Mandatory)]
+            [hashtable]$Parameters,
+            [Parameter(Mandatory)]
+            [string]$Name,
+            [AllowNull()]
+            [string]$Value
+          )
+
+          if (-not [string]::IsNullOrWhiteSpace($Value)) {
+            $Parameters[$Name] = $Value
+          }
+        }
+
+        foreach ($sensitiveValue in @(
+          $env:CREDENTIAL_ID,
+          $env:USER_HANDLE,
+          $env:PRIVATE_KEY,
+          $env:KEY_VAULT_ACCESS_TOKEN,
+          $env:KEY_VAULT_CLIENT_SECRET
+        )) {
+          if (-not [string]::IsNullOrWhiteSpace($sensitiveValue)) {
+            Write-Output "::add-mask::$sensitiveValue"
+          }
+        }
+
+        $params = @{
+          UserPrincipalName = $env:USER_PRINCIPAL_NAME
+          UserHandle = $env:USER_HANDLE
+          CredentialId = $env:CREDENTIAL_ID
+          PassThru = $true
+        }
+
+        if ($env:CONFIRM_APPLICATION -eq 'true') {
+          $params.ConfirmApplication = $true
+          $params.ExpectedClientId = [guid]$env:EXPECTED_CLIENT_ID
+        }
+
+        Add-OptionalParameter -Parameters $params -Name AuthUrl -Value $env:AUTH_URL
+        Add-OptionalParameter -Parameters $params -Name Proxy -Value $env:PROXY
+        Add-OptionalParameter -Parameters $params -Name KeyVaultName -Value $env:KEY_VAULT_NAME
+        Add-OptionalParameter -Parameters $params -Name KeyVaultKeyName -Value $env:KEY_VAULT_KEY_NAME
+        Add-OptionalParameter -Parameters $params -Name KeyVaultAccessToken -Value $env:KEY_VAULT_ACCESS_TOKEN
+        Add-OptionalParameter -Parameters $params -Name KeyVaultClientId -Value $env:KEY_VAULT_CLIENT_ID
+        Add-OptionalParameter -Parameters $params -Name KeyVaultClientSecret -Value $env:KEY_VAULT_CLIENT_SECRET
+        Add-OptionalParameter -Parameters $params -Name KeyVaultTenantId -Value $env:KEY_VAULT_TENANT_ID
+        Add-OptionalParameter -Parameters $params -Name PrivateKey -Value $env:PRIVATE_KEY
+
+        if ($env:EXPORT_AUTH_COOKIE -ne 'false') {
+          $params.IncludeAuthenticationCookie = $true
+        }
+
+        $result = & $script @params
+        if ($result -is [array]) {
+          $result = $result[-1]
+        }
+
+        if (-not $result) {
+          throw 'PasskeyLogin.ps1 did not return a result object.'
+        }
+
+        if ($result.AuthenticationCookieValue) {
+          Write-Output "::add-mask::$($result.AuthenticationCookieValue)"
+        }
+
+        Set-ActionOutput -Name authenticated -Value ([string]$result.Success).ToLowerInvariant()
+        Set-ActionOutput -Name cookie-name -Value $result.AuthenticationCookieName
+        Set-ActionOutput -Name user-principal-name -Value $result.UserPrincipalName
+        Set-ActionOutput -Name signature-method -Value $result.SignatureMethod
+        Set-ActionOutput -Name key-vault-name -Value $result.KeyVaultName
+        Set-ActionOutput -Name auth-cookie -Value $result.AuthenticationCookieValue
