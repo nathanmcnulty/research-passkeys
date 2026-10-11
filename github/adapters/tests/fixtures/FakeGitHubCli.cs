@@ -15,9 +15,12 @@ public static class FakeGitHubCli
 
         if (args.Length == 1 && args[0] == "--fixture-hold-pipes")
         {
+            string pidFile = Environment.GetEnvironmentVariable("PASSKEY_TEST_CHILD_PID");
+            if (String.IsNullOrEmpty(pidFile)) return 95;
             Console.Out.Write("SYNTHETIC-CHILD-OUTPUT");
             Console.Out.Flush();
-            Thread.Sleep(6000);
+            File.WriteAllText(pidFile + ".ready", Process.GetCurrentProcess().Id + "\n");
+            Thread.Sleep(12000);
             return 0;
         }
 
@@ -43,19 +46,23 @@ public static class FakeGitHubCli
         }
         if (mode == "inherited-pipes")
         {
+            // Make a fresh per-stage drain deadline observably different from the original deadline.
+            Thread.Sleep(2000);
             ProcessStartInfo child = new ProcessStartInfo();
             child.FileName = Assembly.GetExecutingAssembly().Location;
             child.Arguments = "--fixture-hold-pipes";
             child.UseShellExecute = false;
             child.CreateNoWindow = true;
+            string pidFile = Environment.GetEnvironmentVariable("PASSKEY_TEST_CHILD_PID");
+            if (String.IsNullOrEmpty(pidFile)) return 95;
             // Default, non-redirected standard handles are inherited from this captured process.
             using (Process process = Process.Start(child))
             {
                 try
                 {
-                    string pidFile = Environment.GetEnvironmentVariable("PASSKEY_TEST_CHILD_PID");
-                    if (String.IsNullOrEmpty(pidFile)) throw new InvalidOperationException("Missing fixture child tracking path.");
-                    File.WriteAllText(pidFile, process.Id + "\n" + process.StartTime.ToUniversalTime().Ticks + "\n");
+                    // This identity/completion marker is written immediately before normal parent exit.
+                    File.WriteAllText(pidFile, process.Id + "\n" + process.StartTime.ToUniversalTime().Ticks + "\n" +
+                        Process.GetCurrentProcess().Id + "\n");
                 }
                 catch
                 {

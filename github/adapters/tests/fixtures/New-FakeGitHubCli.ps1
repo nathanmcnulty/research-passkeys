@@ -37,10 +37,17 @@ case "$PASSKEY_TEST_CLI_MODE" in
     failure) cat >/dev/null; printf 'SYNTHETIC-STDERR' >&2; exit 9 ;;
     inherited-pipes)
         cat >/dev/null
-        sleep 6 &
+        # A reset/per-stage timeout must take measurably longer than the original deadline.
+        sleep 2
+        [ -n "$PASSKEY_TEST_CHILD_PID" ] || exit 95
+        (
+            printf 'SYNTHETIC-CHILD-OUTPUT'
+            printf 'ready\n' > "$PASSKEY_TEST_CHILD_PID.ready" || exit 93
+            exec sleep 12
+        ) &
         child=$!
-        [ -n "$PASSKEY_TEST_CHILD_PID" ] || { kill "$child"; wait "$child"; exit 95; }
-        printf '%s\n' "$child" > "$PASSKEY_TEST_CHILD_PID" || { kill "$child"; wait "$child"; exit 94; }
+        # Child identity and parent completion, immediately before normal parent exit.
+        printf '%s\n\n%s\n' "$child" "$$" > "$PASSKEY_TEST_CHILD_PID" || { kill "$child"; wait "$child"; exit 94; }
         exit 0 ;;
     record|'') cat >/dev/null; printf '%s\n' "$*" >> "$PASSKEY_TEST_CALLS"; exit 0 ;;
     *) exit 97 ;;
@@ -68,7 +75,7 @@ function Stop-FakeGitHubCliChild {
         if ($process.HasExited) { $cleaned = $true; return }
         $start = $process.StartTime.ToUniversalTime()
         if ($start -lt $EarliestStartUtc.AddSeconds(-1) -or $process.MainModule.FileName -ine $ExpectedExecutablePath -or
-            ($identity.Count -gt 1 -and $start.Ticks -ne [long]$identity[1])) {
+            ($identity.Count -gt 1 -and -not [string]::IsNullOrEmpty($identity[1]) -and $start.Ticks -ne [long]$identity[1])) {
             throw 'Refusing to terminate a process that does not match the synthetic fixture child.'
         }
         $process.Kill($true)
@@ -76,6 +83,9 @@ function Stop-FakeGitHubCliChild {
         $cleaned = $true
     } finally {
         if ($null -ne $process) { $process.Dispose() }
-        if ($cleaned) { [IO.File]::Delete($PidFile) }
+        if ($cleaned) {
+            [IO.File]::Delete($PidFile)
+            [IO.File]::Delete("$PidFile.ready")
+        }
     }
 }
