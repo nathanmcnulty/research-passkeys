@@ -122,3 +122,17 @@ $state = Read-Host 'Copy the IDX stateHandle' -AsSecureString
   -OktaDomain 'your-org.okta.com' -CookieHeader $cookie -StateHandle $state `
   -Challenge '<base64url challenge>' -CredentialFilePath '.\okta-passkey-record.json'
 ```
+
+## Offline Entra compatibility tests
+
+Run `Invoke-Pester ./tests/EntraScriptCompatibility.Tests.ps1` from this directory.
+The tests parse the Entra scripts and execute only selected import, token-conversion,
+and denial expressions with synthetic values. They do not enroll credentials, sign
+in, contact Key Vault, or establish server acceptance. The regression suite covers
+curated module resolution, both string and SecureString Az token results, and
+cross-platform SecureString conversion in reference scripts.
+
+These compatibility fixes do not enable reference login: software-backed assertions
+remain explicitly disabled until fresh authenticator-bound user presence and
+verification can be proven. Registration continues to use `none` attestation rather
+than synthetic attestation.

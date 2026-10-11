@@ -300,8 +300,7 @@ function Get-KeyVaultToken {
             Write-Verbose "Trying Az PowerShell module..."
             $azToken = Get-AzAccessToken -ResourceUrl "https://vault.azure.net" -ErrorAction Stop
             $token = if ($azToken.Token -is [System.Security.SecureString]) {
-                [System.Runtime.InteropServices.Marshal]::PtrToStringAuto(
-                    [System.Runtime.InteropServices.Marshal]::SecureStringToBSTR($azToken.Token))
+                [System.Net.NetworkCredential]::new('', $azToken.Token).Password
             } else { $azToken.Token }
             Write-Host "    ✓ Acquired Key Vault token via Az PowerShell module" -ForegroundColor Green
             return $token
@@ -760,9 +759,7 @@ if (-not $useKeyVault) {
     
     # If no JSON key and we have a parameter, convert SecureString to plain text
     if (-not $privateKeySource -and $PrivateKey) {
-        $privateKeySource = [System.Runtime.InteropServices.Marshal]::PtrToStringAuto(
-            [System.Runtime.InteropServices.Marshal]::SecureStringToBSTR($PrivateKey)
-        )
+        $privateKeySource = [System.Net.NetworkCredential]::new('', $PrivateKey).Password
     }
     
     if (-not $privateKeySource) {

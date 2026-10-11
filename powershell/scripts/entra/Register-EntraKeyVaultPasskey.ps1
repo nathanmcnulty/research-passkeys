@@ -109,7 +109,7 @@ param(
 
 $ErrorActionPreference = "Stop"
 
-$moduleRoot = Join-Path -Path $PSScriptRoot -ChildPath '..\modules'
+$moduleRoot = Join-Path -Path $PSScriptRoot -ChildPath '../../modules'
 Import-Module (Join-Path -Path $moduleRoot -ChildPath 'Passkey.Common\Passkey.Common.psm1') -Force
 Import-Module (Join-Path -Path $moduleRoot -ChildPath 'Passkey.EntraAuth\Passkey.EntraAuth.psm1') -Force
 
@@ -187,7 +187,9 @@ if ($KeyVaultAccessToken) {
         try {
             Write-Host "  Trying Az.Accounts module..." -ForegroundColor Yellow
             $azToken = Get-AzAccessToken -ResourceUrl "https://vault.azure.net" -ErrorAction Stop
-            $kvToken = $azToken.Token
+            $kvToken = if ($azToken.Token -is [System.Security.SecureString]) {
+                [System.Net.NetworkCredential]::new('', $azToken.Token).Password
+            } else { $azToken.Token }
             Write-Host "  ✓ Key Vault token acquired via Az.Accounts" -ForegroundColor Green
         } catch {
             Write-Host "  ⚠ Az.Accounts available but failed: $_" -ForegroundColor DarkYellow

@@ -293,7 +293,9 @@ if ($KeyVaultAccessToken) {
         try {
             Write-Host "  Trying Az.Accounts module..." -ForegroundColor Yellow
             $azToken = Get-AzAccessToken -ResourceUrl "https://vault.azure.net" -ErrorAction Stop
-            $kvToken = $azToken.Token
+            $kvToken = if ($azToken.Token -is [System.Security.SecureString]) {
+                [System.Net.NetworkCredential]::new('', $azToken.Token).Password
+            } else { $azToken.Token }
             Write-Host "  ✓ Key Vault token acquired via Az.Accounts" -ForegroundColor Green
         } catch {
             Write-Host "  ⚠ Az.Accounts available but failed: $_" -ForegroundColor DarkYellow
