@@ -85,18 +85,14 @@ Describe 'GitHub secret validation and atomicity boundaries' {
 Describe 'Registration dry-run and trust boundaries' {
     BeforeAll {
         $text = Get-Content $registration -Raw
-        $tokens = $null; $errors = $null
-        $ast = [Management.Automation.Language.Parser]::ParseInput($text, [ref]$tokens, [ref]$errors)
-        $f = $ast.Find({ param($n) $n -is [Management.Automation.Language.FunctionDefinitionAst] -and $n.Name -eq 'Assert-RegistrationUri' }, $true)
-        . ([scriptblock]::Create($f.Extent.Text))
-        $verifyFunction = $ast.Find({ param($n) $n -is [Management.Automation.Language.FunctionDefinitionAst] -and $n.Name -eq 'Assert-RegistrationVerified' }, $true)
-        . ([scriptblock]::Create($verifyFunction.Extent.Text))
+        # Load the COMPLETE generated artifact through its public zero-I/O WhatIf boundary.
+        . $registration -TAP (ConvertTo-SecureString 'synthetic-test-only' -AsPlainText -Force) -UserPrincipalName 'fixture@example.invalid' -TenantId '11111111-1111-1111-1111-111111111111' -Repository 'owner/repo' -ConsumersPaused -AllowLegacySoftwareAttestation -WhatIf
     }
     It 'rejects untrusted endpoint origins' -ForEach @('http://login.microsoftonline.com/x','https://login.microsoftonline.com.evil.invalid/x','https://login.microsoftonline.com:444/x','https://user@login.microsoftonline.com/x','https://evil.invalid/x') {
-        { Assert-RegistrationUri $_ } | Should -Throw
+        { Assert-EntraRegistrationUri $_ } | Should -Throw
     }
     It 'accepts the three pinned HTTPS origins' -ForEach @('https://login.microsoftonline.com/common/login','https://login.microsoft.com/tenant/fido/create','https://mysignins.microsoft.com/api/session/authorize') {
-        { Assert-RegistrationUri $_ } | Should -Not -Throw
+        { Assert-EntraRegistrationUri $_ } | Should -Not -Throw
     }
     It 'has no plaintext credential-file write or inherited console dumps' {
         $text | Should -Not -Match 'Set-Content|Out-File|Write-Host|OutputPath'
@@ -113,18 +109,14 @@ Describe 'Registration dry-run and trust boundaries' {
 
 Describe 'Registration success must bind the new credential' {
     BeforeAll {
-        $text = Get-Content $registration -Raw
-        $tokens = $null; $errors = $null
-        $ast = [Management.Automation.Language.Parser]::ParseInput($text, [ref]$tokens, [ref]$errors)
-        $f = $ast.Find({ param($n) $n -is [Management.Automation.Language.FunctionDefinitionAst] -and $n.Name -eq 'Assert-RegistrationVerified' }, $true)
-        . ([scriptblock]::Create($f.Extent.Text))
+        . $registration -TAP (ConvertTo-SecureString 'synthetic-test-only' -AsPlainText -Force) -UserPrincipalName 'fixture@example.invalid' -TenantId '11111111-1111-1111-1111-111111111111' -Repository 'owner/repo' -ConsumersPaused -AllowLegacySoftwareAttestation -WhatIf
     }
     BeforeEach { $response = @{ VerificationState = 2; ErrorCode = 0; DataUpdates = @{ FidoDevices = @{ CredentialId = 'AQIDBA' } } } }
-    It 'accepts successful bound verification' { { Assert-RegistrationVerified 200 $response 'AQIDBA' } | Should -Not -Throw }
-    It 'rejects HTTP errors even with success body' { { Assert-RegistrationVerified 400 $response 'AQIDBA' } | Should -Throw }
-    It 'rejects nonzero protocol error even with success state' { $response.ErrorCode = 1; { Assert-RegistrationVerified 200 $response 'AQIDBA' } | Should -Throw }
-    It 'rejects mismatched credential' { { Assert-RegistrationVerified 200 $response 'BQYHCA' } | Should -Throw }
-    It 'rejects missing credential binding' { $response.DataUpdates = @{}; { Assert-RegistrationVerified 200 $response 'AQIDBA' } | Should -Throw }
-    It 'rejects ambiguous multi-credential binding' { $response.DataUpdates.FidoDevices = @(@{CredentialId='AQIDBA'},@{CredentialId='BQYHCA'}); { Assert-RegistrationVerified 200 $response 'AQIDBA' } | Should -Throw }
-    It 'rejects pending verification' { $response.VerificationState=1; { Assert-RegistrationVerified 200 $response 'AQIDBA' } | Should -Throw }
+    It 'accepts successful bound verification' { { Assert-EntraRegistrationVerified 200 $response 'AQIDBA' } | Should -Not -Throw }
+    It 'rejects HTTP errors even with success body' { { Assert-EntraRegistrationVerified 400 $response 'AQIDBA' } | Should -Throw }
+    It 'rejects nonzero protocol error even with success state' { $response.ErrorCode = 1; { Assert-EntraRegistrationVerified 200 $response 'AQIDBA' } | Should -Throw }
+    It 'rejects mismatched credential' { { Assert-EntraRegistrationVerified 200 $response 'BQYHCA' } | Should -Throw }
+    It 'rejects missing credential binding' { $response.DataUpdates = @{}; { Assert-EntraRegistrationVerified 200 $response 'AQIDBA' } | Should -Throw }
+    It 'rejects ambiguous multi-credential binding' { $response.DataUpdates.FidoDevices = @(@{CredentialId='AQIDBA'},@{CredentialId='BQYHCA'}); { Assert-EntraRegistrationVerified 200 $response 'AQIDBA' } | Should -Throw }
+    It 'rejects pending verification' { $response.VerificationState=1; { Assert-EntraRegistrationVerified 200 $response 'AQIDBA' } | Should -Throw }
 }

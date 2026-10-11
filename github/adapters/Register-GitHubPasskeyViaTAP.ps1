@@ -1,932 +1,1199 @@
-#Requires -Version 7.0
-<#
-.SYNOPSIS
-Experimental legacy software-passkey enrollment with in-memory GitHub secret export.
+#Requires -Version 7.6
+
+<# .SYNOPSIS
+Experimentally enroll a legacy software passkey through native My Sign-ins endpoints.
 .DESCRIPTION
-Derived from Nathan McNulty's TAP script at personal repo commit
-1c0a52f339915b70e637d727edbaa0a9dd81fe17. Uses undocumented My Sign-ins endpoints.
-No credential JSON is written. Four GitHub secret writes are NOT atomic.
-This legacy flow synthesizes attestation and UP/UV claims; it does not prove
-hardware-backed user presence or verification. It is separate from the guarded research reference paths,
-whose fail-closed assertion guard MUST remain in place. Live enrollment is unverified.
-WhatIf performs local parameter validation only; no network, enrollment or upload.
+Requires AllowLegacySoftwareAttestation acknowledgement. Packed software attestation and UP/UV claims are not trusted assurance. WhatIf performs no I/O. GitHub export requires ConsumersPaused and four non-atomic secret writes.
 #>
-[CmdletBinding(SupportsShouldProcess, ConfirmImpact='High')]
-param(
-    [Parameter(Mandatory)][securestring]$TAP,
-    [Parameter(Mandatory)][ValidatePattern('^[^\s@]+@[^\s@]+$')][string]$UserPrincipalName,
-    [Parameter(Mandatory)][guid]$TenantId,
-    [Parameter(Mandatory)][string]$Repository,
-    [ValidateLength(1,100)][string]$DisplayName = 'Software Passkey',
-    [switch]$ConsumersPaused,
-    [switch]$AllowLegacySoftwareAttestation
-)
-$ErrorActionPreference = 'Stop'
-$VerbosePreference = 'SilentlyContinue'
-$DebugPreference = 'SilentlyContinue'
-$ProgressPreference = 'SilentlyContinue'
-. (Join-Path $PSScriptRoot 'Export-PasskeyToGitHubSecret.ps1')
-Assert-GitHubPasskeyRepository $Repository
-if ($TenantId -eq [guid]::Empty) { throw 'TenantId cannot be empty.' }
-if ($TAP.Length -eq 0) { throw 'TAP cannot be empty.' }
-if (-not $ConsumersPaused) { throw 'Pause consumers and supply -ConsumersPaused before enrollment.' }
-if (-not $AllowLegacySoftwareAttestation) { throw 'This experimental flow requires -AllowLegacySoftwareAttestation acknowledgement.' }
-if (-not $PSCmdlet.ShouldProcess("Entra tenant $TenantId and github.com/$Repository", 'Enroll persistent legacy software passkey and replace four repository secrets')) { return }
-# Check destination before enrolling a credential. This cannot prove upload will succeed.
-Test-GitHubPasskeyDestination $Repository
+[CmdletBinding(SupportsShouldProcess, ConfirmImpact = 'High')]
+param([Parameter(Mandatory)][securestring]$TAP,
+        [Parameter(Mandatory)][ValidatePattern('^[^\s@]+@[^\s@]+$')][string]$UserPrincipalName,
+        [Parameter(Mandatory)][guid]$TenantId, [Parameter(Mandatory)][string]$Repository,
+        [ValidateLength(1,100)][string]$DisplayName = 'Software Passkey',
+        [switch]$ConsumersPaused, [switch]$AllowLegacySoftwareAttestation)
 
-function Assert-RegistrationUri {
-    param([Parameter(Mandatory)][string]$Uri)
-    $parsed = $null
-    if (-not [uri]::TryCreate($Uri, [UriKind]::Absolute, [ref]$parsed) -or
-        $parsed.Scheme -ne 'https' -or $parsed.Port -ne 443 -or $parsed.UserInfo -or
-        $parsed.Host -notin @('login.microsoftonline.com','login.microsoft.com','mysignins.microsoft.com')) {
-        throw 'Registration endpoint is outside the allowed HTTPS origins.'
-    }
-}
-function Invoke-TrustedRegistrationWebRequest {
-    [CmdletBinding()]
-    param($Uri, $Method = 'GET', $Body, $ContentType, $Headers, $WebSession,
-          [int]$MaximumRedirection = 0, [switch]$UseBasicParsing)
-    Assert-RegistrationUri $Uri
-    $argsForRequest = @{} + $PSBoundParameters
-    $argsForRequest.MaximumRedirection = 0 # Never forward bearer data through automatic redirects.
-    $argsForRequest.Verbose = $false
-    $argsForRequest.Debug = $false
-    Microsoft.PowerShell.Utility\Invoke-WebRequest @argsForRequest
-}
-function Invoke-TrustedRegistrationRestMethod {
-    [CmdletBinding()]
-    param($Uri, $Method = 'GET', $Body, $ContentType, $Headers, $WebSession,
-          [int]$MaximumRedirection = 0, [switch]$UseBasicParsing)
-    Assert-RegistrationUri $Uri
-    $argsForRequest = @{} + $PSBoundParameters
-    $argsForRequest.MaximumRedirection = 0
-    $argsForRequest.Verbose = $false
-    $argsForRequest.Debug = $false
-    Microsoft.PowerShell.Utility\Invoke-RestMethod @argsForRequest
-}
-function Get-RegistrationAuthorizationCode {
-    param([string]$Callback, [string]$ExpectedState)
-    Assert-RegistrationUri $Callback
-    $uri = [uri]$Callback
-    if ($uri.Host -ne 'mysignins.microsoft.com' -or $uri.AbsolutePath -ne '/') { throw 'Unexpected callback.' }
-    $fields = [Web.HttpUtility]::ParseQueryString(($uri.Query.TrimStart('?') + '&' + $uri.Fragment.TrimStart('#')))
-    $states = @($fields.GetValues('state'))
-    $codes = @($fields.GetValues('code'))
-    if (-not $ExpectedState -or $states.Count -ne 1 -or $states[0] -cne $ExpectedState -or
-        $codes.Count -ne 1 -or [string]::IsNullOrWhiteSpace($codes[0]) -or $fields['error']) {
-        throw 'Missing, ambiguous or mismatched authorization response.'
-    }
-    return $codes[0]
-}
-function Assert-RegistrationVerified {
-    param([int]$StatusCode, [object]$Response, [string]$ExpectedCredentialId)
-    if ($StatusCode -lt 200 -or $StatusCode -ge 300 -or
-        $null -eq $Response -or $Response.VerificationState -ne 2 -or
-        ($null -ne $Response.ErrorCode -and $Response.ErrorCode -ne 0)) {
-        throw 'Registration verification was not successful.'
-    }
-    $ids = @($Response.DataUpdates.FidoDevices.CredentialId)
-    if (-not $ExpectedCredentialId -or $ids.Count -ne 1 -or $ids[0] -cne $ExpectedCredentialId) {
-        throw 'Registration verification did not bind the expected credential.'
-    }
-}
-$phase = 'registration'
-$exportStarted = $false
-try {
-$tapText = [Net.NetworkCredential]::new('', $TAP).Password
-$ClientId = "19db86c3-b2b9-44cc-b339-36da233a3be2"  # My Signins SPA
-$RedirectUri = "https://mysignins.microsoft.com"
+# Generated by build/build.ps1. DO NOT EDIT.
+# Passkey source version: 0.1.0
+# Edit the following source files, then run build/build.ps1:
+#   powershell/entrypoints/Register-GitHubPasskeyViaTAP.ps1
+#   powershell/src/Common/Encoding.ps1
+#   powershell/src/Common/Values.ps1
+#   powershell/src/Common/Cbor.ps1
+#   powershell/src/Entra/SoftwareBrowserHeaders.ps1
+#   powershell/src/Entra/SoftwareSession.ps1
+#   powershell/src/Entra/SoftwareAuthorization.ps1
+#   powershell/src/Entra/SoftwareAuthentication.ps1
+#   powershell/src/Entra/KeyVaultRegistrationState.ps1
+#   powershell/src/Entra/KeyVaultRegistrationRequests.ps1
+#   powershell/src/Entra/KeyVaultRegistrationVerification.ps1
+#   powershell/src/Local/RegistrationKey.ps1
+#   powershell/src/Entra/SoftwareAttestation.ps1
+#   powershell/src/Entra/SoftwareCredential.ps1
+#   powershell/src/Entra/SoftwareNativeRegistration.ps1
+#   powershell/src/GitHub/SecretValues.ps1
+#   powershell/src/GitHub/Transport.ps1
+#   powershell/src/Public/ExportGitHubSecret.ps1
+#   powershell/src/Public/RegisterGitHubPasskey.ps1
 
-
-#region Helper Functions
-
+# Source: powershell/src/Common/Encoding.ps1
 function ConvertTo-Base64Url {
     param([byte[]]$Bytes)
-    return [Convert]::ToBase64String($Bytes).TrimEnd('=').Replace('+', '-').Replace('/', '_')
+    return [Convert]::ToBase64String($Bytes).Replace('+', '-').Replace('/', '_').TrimEnd('=')
 }
 
+function ConvertFrom-Base64Url {
+    param([string]$Base64Url)
+    $base64 = $Base64Url.Replace('-', '+').Replace('_', '/')
+    # Add padding
+    $padding = (4 - ($base64.Length % 4)) % 4
+    $base64 += '=' * $padding
+    return [Convert]::FromBase64String($base64)
+}
+
+function Confirm-Base64Url {
+    param([string]$Value)
+    if ([string]::IsNullOrWhiteSpace($Value) -or $Value -cnotmatch '^[A-Za-z0-9+/_-]+={0,2}$') {
+        throw 'Credential identifier or user handle must be base64url/base64 text.'
+    }
+    $normalized = $Value.TrimEnd('=') -replace '\+','-' -replace '/','_'
+    if ($normalized.Length % 4 -eq 1) { throw 'Invalid base64url length.' }
+    return $normalized
+}
+
+function ConvertFrom-UuidToBase64Url {
+    param([string]$Uuid)
+
+    if ($Uuid -notmatch '^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$') {
+        return $Uuid  # Not a UUID, return as-is
+    }
+
+    Write-Verbose "Converting UUID format credential ID to base64url"
+    $hexString = $Uuid.Replace('-', '')
+    $rawBytes = [byte[]]::new($hexString.Length / 2)
+    for ($i = 0; $i -lt $hexString.Length; $i += 2) {
+        $rawBytes[$i / 2] = [Convert]::ToByte($hexString.Substring($i, 2), 16)
+    }
+    $base64 = [Convert]::ToBase64String($rawBytes)
+    return $base64.Replace('+', '-').Replace('/', '_').TrimEnd('=')
+}
+
+function ConvertFrom-IeeeToDer {
+    param([byte[]]$IeeeSignature)
+
+    # IEEE P1363 format for ES256 is r || s (32 + 32 bytes)
+    # DER format is: 0x30 <length> 0x02 <r-length> <r> 0x02 <s-length> <s>
+
+    if ($IeeeSignature.Length -ne 64) {
+        throw "Invalid IEEE P1363 signature length: $($IeeeSignature.Length). Expected 64 bytes for ES256."
+    }
+
+    $r = $IeeeSignature[0..31]
+    $s = $IeeeSignature[32..63]
+
+    # Remove leading zero bytes but keep at least one byte
+    while ($r.Length -gt 1 -and $r[0] -eq 0) { $r = $r[1..($r.Length-1)] }
+    while ($s.Length -gt 1 -and $s[0] -eq 0) { $s = $s[1..($s.Length-1)] }
+
+    # Add leading zero if high bit is set (to keep it positive)
+    if ($r[0] -ge 0x80) { $r = @(0) + $r }
+    if ($s[0] -ge 0x80) { $s = @(0) + $s }
+
+    # Build DER sequence
+    $der = @(
+        0x30,  # SEQUENCE tag
+        ($r.Length + $s.Length + 4),  # Total length
+        0x02,  # INTEGER tag for r
+        $r.Length
+    ) + $r + @(
+        0x02,  # INTEGER tag for s
+        $s.Length
+    ) + $s
+
+    return [byte[]]$der
+}
+# End source: powershell/src/Common/Encoding.ps1
+
+# Source: powershell/src/Common/Values.ps1
+function ConvertTo-PlainTextValue {
+    param(
+        [Parameter(Mandatory = $false)]
+        $Value
+    )
+
+    if ($null -eq $Value) {
+        return $null
+    }
+
+    if ($Value -is [string]) {
+        return $Value
+    }
+
+    if ($Value -is [System.Security.SecureString]) {
+        $bstr = [System.Runtime.InteropServices.Marshal]::SecureStringToBSTR($Value)
+        try {
+            return [System.Runtime.InteropServices.Marshal]::PtrToStringBSTR($bstr)
+        } finally {
+            if ($bstr -ne [IntPtr]::Zero) {
+                [System.Runtime.InteropServices.Marshal]::ZeroFreeBSTR($bstr)
+            }
+        }
+    }
+
+    throw "PrivateKey must be either a string or SecureString. Received: $($Value.GetType().FullName)"
+}
+
+function Normalize-OptionalString {
+    param(
+        [AllowNull()]
+        [string]$Value
+    )
+
+    if ($null -eq $Value) {
+        return $null
+    }
+
+    $trimmedValue = $Value.Trim()
+    if ($trimmedValue.Length -eq 0) {
+        return $null
+    }
+
+    return $trimmedValue
+}
+
+function Get-HttpErrorMessage {
+    param(
+        [Parameter(Mandatory)]
+        $ErrorRecord
+    )
+
+    # Exceptions and server bodies may echo bearer material. Never forward them to logs.
+    return 'Request failed; server details suppressed.'
+}
+# End source: powershell/src/Common/Values.ps1
+
+# Source: powershell/src/Common/Cbor.ps1
 function New-CBOREncoded {
-    param($Value)
+    [CmdletBinding()]
+    param(
+        [Parameter(Mandatory)]
+        $Value
+    )
+
     $bytes = [System.Collections.Generic.List[byte]]::new()
 
-    if ($Value -is [int]) {
+    if ($Value -is [int] -or $Value -is [long]) {
         if ($Value -ge 0) {
-            # Major type 0: unsigned integer
             if ($Value -le 23) { $bytes.Add([byte]$Value) }
             elseif ($Value -le 255) { $bytes.Add(0x18); $bytes.Add([byte]$Value) }
             elseif ($Value -le 65535) {
                 $bytes.Add(0x19)
-                $lenBytes = [BitConverter]::GetBytes([uint16]$Value); [Array]::Reverse($lenBytes)
+                $lenBytes = [BitConverter]::GetBytes([uint16]$Value)
+                [Array]::Reverse($lenBytes)
                 $bytes.AddRange([byte[]]$lenBytes)
             } else {
                 $bytes.Add(0x1A)
-                $lenBytes = [BitConverter]::GetBytes([uint32]$Value); [Array]::Reverse($lenBytes)
+                $lenBytes = [BitConverter]::GetBytes([uint32]$Value)
+                [Array]::Reverse($lenBytes)
                 $bytes.AddRange([byte[]]$lenBytes)
             }
         } else {
-            # Major type 1: negative integer (CBOR encodes as -1 - n)
             $n = -1 - $Value
             if ($n -le 23) { $bytes.Add([byte](0x20 + $n)) }
             elseif ($n -le 255) { $bytes.Add(0x38); $bytes.Add([byte]$n) }
             elseif ($n -le 65535) {
                 $bytes.Add(0x39)
-                $lenBytes = [BitConverter]::GetBytes([uint16]$n); [Array]::Reverse($lenBytes)
+                $lenBytes = [BitConverter]::GetBytes([uint16]$n)
+                [Array]::Reverse($lenBytes)
                 $bytes.AddRange([byte[]]$lenBytes)
             } else {
                 $bytes.Add(0x3A)
-                $lenBytes = [BitConverter]::GetBytes([uint32]$n); [Array]::Reverse($lenBytes)
+                $lenBytes = [BitConverter]::GetBytes([uint32]$n)
+                [Array]::Reverse($lenBytes)
                 $bytes.AddRange([byte[]]$lenBytes)
             }
         }
     } elseif ($Value -is [string]) {
-        # Major type 3: text string
         $textBytes = [System.Text.Encoding]::UTF8.GetBytes($Value)
         if ($textBytes.Length -le 23) { $bytes.Add([byte](0x60 + $textBytes.Length)) }
         elseif ($textBytes.Length -le 255) { $bytes.Add(0x78); $bytes.Add([byte]$textBytes.Length) }
         elseif ($textBytes.Length -le 65535) {
             $bytes.Add(0x79)
-            $lenBytes = [BitConverter]::GetBytes([uint16]$textBytes.Length); [Array]::Reverse($lenBytes)
+            $lenBytes = [BitConverter]::GetBytes([uint16]$textBytes.Length)
+            [Array]::Reverse($lenBytes)
             $bytes.AddRange([byte[]]$lenBytes)
         } else {
             $bytes.Add(0x7A)
-            $lenBytes = [BitConverter]::GetBytes([uint32]$textBytes.Length); [Array]::Reverse($lenBytes)
+            $lenBytes = [BitConverter]::GetBytes([uint32]$textBytes.Length)
+            [Array]::Reverse($lenBytes)
             $bytes.AddRange([byte[]]$lenBytes)
         }
+
         $bytes.AddRange([byte[]]$textBytes)
     } elseif ($Value -is [byte[]]) {
-        # Major type 2: byte string
         if ($Value.Length -le 23) { $bytes.Add([byte](0x40 + $Value.Length)) }
         elseif ($Value.Length -le 255) { $bytes.Add(0x58); $bytes.Add([byte]$Value.Length) }
         elseif ($Value.Length -le 65535) {
             $bytes.Add(0x59)
-            $lenBytes = [BitConverter]::GetBytes([uint16]$Value.Length); [Array]::Reverse($lenBytes)
+            $lenBytes = [BitConverter]::GetBytes([uint16]$Value.Length)
+            [Array]::Reverse($lenBytes)
             $bytes.AddRange([byte[]]$lenBytes)
         } else {
             $bytes.Add(0x5A)
-            $lenBytes = [BitConverter]::GetBytes([uint32]$Value.Length); [Array]::Reverse($lenBytes)
+            $lenBytes = [BitConverter]::GetBytes([uint32]$Value.Length)
+            [Array]::Reverse($lenBytes)
             $bytes.AddRange([byte[]]$lenBytes)
         }
+
         $bytes.AddRange([byte[]]$Value)
     } elseif ($Value -is [System.Array]) {
-        # Major type 4: array
         $count = $Value.Length
         if ($count -le 23) { $bytes.Add([byte](0x80 + $count)) }
         elseif ($count -le 255) { $bytes.Add(0x98); $bytes.Add([byte]$count) }
         else {
             $bytes.Add(0x99)
-            $lenBytes = [BitConverter]::GetBytes([uint16]$count); [Array]::Reverse($lenBytes)
+            $lenBytes = [BitConverter]::GetBytes([uint16]$count)
+            [Array]::Reverse($lenBytes)
             $bytes.AddRange([byte[]]$lenBytes)
         }
+
         foreach ($item in $Value) {
             $itemBytes = New-CBOREncoded -Value $item
             if ($itemBytes -is [byte]) { $bytes.Add($itemBytes) } else { $bytes.AddRange([byte[]]$itemBytes) }
         }
     } elseif ($Value -is [System.Collections.IDictionary]) {
-        # Major type 5: map
         $count = $Value.Count
         if ($count -le 23) { $bytes.Add([byte](0xA0 + $count)) }
         elseif ($count -le 255) { $bytes.Add(0xB8); $bytes.Add([byte]$count) }
         else {
             $bytes.Add(0xB9)
-            $lenBytes = [BitConverter]::GetBytes([uint16]$count); [Array]::Reverse($lenBytes)
+            $lenBytes = [BitConverter]::GetBytes([uint16]$count)
+            [Array]::Reverse($lenBytes)
             $bytes.AddRange([byte[]]$lenBytes)
         }
+
         foreach ($entry in $Value.GetEnumerator()) {
             $keyBytes = New-CBOREncoded -Value $entry.Key
-            $valBytes = New-CBOREncoded -Value $entry.Value
+            $valueBytes = New-CBOREncoded -Value $entry.Value
             if ($keyBytes -is [byte]) { $bytes.Add($keyBytes) } else { $bytes.AddRange([byte[]]$keyBytes) }
-            if ($valBytes -is [byte]) { $bytes.Add($valBytes) } else { $bytes.AddRange([byte[]]$valBytes) }
+            if ($valueBytes -is [byte]) { $bytes.Add($valueBytes) } else { $bytes.AddRange([byte[]]$valueBytes) }
         }
+    } else {
+        throw "Unsupported CBOR value type: $($Value.GetType().FullName)"
     }
+
     return ,[byte[]]$bytes.ToArray()
 }
+# End source: powershell/src/Common/Cbor.ps1
 
-#endregion
+# Source: powershell/src/Entra/SoftwareBrowserHeaders.ps1
+function Add-PasskeyBrowserHeaders {
+    [CmdletBinding()]
+    param(
+        [Parameter(Mandatory)]
+        [hashtable]$Headers
+    )
 
-$spaHeaders = @{
-    'Origin'         = $RedirectUri
-    'Referer'        = "$RedirectUri/"
-    'Sec-Fetch-Mode' = 'cors'
-    'Sec-Fetch-Site' = 'cross-site'
-    'Sec-Fetch-Dest' = 'empty'
-}
-
-# Shared WebSession for cookie handling across all stages
-$webSession = [Microsoft.PowerShell.Commands.WebRequestSession]::new()
-
-# Scope used throughout — $ClientId/.default gives the correct audience/permissions
-$tokenScope = "$ClientId/.default openid profile offline_access"
-
-# Generate PKCE
-$verifierBytes = [byte[]]::new(32)
-[System.Security.Cryptography.RandomNumberGenerator]::Fill($verifierBytes)
-$codeVerifier = [Convert]::ToBase64String($verifierBytes) -replace '\+','-' -replace '/','_' -replace '=',''
-$challengeBytes = [System.Security.Cryptography.SHA256]::HashData([System.Text.Encoding]::ASCII.GetBytes($codeVerifier))
-$codeChallenge = [Convert]::ToBase64String($challengeBytes) -replace '\+','-' -replace '/','_' -replace '=',''
-
-# ══════════════════════════════════════════════════════════════════════
-# STAGE 1: TAP Login
-# ══════════════════════════════════════════════════════════════════════
-
-
-# Step 1a: Load the login page
-$state = [guid]::NewGuid().ToString()
-$authUrl = "https://login.microsoftonline.com/$TenantId/oauth2/v2.0/authorize?" + `
-    "client_id=$ClientId" + `
-    "&redirect_uri=$([System.Web.HttpUtility]::UrlEncode($RedirectUri))" + `
-    "&scope=$([System.Web.HttpUtility]::UrlEncode($tokenScope))" + `
-    "&response_type=code" + `
-    "&response_mode=fragment" + `
-    "&prompt=login" + `
-    "&login_hint=$([System.Web.HttpUtility]::UrlEncode($UserPrincipalName))" + `
-    "&code_challenge=$codeChallenge" + `
-    "&code_challenge_method=S256" + `
-    "&state=$state"
-
-$loginPage = Invoke-TrustedRegistrationWebRequest -Uri $authUrl -UseBasicParsing -MaximumRedirection 10 -WebSession $webSession
-
-if ($loginPage.StatusCode -ne 200) {
-    throw "Registration protocol step failed."
-}
-
-# Parse $Config from HTML
-if ($loginPage.Content -notmatch '\$Config=(\{.+\});') {
-    throw "Registration protocol step failed."
-}
-$config = $matches[1] | ConvertFrom-Json
-
-if ($config.pgid -ne 'ConvergedSignIn') {
-    throw "Registration protocol step failed."
-}
-
-$flowToken = $config.sFT
-$sCtx = $config.sCtx
-$canary = $config.canary
-$apiCanary = $config.apiCanary
-$sessionId = $config.sessionId
-$urlPost = $config.urlPost
-
-
-# Step 1b: GetCredentialType (tells server we're using TAP)
-$gctBody = @{
-    username                = $UserPrincipalName
-    isOtherIdpSupported     = $false
-    checkPhones             = $false
-    isRemoteNGCSupported    = $true
-    isCookieBannerShown     = $false
-    isFidoSupported         = $true
-    originalRequest         = $sCtx
-    flowToken               = $flowToken
-} | ConvertTo-Json -Compress
-
-$gctHeaders = @{
-    'canary'       = $apiCanary
-    'hpgrequestid' = $sessionId
-    'hpgact'       = '1800'
-    'hpgid'        = '1104'
-}
-
-try {
-    $gctResp = Invoke-TrustedRegistrationRestMethod -Uri "https://login.microsoftonline.com/common/GetCredentialType?mkt=en-US" `
-        -Method POST -Body $gctBody -ContentType "application/json" -Headers $gctHeaders
-    
-    # Update flowToken if returned
-    if ($gctResp.FlowToken) {
-        $flowToken = $gctResp.FlowToken
-    } else {
+    if (-not $Headers.ContainsKey('User-Agent')) {
+        $Headers['User-Agent'] = 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/149.0.0.0 Safari/537.36 Edg/149.0.0.0'
     }
-    
-    # Check credential type
-    if ($gctResp.Credentials) {
-        $credTypes = ($gctResp.Credentials.PrefCredential, $gctResp.Credentials.HasPassword) -join ', '
+
+    if (-not $Headers.ContainsKey('Accept')) {
+        $Headers['Accept'] = '*/*'
     }
-} catch {
+
+    if (-not $Headers.ContainsKey('Accept-Language')) {
+        $Headers['Accept-Language'] = 'en-US'
+    }
+
+    if (-not $Headers.ContainsKey('sec-ch-ua')) {
+        $Headers['sec-ch-ua'] = '"Chromium";v="149", "Microsoft Edge";v="149", "Not_A Brand";v="99"'
+    }
+
+    if (-not $Headers.ContainsKey('sec-ch-ua-mobile')) {
+        $Headers['sec-ch-ua-mobile'] = '?0'
+    }
+
+    if (-not $Headers.ContainsKey('sec-ch-ua-platform')) {
+        $Headers['sec-ch-ua-platform'] = '"Windows"'
+    }
+
+    if (-not $Headers.ContainsKey('Sec-Fetch-Dest')) {
+        $Headers['Sec-Fetch-Dest'] = 'empty'
+    }
+
+    if (-not $Headers.ContainsKey('Sec-Fetch-Mode')) {
+        $Headers['Sec-Fetch-Mode'] = 'cors'
+    }
+
+    if (-not $Headers.ContainsKey('Sec-Fetch-Site')) {
+        $Headers['Sec-Fetch-Site'] = 'same-origin'
+    }
+}
+# End source: powershell/src/Entra/SoftwareBrowserHeaders.ps1
+
+# Source: powershell/src/Entra/SoftwareSession.ps1
+# Shared My Sign-ins registration transport and request state. Loading this file has no side effects.
+function Assert-EntraRegistrationUri {
+    param([Parameter(Mandatory)][string]$Uri)
+    $parsed = $null
+    if (-not [uri]::TryCreate($Uri, [UriKind]::Absolute, [ref]$parsed) -or
+        $parsed.Scheme -ne 'https' -or $parsed.Port -ne 443 -or $parsed.UserInfo -or
+        $parsed.Host -notin @('login.microsoftonline.com', 'login.microsoft.com', 'mysignins.microsoft.com')) {
+        throw 'Registration endpoint is outside the allowed HTTPS origins.'
+    }
+    return $parsed
 }
 
-# Step 1c: POST login with TAP
-
-$loginBody = @{
-    login              = $UserPrincipalName
-    loginfmt           = $UserPrincipalName
-    accesspass         = $tapText
-    ps                 = '56'
-    psRNGCDefaultType  = '1'
-    psRNGCEntropy      = ''
-    psRNGCSLK          = $flowToken
-    canary             = $canary
-    ctx                = $sCtx
-    hpgrequestid       = $sessionId
-    flowToken          = $flowToken
-    PPSX               = ''
-    NewUser            = '1'
-    FoundMSAs          = ''
-    fspost             = '0'
-    i21                = '0'
-    CookieDisclosure   = '0'
-    IsFidoSupported    = '1'
-    isSignupPost       = '0'
-    DfpArtifact        = ''
-    i19                = '10000'
+function Invoke-EntraRegistrationWebRequest {
+    [CmdletBinding()]
+    param([Parameter(Mandatory)][string]$Uri, [string]$Method = 'GET', $Body,
+        [string]$ContentType, [hashtable]$Headers, $WebSession)
+    $null = Assert-EntraRegistrationUri $Uri
+    $request = @{} + $PSBoundParameters
+    $request.Headers = if ($null -ne $Headers) { @{} + $Headers } else { @{} }
+    if ($null -ne $WebSession -and $WebSession.UserAgent) { $request.Headers['User-Agent'] = $WebSession.UserAgent }
+    Add-PasskeyBrowserHeaders -Headers $request.Headers
+    $request.MaximumRedirection = 0
+    $request.SkipHttpErrorCheck = $true
+    $request.ConnectionTimeoutSeconds = 60
+    $request.OperationTimeoutSeconds = 60
+    $request.Verbose = $false
+    $request.Debug = $false
+    # No automatic redirects: authentication data must stay on the checked origin.
+    Microsoft.PowerShell.Utility\Invoke-WebRequest @request
 }
 
-$formBody = ($loginBody.GetEnumerator() | ForEach-Object { "$([System.Web.HttpUtility]::UrlEncode($_.Key))=$([System.Web.HttpUtility]::UrlEncode($_.Value))" }) -join '&'
-
-$loginUrl = "https://login.microsoftonline.com$urlPost"
-if ([string]::IsNullOrEmpty($urlPost)) {
-    $loginUrl = "https://login.microsoftonline.com/common/login"
+function Invoke-EntraRegistrationRestMethod {
+    [CmdletBinding()]
+    param([Parameter(Mandatory)][string]$Uri, [string]$Method = 'GET', $Body,
+        [string]$ContentType, [hashtable]$Headers, $WebSession)
+    $response = Invoke-EntraRegistrationWebRequest @PSBoundParameters
+    if ([int]$response.StatusCode -lt 200 -or [int]$response.StatusCode -ge 300) {
+        throw 'Registration request was not successful; response details suppressed.'
+    }
+    try { return ($response.Content | ConvertFrom-Json -ErrorAction Stop) }
+    catch { throw 'Registration endpoint returned an invalid JSON response.' }
 }
 
-# Follow redirect chain manually until we find the auth code
-$authCode = $null
-$currentUrl = $loginUrl
-$currentMethod = 'POST'
-$currentBody = $formBody
-$currentContentType = "application/x-www-form-urlencoded"
-$maxRedirects = 15
+function ConvertTo-EntraRegistrationForm {
+    param([Parameter(Mandatory)][System.Collections.IDictionary]$Fields)
+    return (($Fields.GetEnumerator() | ForEach-Object {
+        [Web.HttpUtility]::UrlEncode([string]$_.Key) + '=' + [Web.HttpUtility]::UrlEncode([string]$_.Value)
+    }) -join '&')
+}
 
-for ($redirectCount = 0; $redirectCount -lt $maxRedirects; $redirectCount++) {
-    try {
-        $reqParams = @{
-            Uri                = $currentUrl
-            Method             = $currentMethod
-            WebSession         = $webSession
-            MaximumRedirection = 0
-            UseBasicParsing    = $true
+function Get-EntraRegistrationPageConfig {
+    param([Parameter(Mandatory)][string]$Content)
+    if ($Content -notmatch '(?s)\$Config\s*=\s*(\{.*?\});') { throw 'Registration page configuration is missing.' }
+    try { return ($matches[1] | ConvertFrom-Json -ErrorAction Stop) }
+    catch { throw 'Registration page configuration is invalid.' }
+}
+
+function Get-EntraRegistrationAuthorizationCode {
+    param([Parameter(Mandatory)][string]$Callback, [Parameter(Mandatory)][string]$ExpectedState)
+    $uri = Assert-EntraRegistrationUri $Callback
+    if ($uri.Host -ne 'mysignins.microsoft.com' -or $uri.AbsolutePath -ne '/') { throw 'Unexpected authorization callback.' }
+    $fields = [Web.HttpUtility]::ParseQueryString(($uri.Query.TrimStart('?') + '&' + $uri.Fragment.TrimStart('#')))
+    $states = @($fields.GetValues('state')); $codes = @($fields.GetValues('code'))
+    if ($states.Count -ne 1 -or $states[0] -cne $ExpectedState -or $codes.Count -ne 1 -or
+        [string]::IsNullOrWhiteSpace($codes[0]) -or $fields['error']) {
+        throw 'Missing, ambiguous or mismatched authorization response.'
+    }
+    return $codes[0]
+}
+
+function New-EntraRegistrationContext {
+    param([string]$RedirectUri = 'https://mysignins.microsoft.com', [string]$UserAgent)
+    if ($RedirectUri.TrimEnd('/') -cne 'https://mysignins.microsoft.com') { throw 'Registration RedirectUri must be https://mysignins.microsoft.com.' }
+    $session = [Microsoft.PowerShell.Commands.WebRequestSession]::new()
+    if ($UserAgent) { $session.UserAgent = $UserAgent }
+    $random = [byte[]]::new(32)
+    [Security.Cryptography.RandomNumberGenerator]::Fill($random)
+    $verifier = ConvertTo-Base64Url $random
+    [pscustomobject]@{
+        ClientId = '19db86c3-b2b9-44cc-b339-36da233a3be2'
+        RedirectUri = $RedirectUri.TrimEnd('/')
+        State = [guid]::NewGuid().ToString()
+        CodeVerifier = $verifier
+        CodeChallenge = ConvertTo-Base64Url ([Security.Cryptography.SHA256]::HashData([Text.Encoding]::ASCII.GetBytes($verifier)))
+        WebSession = $session
+        ClientSessionId = [guid]::NewGuid().ToString()
+        TenantId = $null; UserPrincipalName = $null; Token = $null; RefreshToken = $null; SessionCtxV2 = $null
+    }
+}
+
+function Get-EntraRegistrationHeaders {
+    param([Parameter(Mandatory)]$Context, [switch]$IncludeToken, [switch]$IncludeSession)
+    $headers = @{
+        Origin = $Context.RedirectUri; Referer = "$($Context.RedirectUri)/security-info"
+        AjaxRequest = 'true'; 'x-ms-mysignins-region' = 'westus2'
+        'x-ms-client-session-id' = $Context.ClientSessionId
+    }
+    if ($IncludeToken) { $headers.Authorization = "Bearer $($Context.Token)" }
+    if ($IncludeSession) { $headers.SessionCtxV2 = $Context.SessionCtxV2 }
+    if ($Context.WebSession -and $Context.WebSession.UserAgent) { $headers['User-Agent'] = $Context.WebSession.UserAgent }
+    Add-PasskeyBrowserHeaders -Headers $headers
+    return $headers
+}
+
+function Initialize-EntraRegistrationSession {
+    param([Parameter(Mandatory)]$Context)
+    $headers = Get-EntraRegistrationHeaders -Context $Context -IncludeToken
+    $response = Invoke-EntraRegistrationRestMethod -Uri "$($Context.RedirectUri)/api/session/authorize" `
+        -Method POST -Headers $headers -ContentType 'application/json' -Body '{}' -WebSession $Context.WebSession
+    if ($response.isAuthorized -ne $true -or [string]::IsNullOrWhiteSpace($response.sessionCtxV2)) {
+        throw 'My Sign-ins registration session was not authorized.'
+    }
+    if ($response.requireNgcMfaForSecurityInfo) {
+        $claims = '{"id_token":{"amr":{"essential":true,"values":["ngcmfa"]}},"access_token":{"amr":{"essential":true,"values":["ngcmfa"]}}}'
+        $body = ConvertTo-EntraRegistrationForm @{
+            client_id = $Context.ClientId; scope = "$($Context.ClientId)/.default openid"
+            grant_type = 'refresh_token'; refresh_token = $Context.RefreshToken; claims = $claims
         }
-        if ($currentMethod -eq 'POST' -and $currentBody) {
-            $reqParams['Body'] = $currentBody
-            $reqParams['ContentType'] = $currentContentType
+        $tokens = Invoke-EntraRegistrationRestMethod -Uri "https://login.microsoftonline.com/$($Context.TenantId)/oauth2/v2.0/token" `
+            -Method POST -Body $body -ContentType 'application/x-www-form-urlencoded' -Headers @{ Origin = $Context.RedirectUri }
+        $null = Assert-EntraRegistrationTokenBinding -Token $tokens.access_token -ClientId $Context.ClientId `
+            -TenantId $Context.TenantId -UserPrincipalName $Context.UserPrincipalName
+        $Context.Token = $tokens.access_token
+        if ($tokens.refresh_token) { $Context.RefreshToken = $tokens.refresh_token }
+        $headers.Authorization = "Bearer $($Context.Token)"
+        $response = Invoke-EntraRegistrationRestMethod -Uri "$($Context.RedirectUri)/api/session/authorize" `
+            -Method POST -Headers $headers -ContentType 'application/json' -Body '{}' -WebSession $Context.WebSession
+        if ($response.isAuthorized -ne $true -or [string]::IsNullOrWhiteSpace($response.sessionCtxV2)) {
+            throw 'My Sign-ins MFA registration session was not authorized.'
         }
-        
-        $resp = Invoke-TrustedRegistrationWebRequest @reqParams -ErrorAction Stop
-        
-        # 200 response - might be KMSI page or login page with error
-        if ($resp.StatusCode -eq 200) {
-            # Only known KMSI continuation pages may submit forms. Never grant consent.
-            $pageConfig = $null
-            if ($resp.Content -match '\$Config=(\{.+\});') { $pageConfig = $matches[1] | ConvertFrom-Json }
-            if (-not $pageConfig -or $pageConfig.pgid -notin @('KmsiBroker','KmsiInterrupt')) {
-                throw 'Unrecognized login continuation or consent interrupt; manual review required.'
+    }
+    $Context.SessionCtxV2 = $response.sessionCtxV2
+    return $Context
+}
+# End source: powershell/src/Entra/SoftwareSession.ps1
+
+# Source: powershell/src/Entra/SoftwareAuthorization.ps1
+# Bounded OAuth continuation; only known KMSI pages are eligible for form submission.
+function Invoke-EntraRegistrationAuthorization {
+    param([Parameter(Mandatory)]$Context, [Parameter(Mandatory)][string]$Uri,
+        [string]$Method = 'GET', [AllowNull()][string]$Body)
+    $current = $Uri
+    for ($step = 0; $step -lt 15; $step++) {
+        $request = @{ Uri = $current; Method = $Method; WebSession = $Context.WebSession }
+        if ($Method -eq 'POST') { $request.Body = $Body; $request.ContentType = 'application/x-www-form-urlencoded' }
+        $response = Invoke-EntraRegistrationWebRequest @request
+        $status = [int]$response.StatusCode
+        if ($status -in @(301, 302, 303, 307, 308)) {
+            $locations = @($response.Headers.Location)
+            if ($locations.Count -ne 1 -or [string]::IsNullOrWhiteSpace($locations[0])) { throw 'Missing or ambiguous registration redirect.' }
+            $next = [uri]::new([uri]$current, [string]$locations[0]).AbsoluteUri
+            $nextUri = Assert-EntraRegistrationUri $next
+            $fields = [Web.HttpUtility]::ParseQueryString($nextUri.Query.TrimStart('?') + '&' + $nextUri.Fragment.TrimStart('#'))
+            if ($fields['code'] -or $fields['error']) {
+                return Get-EntraRegistrationAuthorizationCode -Callback $next -ExpectedState $Context.State
             }
-            if ($resp.Content -match 'action="([^"]+)"') {
-                $formAction = $matches[1]
-                # Extract hidden form fields
-                $hiddenFields = [regex]::Matches($resp.Content, '<input[^>]+name="([^"]+)"[^>]+value="([^"]*)"')
-                $formData = ($hiddenFields | ForEach-Object { 
-                    "$([System.Web.HttpUtility]::UrlEncode($_.Groups[1].Value))=$([System.Web.HttpUtility]::UrlEncode($_.Groups[2].Value))" 
-                }) -join '&'
-                
-                if ($formAction -and $formData) {
-                    # Resolve relative URL
-                    if ($formAction.StartsWith('/')) {
-                        $uri = [System.Uri]$currentUrl
-                        $formAction = "$($uri.Scheme)://$($uri.Host)$formAction"
-                    }
-                    $currentUrl = $formAction
-                    $currentMethod = 'POST'
-                    $currentBody = $formData
-                    $currentContentType = "application/x-www-form-urlencoded"
-                    continue
-                }
-            }
-            
-            # Check for $Config errors
-            if ($resp.Content -match '\$Config=(\{.+\});') {
-                $respConfig = $matches[1] | ConvertFrom-Json
-                if ($respConfig.strServiceExceptionMessage) {
-                    throw "Registration protocol step failed."
-                }
-                if ($respConfig.pgid -eq 'ConvergedSignIn') {
-                    throw "Registration protocol step failed."
-                }
-                if ($respConfig.pgid -eq 'KmsiBroker') {
-                    # KMSI pages have a standard auto-submit form — handled by the
-                    # generic form handler above. If we reach here, the form had
-                    # no extractable hidden inputs; throw to avoid an infinite loop.
-                    throw "Registration protocol step failed."
-                }
-            }
-            
-            # Didn't find a redirect mechanism - dump what we got
-            throw "Registration protocol step failed."
-        }
-    } catch [Microsoft.PowerShell.Commands.HttpResponseException] {
-        # Handle redirect status codes (301, 302, 307, 308)
-        $statusCode = [int]$_.Exception.Response.StatusCode
-        if ($statusCode -ge 300 -and $statusCode -lt 400) {
-            $location = $_.Exception.Response.Headers.Location.ToString()
-            
-            # Resolve relative redirect
-            if ($location.StartsWith('/')) {
-                $uri = [System.Uri]$currentUrl
-                $location = "$($uri.Scheme)://$($uri.Host)$location"
-            }
-            
-            # Check for auth code in fragment (#code=...) or query (?code=...)
-            Assert-RegistrationUri $location
-            if ($location -match '[#?&]code=([^&#]+)') {
-                $callback = [uri]$location
-                if ($callback.Host -ne 'mysignins.microsoft.com' -or $callback.AbsolutePath -ne '/') { throw 'Unexpected authorization callback.' }
-                $authCode = Get-RegistrationAuthorizationCode -Callback $location -ExpectedState $state
-                
-                # Capture cookies from this response
-                try {
-                    foreach ($header in $_.Exception.Response.Headers.GetValues('Set-Cookie')) {
-                        if ($header -match '(ESTSAUTH[^=]*)=([^;]+)') {
-                            $webSession.Cookies.Add([System.Net.Cookie]::new($matches[1], $matches[2], "/", ".login.microsoftonline.com"))
-                        }
-                    }
-                } catch {}
-                break
-            }
-            
-            # Check for error
-            if ($location -match 'error=([^&#]+)') {
-                $errorCode = [System.Web.HttpUtility]::UrlDecode($matches[1])
-                $errorDesc = ""
-                if ($location -match 'error_description=([^&#]+)') {
-                    $errorDesc = [System.Web.HttpUtility]::UrlDecode($matches[1])
-                }
-                throw "Registration protocol step failed."
-            }
-            
-            # Capture cookies from redirects
-            try {
-                foreach ($header in $_.Exception.Response.Headers.GetValues('Set-Cookie')) {
-                    if ($header -match '(ESTSAUTH[^=]*)=([^;]+)') {
-                        $webSession.Cookies.Add([System.Net.Cookie]::new($matches[1], $matches[2], "/", ".login.microsoftonline.com"))
-                    }
-                }
-            } catch {}
-            
-            $currentUrl = $location
-            $currentMethod = 'GET'
-            $currentBody = $null
+            # Do not forward a TAP/form through 307/308 or to another origin.
+            if ($status -in @(307, 308) -and $Method -eq 'POST') {
+                if ($nextUri.Host -ne ([uri]$current).Host) { throw 'Cross-origin registration form redirect refused.' }
+            } else { $Method = 'GET'; $Body = $null }
+            $current = $next
             continue
         }
-        throw
+        if ($status -ne 200) { throw 'Registration authorization was not successful.' }
+        $config = Get-EntraRegistrationPageConfig -Content $response.Content
+        if ($config.pgid -notin @('KmsiBroker', 'KmsiInterrupt') -or $config.strServiceExceptionMessage) {
+            throw 'Unrecognized login continuation or consent interrupt; manual review required.'
+        }
+        $actions = [regex]::Matches($response.Content, '(?is)<form\b[^>]*\baction="([^"]+)"')
+        if ($actions.Count -ne 1) { throw 'Registration continuation form is missing or ambiguous.' }
+        $nextUri = Assert-EntraRegistrationUri ([uri]::new([uri]$current, [Web.HttpUtility]::HtmlDecode($actions[0].Groups[1].Value)).AbsoluteUri)
+        if ($nextUri.Host -ne 'login.microsoftonline.com') { throw 'Unexpected registration continuation destination.' }
+        $fields = [ordered]@{}
+        foreach ($input in [regex]::Matches($response.Content, '(?is)<input\b[^>]*>')) {
+            $tag = $input.Value
+            if ($tag -notmatch '\btype="hidden"' -or $tag -notmatch '\bname="([^"]+)"') { continue }
+            $name = [Web.HttpUtility]::HtmlDecode($matches[1])
+            if ($tag -notmatch '\bvalue="([^"]*)"') { throw 'Registration continuation field has no value.' }
+            if ($fields.Contains($name)) { throw 'Duplicate registration continuation field.' }
+            $fields[$name] = [Web.HttpUtility]::HtmlDecode($matches[1])
+        }
+        if (-not $fields.Count) { throw 'Registration continuation has no hidden fields.' }
+        $current = $nextUri.AbsoluteUri; $Method = 'POST'; $Body = ConvertTo-EntraRegistrationForm $fields
     }
+    throw 'Registration authorization exceeded the redirect limit.'
 }
 
-if (-not $authCode) {
-    throw "Registration protocol step failed."
-}
-
-
-# ══════════════════════════════════════════════════════════════════════
-# STAGE 2: Token Exchange (SPA + PKCE)
-# ══════════════════════════════════════════════════════════════════════
-
-# Exchange auth code for tokens using $ClientId/.default scope (self-referencing)
-# CRITICAL: Origin header is required — SPA client rejects token exchange without it
-$tokenBody = "client_id=$ClientId" + `
-    "&scope=$([System.Web.HttpUtility]::UrlEncode($tokenScope))" + `
-    "&grant_type=authorization_code" + `
-    "&code=$([System.Web.HttpUtility]::UrlEncode($authCode))" + `
-    "&redirect_uri=$([System.Web.HttpUtility]::UrlEncode($RedirectUri))" + `
-    "&code_verifier=$codeVerifier"
-
-$tokenResp = Invoke-TrustedRegistrationRestMethod -Uri "https://login.microsoftonline.com/$TenantId/oauth2/v2.0/token" `
-    -Method POST -Body $tokenBody -ContentType "application/x-www-form-urlencoded" -Headers $spaHeaders
-
-$selfToken = $tokenResp.access_token
-$currentRefreshToken = $tokenResp.refresh_token
-
-
-if (-not $currentRefreshToken) {
-    throw "Registration protocol step failed."
-}
-
-# ══════════════════════════════════════════════════════════════════════
-# STAGE 3: Session Setup (session/authorize → SessionCtxV2)
-# ══════════════════════════════════════════════════════════════════════
-
-$clientSessionId = [guid]::NewGuid().ToString()
-$sessHeaders = @{
-    'Authorization'          = "Bearer $selfToken"
-    'Origin'                 = $RedirectUri
-    'Referer'                = "$RedirectUri/security-info"
-    'AjaxRequest'            = 'true'
-    'x-ms-mysignins-region'  = 'westus2'
-    'x-ms-client-session-id' = $clientSessionId
-}
-
-$sessResp = Invoke-TrustedRegistrationRestMethod -Uri "$RedirectUri/api/session/authorize" `
-    -Method POST -Headers $sessHeaders -ContentType "application/json" -Body "" -WebSession $webSession
-
-if (-not $sessResp.isAuthorized) {
-    throw "Registration protocol step failed."
-}
-
-$sessionCtxV2 = $sessResp.sessionCtxV2
-
-# ── NGC MFA token refresh ──────────────────────────────────────────
-# When requireNgcMfaForSecurityInfo=True, the SPA requests a token with
-# amr=ngcmfa via the claims parameter. TAP satisfies NGC MFA as a
-# passwordless bootstrapping credential. This is the key step that makes
-# authenticationmethods/new accept the token.
-if ($sessResp.requireNgcMfaForSecurityInfo) {
-
-    $ngcClaims = '{"id_token":{"amr":{"essential":true,"values":["ngcmfa"]}},"access_token":{"amr":{"essential":true,"values":["ngcmfa"]}}}'
-    $ngcBody = "client_id=$ClientId" + `
-        "&scope=$([System.Web.HttpUtility]::UrlEncode("$ClientId/.default openid"))" + `
-        "&grant_type=refresh_token" + `
-        "&refresh_token=$([System.Web.HttpUtility]::UrlEncode($currentRefreshToken))" + `
-        "&claims=$([System.Web.HttpUtility]::UrlEncode($ngcClaims))"
-
-    # CRITICAL: Origin header is required on ALL token endpoint calls for SPA clients.
-    # Without it, the NGC MFA claims refresh fails with AADSTS130507.
-    $ngcResp = Invoke-TrustedRegistrationRestMethod -Uri "https://login.microsoftonline.com/$TenantId/oauth2/v2.0/token" `
-        -Method POST -Body $ngcBody -ContentType "application/x-www-form-urlencoded" -Headers $spaHeaders
-
-    $selfToken = $ngcResp.access_token
-
-    # Update refresh_token if a new one was returned
-    if ($ngcResp.refresh_token) {
-        $currentRefreshToken = $ngcResp.refresh_token
+function Assert-EntraRegistrationTokenBinding {
+    param([Parameter(Mandatory)][string]$Token, [Parameter(Mandatory)][string]$ClientId,
+        [AllowNull()][string]$TenantId, [AllowNull()][string]$UserPrincipalName)
+    # These transport-returned claims are consistency checks, not independent signature validation.
+    $parts = $Token.Split('.')
+    if ($parts.Count -ne 3) { throw 'Registration token is malformed.' }
+    try { $claims = [Text.Encoding]::UTF8.GetString((ConvertFrom-Base64Url $parts[1])) | ConvertFrom-Json -ErrorAction Stop }
+    catch { throw 'Registration token claims are invalid.' }
+    $tenant = [guid]::Empty
+    if (-not [guid]::TryParse([string]$claims.tid, [ref]$tenant) -or $tenant -eq [guid]::Empty -or
+        [string]$claims.aud -cne $ClientId) { throw 'Registration token audience or tenant is not bound to the requested client.' }
+    foreach ($property in @('appid', 'azp')) {
+        $value = $claims.PSObject.Properties[$property]
+        if ($null -ne $value -and $value.Value -and [string]$value.Value -cne $ClientId) { throw 'Registration token application binding mismatch.' }
     }
-
-    # Second session/authorize with the NGC token (creates proper SessionCtxV2)
-    $sessHeaders['Authorization'] = "Bearer $selfToken"
-    $sessResp2 = Invoke-TrustedRegistrationRestMethod -Uri "$RedirectUri/api/session/authorize" `
-        -Method POST -Headers $sessHeaders -ContentType "application/json" -Body "" -WebSession $webSession
-
-    if (-not $sessResp2.isAuthorized) {
-        throw "Registration protocol step failed."
+    if ($TenantId -and $tenant -ne [guid]$TenantId) { throw 'Registration token tenant mismatch.' }
+    $upn = $claims.upn
+    if (-not $upn) { $upn = $claims.preferred_username }
+    if (-not $upn) { $upn = $claims.unique_name }
+    if ([string]$upn -notmatch '^[^\s@]+@[^\s@]+$' -or ($UserPrincipalName -and $upn -ine $UserPrincipalName)) {
+        throw 'Registration token user binding mismatch.'
     }
-    $sessionCtxV2 = $sessResp2.sessionCtxV2
+    if ($null -eq $claims.exp -or [long]$claims.exp -le [DateTimeOffset]::UtcNow.ToUnixTimeSeconds()) { throw 'Registration token has expired or has no expiry.' }
+    return [pscustomobject]@{ TenantId = $tenant.ToString(); UserPrincipalName = [string]$upn }
 }
 
-
-# ══════════════════════════════════════════════════════════════════════
-# STAGE 4: Passkey Creation Init (get canary + server challenge)
-# ══════════════════════════════════════════════════════════════════════
-
-$newHeaders = @{
-    'Authorization'          = "Bearer $selfToken"
-    'SessionCtxV2'           = $sessionCtxV2
-    'Origin'                 = $RedirectUri
-    'Referer'                = "$RedirectUri/security-info"
-    'AjaxRequest'            = 'true'
-    'x-ms-mysignins-region'  = 'westus2'
-    'x-ms-client-session-id' = $clientSessionId
+function Get-EntraRegistrationAuthorizeUri {
+    param([Parameter(Mandatory)]$Context, [Parameter(Mandatory)][string]$Authority,
+        [AllowNull()][string]$UserPrincipalName, [switch]$Tap)
+    $query = [ordered]@{
+        client_id = $Context.ClientId; redirect_uri = $Context.RedirectUri
+        scope = "$($Context.ClientId)/.default openid profile offline_access"
+        response_type = 'code'; response_mode = 'fragment'; code_challenge = $Context.CodeChallenge
+        code_challenge_method = 'S256'; state = $Context.State
+    }
+    if ($Tap) { $query.prompt = 'login'; $query.login_hint = $UserPrincipalName }
+    else { $query.prompt = 'none' }
+    return "https://login.microsoftonline.com/$Authority/oauth2/v2.0/authorize?$(ConvertTo-EntraRegistrationForm $query)"
 }
 
-$newResp = Invoke-TrustedRegistrationWebRequest -Uri "$RedirectUri/api/authenticationmethods/new" `
-    -Method POST -Headers $newHeaders -ContentType "application/json" -Body '{"Type":18}' -WebSession $webSession
-
-$newJson = $newResp.Content | ConvertFrom-Json
-
-# Response structure: { Type: 18, VerificationState: 1, Data: "<JSON string>", ErrorCode: 0 }
-if ($newJson.ErrorCode -and $newJson.ErrorCode -ne 0) {
-    throw "Registration protocol step failed."
+function Complete-EntraRegistrationTokenExchange {
+    param([Parameter(Mandatory)]$Context, [Parameter(Mandatory)][string]$Authority,
+        [Parameter(Mandatory)][string]$Code, [AllowNull()][string]$TenantId, [AllowNull()][string]$UserPrincipalName)
+    $body = ConvertTo-EntraRegistrationForm @{
+        client_id = $Context.ClientId; redirect_uri = $Context.RedirectUri
+        scope = "$($Context.ClientId)/.default openid profile offline_access"
+        grant_type = 'authorization_code'; code = $Code; code_verifier = $Context.CodeVerifier
+        # Preserve the curated TAP bootstrap: request required MFA claims on the initial exchange.
+        claims = '{"id_token":{"amr":{"essential":true,"values":["ngcmfa"]}},"access_token":{"amr":{"essential":true,"values":["ngcmfa"]}}}'
+    }
+    $tokens = Invoke-EntraRegistrationRestMethod -Uri "https://login.microsoftonline.com/$Authority/oauth2/v2.0/token" `
+        -Method POST -Body $body -ContentType 'application/x-www-form-urlencoded' -Headers @{ Origin = $Context.RedirectUri }
+    if ([string]::IsNullOrWhiteSpace($tokens.refresh_token)) { throw 'Registration refresh token is missing.' }
+    $identity = Assert-EntraRegistrationTokenBinding -Token $tokens.access_token -ClientId $Context.ClientId `
+        -TenantId $TenantId -UserPrincipalName $UserPrincipalName
+    $Context.Token = $tokens.access_token; $Context.RefreshToken = $tokens.refresh_token
+    $Context.TenantId = $identity.TenantId; $Context.UserPrincipalName = $identity.UserPrincipalName
+    $Context.CodeVerifier = $null
+    return $Context
 }
+# End source: powershell/src/Entra/SoftwareAuthorization.ps1
 
-
-# The Data field is a JSON string that must be parsed again
-$innerJson = $newJson.Data | ConvertFrom-Json
-$requestData = $innerJson.requestData
-$provisionUrl = $innerJson.provisionUrl
-$fidoCanary = $requestData.canary
-$serverChallenge = $requestData.serverChallenge
-$postBackUrl = $requestData.postBackUrl
-$fidoUserId = $requestData.userId
-$correlationId = [guid]::NewGuid().ToString()
-$excludeCredentials = $requestData.ExcludeNextGenCredentialsJSON
-
-if ([string]::IsNullOrEmpty($fidoCanary)) {
-    throw "Registration protocol step failed."
-}
-if ([string]::IsNullOrEmpty($serverChallenge)) {
-    throw "Registration protocol step failed."
-}
-if ([string]::IsNullOrEmpty($fidoUserId)) {
-    throw "Registration protocol step failed."
-}
-
-
-# ══════════════════════════════════════════════════════════════════════
-# STAGE 5: Build WebAuthn Attestation
-# ══════════════════════════════════════════════════════════════════════
-
-# Generate ES256 key pair (P-256 / secp256r1)
-$ecDsa = [System.Security.Cryptography.ECDsa]::Create(
-    [System.Security.Cryptography.ECCurve]::CreateFromValue("1.2.840.10045.3.1.7")
-)
-try {
-$publicKeyParams = $ecDsa.ExportParameters($false)
-
-# Generate credential ID (32 bytes like in HAR)
-$credentialIdBytes = [byte[]]::new(32)
-[System.Security.Cryptography.RandomNumberGenerator]::Fill($credentialIdBytes)
-$credentialIdB64Url = ConvertTo-Base64Url $credentialIdBytes
-
-# Build COSE key (CBOR-encoded public key) — CTAP2 canonical order: sort by encoded key bytes
-$coseKey = [ordered]@{
-    1  = 2                          # kty: EC2
-    3  = -7                         # alg: ES256
-    -1 = 1                          # crv: P-256
-    -2 = [byte[]]$publicKeyParams.Q.X  # x coordinate
-    -3 = [byte[]]$publicKeyParams.Q.Y  # y coordinate
-}
-$coseKeyBytes = [byte[]](New-CBOREncoded -Value $coseKey)
-
-# Build authenticator data
-$rpId = "login.microsoft.com"
-$rpIdHash = [byte[]][System.Security.Cryptography.SHA256]::HashData(
-    [System.Text.Encoding]::UTF8.GetBytes($rpId)
-)
-$authDataFlags = [byte[]]@(0x45)  # UP=1, AT=1 (attested credential data present)
-$signCount = [byte[]]@(0, 0, 0, 0)
-$aaguid = [byte[]]::new(16)  # All zeros — standard for software authenticators
-$credIdLen = [BitConverter]::GetBytes([uint16]$credentialIdBytes.Length)
-[Array]::Reverse($credIdLen)
-
-[byte[]]$authData = $rpIdHash + $authDataFlags + $signCount + $aaguid + $credIdLen + $credentialIdBytes + $coseKeyBytes
-
-# Build client data JSON
-# The challenge in clientDataJSON is base64url(UTF8(serverChallenge JWE string))
-# This matches the browser's WebAuthn behavior - the challenge bytes ARE the JWE string
-$challengeB64Url = ConvertTo-Base64Url ([System.Text.Encoding]::UTF8.GetBytes($serverChallenge))
-
-$clientData = [ordered]@{
-    type        = "webauthn.create"
-    challenge   = $challengeB64Url
-    origin      = "https://$rpId"
-    crossOrigin = $false
-} | ConvertTo-Json -Compress
-
-$clientDataBytes = [System.Text.Encoding]::UTF8.GetBytes($clientData)
-$clientDataB64Url = ConvertTo-Base64Url $clientDataBytes
-
-# Sign: authData + SHA256(clientDataJSON) using a BATCH attestation key
-# Microsoft requires full attestation (x5c certificate), not self-attestation
-[byte[]]$clientDataHash = [System.Security.Cryptography.SHA256]::HashData($clientDataBytes)
-[byte[]]$signatureBase = $authData + $clientDataHash
-
-# Generate batch attestation key pair and self-signed certificate
-$batchEcDsa = [System.Security.Cryptography.ECDsa]::Create(
-    [System.Security.Cryptography.ECCurve]::CreateFromValue("1.2.840.10045.3.1.7")
-)
-try {
-    $certReq = [System.Security.Cryptography.X509Certificates.CertificateRequest]::new(
-        "CN=Batch Certificate, OU=Authenticator Attestation, O=Chromium, C=US",
-        $batchEcDsa,
-        [System.Security.Cryptography.HashAlgorithmName]::SHA256
-    )
-    $batchCert = $certReq.CreateSelfSigned(
-        [DateTimeOffset]::new(2017, 7, 14, 2, 40, 0, [TimeSpan]::Zero),
-        [DateTimeOffset]::new(2046, 2, 6, 6, 33, 7, [TimeSpan]::Zero)
-    )
-    $batchCertDer = $batchCert.RawData
-
-    # Sign with BATCH key (full attestation), not credential key (self-attestation)
-    $signatureBytes = $batchEcDsa.SignData(
-        $signatureBase,
-        [System.Security.Cryptography.HashAlgorithmName]::SHA256,
-        [System.Security.Cryptography.DSASignatureFormat]::Rfc3279DerSequence
-    )
-} finally {
-    $batchEcDsa.Dispose()
-}
-
-# Build CBOR attestation object with x5c for full packed attestation
-$attStmt = [ordered]@{
-    "alg" = -7
-    "sig" = [byte[]]$signatureBytes
-    "x5c" = @(,[byte[]]$batchCertDer)
-}
-$attestationObj = [ordered]@{
-    "fmt"     = "packed"
-    "attStmt" = $attStmt
-    "authData"= [byte[]]$authData
-}
-$attestationObjBytes = [byte[]](New-CBOREncoded -Value $attestationObj)
-$attestationObjB64Url = ConvertTo-Base64Url $attestationObjBytes
-
-# Client extension results (matching browser behavior)
-$extensionResults = '{"hmacCreateSecret":false}'
-$extensionResultsB64Url = ConvertTo-Base64Url ([System.Text.Encoding]::UTF8.GetBytes($extensionResults))
-
-
-# ══════════════════════════════════════════════════════════════════════
-# STAGE 5b: Call fido/create (registers challenge server-side)
-# ══════════════════════════════════════════════════════════════════════
-
-$fidoCreateBody = [ordered]@{
-    correlationId                  = $correlationId
-    canary                         = $fidoCanary
-    ExcludeNextGenCredentialsJSON  = if ($excludeCredentials) { $excludeCredentials } else { '[]' }
-    memberName                     = $UserPrincipalName
-    postBackUrl                    = "$(if ($postBackUrl) { $postBackUrl } else { "$RedirectUri/api/post/newfido" })?mysignins-region=westus2&cid=$correlationId"
-    serverChallenge                = $serverChallenge
-    userDisplayName                = $DisplayName
-    userIconUrl                    = ''
-    userId                         = $fidoUserId
-}
-
-$fidoCreateFormBody = ($fidoCreateBody.GetEnumerator() | ForEach-Object {
-    "$([System.Web.HttpUtility]::UrlEncode($_.Key))=$([System.Web.HttpUtility]::UrlEncode($_.Value))"
-}) -join '&'
-
-$fidoCreateUrl = if ($provisionUrl) { "$provisionUrl`?cid=$correlationId" } else { "https://login.microsoft.com/$TenantId/fido/create?cid=$correlationId" }
-
-try {
-    $fidoCreateResp = Invoke-TrustedRegistrationWebRequest -Uri $fidoCreateUrl -Method POST -Body $fidoCreateFormBody `
-        -ContentType "application/x-www-form-urlencoded" -UseBasicParsing -WebSession $webSession
-} catch {
-}
-
-# ══════════════════════════════════════════════════════════════════════
-# STAGE 6: Finalize Registration (newfido → verify)
-# ══════════════════════════════════════════════════════════════════════
-
-# Ensure newfido URL always has query parameters (postBackUrl from server may lack them)
-$newFidoUrl = if ($postBackUrl) {
-    if ($postBackUrl -notmatch '\?') { "$postBackUrl`?mysignins-region=westus2&cid=$correlationId" }
-    else { $postBackUrl }
-} else {
-    "$RedirectUri/api/post/newfido?mysignins-region=westus2&cid=$correlationId"
-}
-
-$newFidoBody = [ordered]@{
-    canary                  = $fidoCanary
-    authenticator           = 'cross-platform'
-    transports              = 'usb'
-    aaguid                  = '00000000-0000-0000-0000-000000000000'
-    credentialDeviceType    = 'singleDevice'
-    credentialBackedUp      = 'false'
-    attestationParseError   = ''
-    error_code              = ''
-    suberror_code           = ''
-    clientDataJson          = $clientDataB64Url
-    attestationObject       = $attestationObjB64Url
-    credentialId            = $credentialIdB64Url
-    clientExtensionResults  = $extensionResultsB64Url
-    i19                     = ''
-}
-
-$newFidoFormBody = ($newFidoBody.GetEnumerator() | ForEach-Object { 
-    "$([System.Web.HttpUtility]::UrlEncode($_.Key))=$([System.Web.HttpUtility]::UrlEncode($_.Value))" 
-}) -join '&'
-
-$fidoHeaders = @{
-    'Origin'  = 'https://login.microsoft.com'
-    'Referer' = 'https://login.microsoft.com/'
-}
-
-
-$fidoResp = Invoke-TrustedRegistrationWebRequest -Uri $newFidoUrl -Method POST -Body $newFidoFormBody `
-    -ContentType "application/x-www-form-urlencoded" -Headers $fidoHeaders -UseBasicParsing -WebSession $webSession
-
-
-# Check for errors in newfido response
-if ($fidoResp.Content -match '\$Config=(\{.+\});') {
+# Source: powershell/src/Entra/SoftwareAuthentication.ps1
+function Invoke-EntraRegistrationTapAuthentication {
+    param([Parameter(Mandatory)]$Context, [Parameter(Mandatory)][object]$TAP,
+        [Parameter(Mandatory)][string]$UserPrincipalName, [Parameter(Mandatory)][guid]$TenantId)
+    if ($TenantId -eq [guid]::Empty -or $UserPrincipalName -notmatch '^[^\s@]+@[^\s@]+$') { throw 'A nonempty tenant GUID and UPN are required.' }
+    $tapText = ConvertTo-PlainTextValue $TAP
+    if ([string]::IsNullOrWhiteSpace($tapText)) { throw 'TAP cannot be empty.' }
     try {
-        $respCfg = $matches[1] | ConvertFrom-Json
-        if ($respCfg.iErrorCode -and $respCfg.iErrorCode -ne 0) {
-            if ($respCfg.strServiceExceptionMessage) {
+        $uri = Get-EntraRegistrationAuthorizeUri -Context $Context -Authority $TenantId.ToString() -UserPrincipalName $UserPrincipalName -Tap
+        $response = Invoke-EntraRegistrationWebRequest -Uri $uri -WebSession $Context.WebSession
+        if ([int]$response.StatusCode -ne 200) { throw 'Registration sign-in page was not returned.' }
+        $config = Get-EntraRegistrationPageConfig -Content $response.Content
+        if ($config.pgid -ne 'ConvergedSignIn' -or -not $config.sFT -or -not $config.sCtx) { throw 'Unexpected registration sign-in page.' }
+        $gct = Invoke-EntraRegistrationRestMethod -Uri 'https://login.microsoftonline.com/common/GetCredentialType?mkt=en-US' `
+            -Method POST -Body (@{
+                username = $UserPrincipalName; isOtherIdpSupported = $false; checkPhones = $false
+                isRemoteNGCSupported = $true; isCookieBannerShown = $false; isFidoSupported = $true
+                originalRequest = $config.sCtx; flowToken = $config.sFT
+            } | ConvertTo-Json -Compress) -ContentType 'application/json' `
+            -Headers @{ canary = $config.apiCanary; hpgrequestid = $config.sessionId; hpgact = '1800'; hpgid = '1104' }
+        $flowToken = if ($gct.FlowToken) { $gct.FlowToken } else { $config.sFT }
+        $postUri = if ($config.urlPost) { [uri]::new([uri]'https://login.microsoftonline.com/', [string]$config.urlPost) } else { [uri]'https://login.microsoftonline.com/common/login' }
+        $null = Assert-EntraRegistrationUri $postUri.AbsoluteUri
+        if ($postUri.Host -ne 'login.microsoftonline.com') { throw 'Unexpected TAP sign-in destination.' }
+        $body = ConvertTo-EntraRegistrationForm @{
+            login = $UserPrincipalName; loginfmt = $UserPrincipalName; accesspass = $tapText; ps = '56'
+            psRNGCDefaultType = '1'; psRNGCEntropy = ''; psRNGCSLK = $flowToken
+            canary = $config.canary; ctx = $config.sCtx; hpgrequestid = $config.sessionId; flowToken = $flowToken
+            PPSX = ''; NewUser = '1'; FoundMSAs = ''; fspost = '0'; i21 = '0'; CookieDisclosure = '0'
+            IsFidoSupported = '1'; isSignupPost = '0'; DfpArtifact = ''; i19 = '10000'
+        }
+        $code = Invoke-EntraRegistrationAuthorization -Context $Context -Uri $postUri.AbsoluteUri -Method POST -Body $body
+        return Complete-EntraRegistrationTokenExchange -Context $Context -Authority $TenantId.ToString() -Code $code `
+            -TenantId $TenantId.ToString() -UserPrincipalName $UserPrincipalName
+    } finally { $tapText = $null; $body = $null }
+}
+
+function Invoke-EntraRegistrationCookieAuthentication {
+    param([Parameter(Mandatory)]$Context, [Parameter(Mandatory)][object]$ESTSAuthCookie,
+        [AllowNull()][string]$TenantId)
+    $authority = 'organizations'
+    if ($TenantId) {
+        $tenant = [guid]::Empty
+        if (-not [guid]::TryParse($TenantId, [ref]$tenant) -or $tenant -eq [guid]::Empty) { throw 'TenantId must be a nonempty GUID.' }
+        $authority = $tenant.ToString()
+    }
+    $cookie = ConvertTo-PlainTextValue $ESTSAuthCookie
+    if ([string]::IsNullOrWhiteSpace($cookie) -or $cookie -match '[\r\n;]') { throw 'ESTS cookie value is empty or invalid.' }
+    try {
+        foreach ($name in @('ESTSAUTH', 'ESTSAUTHPERSISTENT')) {
+            $Context.WebSession.Cookies.Add([Net.Cookie]::new($name, $cookie, '/', '.login.microsoftonline.com'))
+        }
+        $uri = Get-EntraRegistrationAuthorizeUri -Context $Context -Authority $authority
+        $code = Invoke-EntraRegistrationAuthorization -Context $Context -Uri $uri
+        return Complete-EntraRegistrationTokenExchange -Context $Context -Authority $authority -Code $code -TenantId $TenantId
+    } finally { $cookie = $null }
+}
+
+function Clear-EntraRegistrationContext {
+    param([AllowNull()]$Context)
+    if ($null -ne $Context) {
+        foreach ($name in @('Token', 'RefreshToken', 'CodeVerifier', 'SessionCtxV2', 'WebSession')) { $Context.$name = $null }
+    }
+}
+# End source: powershell/src/Entra/SoftwareAuthentication.ps1
+
+# Source: powershell/src/Entra/KeyVaultRegistrationState.ps1
+function Assert-EntraKeyVaultRegistrationUri {
+    [CmdletBinding()]
+    param(
+        [Parameter(Mandatory)][string]$Uri,
+        [Parameter(Mandatory)][string]$RedirectUri,
+        [switch]$Provisioning
+    )
+    $parsed = $null
+    if (-not [uri]::TryCreate($Uri, [UriKind]::Absolute, [ref]$parsed) -or $parsed.UserInfo -or $parsed.Scheme -ne 'https' -or $parsed.Port -ne 443) {
+        throw 'Refusing untrusted registration URL.'
+    }
+    if ($Provisioning) {
+        if ($parsed.Host -notin @('login.microsoft.com', 'login.microsoftonline.com')) { throw 'Refusing untrusted provisionUrl.' }
+    } elseif ($parsed.GetLeftPart([UriPartial]::Authority) -ine ([uri]$RedirectUri).GetLeftPart([UriPartial]::Authority)) {
+        throw 'Refusing untrusted registration redirect or postBackUrl.'
+    }
+    $parsed.AbsoluteUri
+}
+
+function Add-EntraKeyVaultRegistrationQuery {
+    [CmdletBinding()]
+    param([Parameter(Mandatory)][string]$Uri, [Parameter(Mandatory)][string]$CorrelationId, [switch]$IncludeRegion)
+    $builder = [uriBuilder]::new($Uri)
+    $query = [System.Web.HttpUtility]::ParseQueryString($builder.Query)
+    $query['cid'] = $CorrelationId
+    if ($IncludeRegion) { $query['mysignins-region'] = 'westus2' }
+    $builder.Query = $query.ToString()
+    $builder.Uri.AbsoluteUri
+}
+
+function Update-EntraKeyVaultRegistrationState {
+    [CmdletBinding()]
+    param([Parameter(Mandatory)][System.Collections.IDictionary]$State, [AllowEmptyString()][string]$Content)
+    if ($Content -match '<div\s+id="context"\s+data-content="([^"]*)"') {
+        $json = [System.Web.HttpUtility]::HtmlDecode($matches[1])
+        try {
+            $context = $json | ConvertFrom-Json -ErrorAction Stop
+            if ($context.Canary) { $State.Canary = [string]$context.Canary }
+            if ($context.PostInfo) { $State.PostInfo = [string]$context.PostInfo }
+        } catch { Write-Verbose 'Registration response context could not be parsed.' }
+    }
+    if ($Content -match '<div\s+id="redirectUrl"\s+data-content="([^"]*)"') {
+        $State.RedirectUrl = [System.Web.HttpUtility]::HtmlDecode($matches[1])
+        $url = [uri]$State.RedirectUrl
+        $values = [System.Web.HttpUtility]::ParseQueryString($url.Fragment.TrimStart('#'))
+        if ($values['fidoProvisionSuccess']) { $State.Canary = $values['fidoProvisionSuccess'] }
+        if ($values['postinfo']) { $State.PostInfo = $values['postinfo'] }
+    }
+    # State is caller-owned. No script/global variables are modified.
+}
+
+function New-EntraKeyVaultVerificationDataJson {
+    [CmdletBinding()]
+    param(
+        [Parameter(Mandatory)][System.Collections.IDictionary]$Template,
+        [ValidateSet('empty', 'context')][string]$PostInfoMode = 'empty',
+        [AllowEmptyString()][string]$PostInfo
+    )
+    $value = [ordered]@{}
+    foreach ($name in @('Name', 'Canary', 'AttestationObject', 'ClientDataJson', 'CredentialId', 'ClientExtensionResults')) {
+        $value[$name] = [string]$Template[$name]
+    }
+    $value.PostInfo = if ($PostInfoMode -eq 'context') { [string]$PostInfo } else { '' }
+    $value.AAGuid = '00000000-0000-0000-0000-000000000000'
+    $value.CredentialDeviceType = 'singleDevice'
+    $value | ConvertTo-Json -Compress
+}
+# End source: powershell/src/Entra/KeyVaultRegistrationState.ps1
+
+# Source: powershell/src/Entra/KeyVaultRegistrationRequests.ps1
+function Initialize-EntraRegistrationRequest {
+    [CmdletBinding()]
+    param([Parameter(Mandatory)]$Context)
+    $headers = Get-EntraRegistrationHeaders -Context $Context -IncludeToken -IncludeSession
+    $response = Invoke-EntraRegistrationRestMethod -Uri "$($Context.RedirectUri)/api/authenticationmethods/new" `
+        -Method POST -Headers $headers -ContentType 'application/json' -Body '{"Type":18}' -WebSession $Context.WebSession
+    if ($response.ErrorCode -and $response.ErrorCode -ne 0) { throw 'Passkey initialization was rejected by the service.' }
+    $data = if ($response.Data -is [string]) { $response.Data | ConvertFrom-Json -ErrorAction Stop } else { $response.Data }
+    $request = $data.requestData
+    foreach ($name in @('canary', 'serverChallenge', 'userId')) {
+        if ([string]::IsNullOrWhiteSpace([string]$request.$name)) { throw "Passkey initialization omitted $name." }
+    }
+    $postBack = if ($request.postBackUrl) { [string]$request.postBackUrl } else { "$($Context.RedirectUri)/api/post/newfido" }
+    $provision = if ($data.provisionUrl) { [string]$data.provisionUrl } else { "https://login.microsoft.com/$($Context.TenantId)/fido/create" }
+    $null = Assert-EntraKeyVaultRegistrationUri -Uri $postBack -RedirectUri $Context.RedirectUri
+    $null = Assert-EntraKeyVaultRegistrationUri -Uri $provision -RedirectUri $Context.RedirectUri -Provisioning
+    [ordered]@{
+        Canary = [string]$request.canary
+        ServerChallenge = [string]$request.serverChallenge
+        UserHandle = [string]$request.userId
+        ProvisionUrl = $provision
+        PostBackUrl = $postBack
+        CorrelationId = [guid]::NewGuid().ToString()
+        ExcludeCredentials = if ($request.ExcludeNextGenCredentialsJSON) { [string]$request.ExcludeNextGenCredentialsJSON } else { '[]' }
+        PostInfo = ''
+        RedirectUrl = ''
+    }
+}
+
+function Submit-EntraRegistration {
+    [CmdletBinding()]
+    param(
+        [Parameter(Mandatory)]$Context,
+        [Parameter(Mandatory)][System.Collections.IDictionary]$Request,
+        [Parameter(Mandatory)]$Attestation,
+        [Parameter(Mandatory)][string]$DisplayName
+    )
+    $null = Assert-EntraKeyVaultRegistrationUri -Uri $Request.ProvisionUrl -RedirectUri $Context.RedirectUri -Provisioning
+    $null = Assert-EntraKeyVaultRegistrationUri -Uri $Request.PostBackUrl -RedirectUri $Context.RedirectUri
+    $postBack = Add-EntraKeyVaultRegistrationQuery -Uri $Request.PostBackUrl -CorrelationId $Request.CorrelationId -IncludeRegion
+    $createBody = ConvertTo-EntraRegistrationForm ([ordered]@{
+        correlationId = $Request.CorrelationId; canary = $Request.Canary
+        ExcludeNextGenCredentialsJSON = $Request.ExcludeCredentials
+        memberName = $Context.UserPrincipalName; postBackUrl = $postBack
+        serverChallenge = $Request.ServerChallenge; userDisplayName = $DisplayName
+        userIconUrl = ''; userId = $Request.UserHandle
+    })
+    $createUri = Add-EntraKeyVaultRegistrationQuery -Uri $Request.ProvisionUrl -CorrelationId $Request.CorrelationId
+    $created = Invoke-EntraRegistrationWebRequest -Uri $createUri -Method POST -Body $createBody `
+        -ContentType 'application/x-www-form-urlencoded' -WebSession $Context.WebSession
+    if ([int]$created.StatusCode -lt 200 -or [int]$created.StatusCode -ge 300) {
+        throw 'FIDO challenge registration failed; refusing to finalize an unconfirmed ceremony.'
+    }
+    $fidoFields = [ordered]@{
+        canary = $Request.Canary; credentialDeviceType = 'singleDevice'; credentialBackedUp = 'false'
+        attestationParseError = ''; error_code = ''; suberror_code = ''; i19 = ''
+        clientDataJson = $Attestation.ClientDataJson; attestationObject = $Attestation.AttestationObject
+        credentialId = $Attestation.CredentialId; clientExtensionResults = $Attestation.ClientExtensionResults
+    }
+    foreach ($field in @('Authenticator', 'Transports', 'AAGuid')) {
+        $present = if ($Attestation -is [System.Collections.IDictionary]) { $Attestation.Contains($field) } else { $null -ne $Attestation.PSObject.Properties[$field] }
+        if ($present) { $fidoFields[$field.ToLowerInvariant()] = [string]$Attestation.$field }
+    }
+    $body = ConvertTo-EntraRegistrationForm $fidoFields
+    $response = Invoke-EntraRegistrationWebRequest -Uri $postBack -Method POST -Body $body `
+        -ContentType 'application/x-www-form-urlencoded' -WebSession $Context.WebSession `
+        -Headers @{ Origin = 'https://login.microsoft.com'; Referer = 'https://login.microsoft.com/' }
+    if ([int]$response.StatusCode -ge 300 -and [int]$response.StatusCode -lt 400) {
+        $location = [string]$response.Headers.Location
+        if (-not $location) { throw 'FIDO callback redirect omitted its destination.' }
+        $target = [uri]::new([uri]$postBack, $location)
+        $null = Assert-EntraKeyVaultRegistrationUri -Uri $target.AbsoluteUri -RedirectUri $Context.RedirectUri
+        $Request.RedirectUrl = $target.AbsoluteUri
+        # Parse the fragment using the same caller-owned state as HTML callbacks.
+        $encoded = [System.Web.HttpUtility]::HtmlEncode($target.AbsoluteUri)
+        Update-EntraKeyVaultRegistrationState -State $Request -Content "<div id=`"redirectUrl`" data-content=`"$encoded`">"
+    } elseif ([int]$response.StatusCode -lt 200 -or [int]$response.StatusCode -ge 300) {
+        throw 'FIDO callback request failed.'
+    } else {
+        if ($response.Content -match '(?s)\$Config\s*=\s*(\{.*?\});') {
+            $config = $matches[1] | ConvertFrom-Json -ErrorAction Stop
+            if ($config.iErrorCode -and $config.iErrorCode -ne 0) { throw 'FIDO callback rejected registration.' }
+        }
+        Update-EntraKeyVaultRegistrationState -State $Request -Content $response.Content
+    }
+    if ($Request.RedirectUrl) {
+        $nav = [uriBuilder]::new([string]$Request.RedirectUrl); $nav.Fragment = ''
+        $null = Assert-EntraKeyVaultRegistrationUri -Uri $nav.Uri.AbsoluteUri -RedirectUri $Context.RedirectUri
+        try {
+            $page = Invoke-EntraRegistrationWebRequest -Uri $nav.Uri.AbsoluteUri -WebSession $Context.WebSession
+            if ([int]$page.StatusCode -eq 200 -and -not $Request.PostInfo) {
+                Update-EntraKeyVaultRegistrationState -State $Request -Content $page.Content
             }
-            throw "Registration protocol step failed."
-        }
-    } catch [System.ArgumentException] { <# JSON parse failed, not a config block #> }
+        } catch { Write-Verbose 'Security-info navigation did not refresh registration state.' }
+    }
+    Update-EntraKeyVaultVerificationSession -Context $Context
+    Invoke-EntraKeyVaultRegistrationVerification -Context $Context -Request $Request -Attestation $Attestation -DisplayName $DisplayName
 }
+# End source: powershell/src/Entra/KeyVaultRegistrationRequests.ps1
 
-# ── Step 1b: Parse newfido response (context in div data-content, not form inputs) ──
-
-# The newfido HTML uses <div> elements with data-content attributes:
-#   <div id="context" data-content="{...JSON...}"></div>
-#   <div id="redirectUrl" data-content="https://...#fidoProvisionSuccess=<canary>"></div>
-# Browser JS stores context in sessionStorage, then redirects to redirectUrl.
-
-$newfidoContext = $null
-$newfidoRedirectUrl = $null
-
-# Parse context div
-if ($fidoResp.Content -match '<div\s+id="context"\s+data-content="([^"]*)"') {
-    $newfidoContext = [System.Web.HttpUtility]::HtmlDecode($matches[1])
-
-    # Parse the context JSON to confirm data and extract server-side canary
+# Source: powershell/src/Entra/KeyVaultRegistrationVerification.ps1
+function Update-EntraKeyVaultVerificationSession {
+    [CmdletBinding()]
+    param([Parameter(Mandatory)]$Context)
+    $headers = Get-EntraRegistrationHeaders -Context $Context -IncludeToken -IncludeSession
+    foreach ($path in @('availablemethods', '')) {
+        try {
+            $uri = "$($Context.RedirectUri)/api/authenticationmethods"
+            if ($path) { $uri += "/$path" }
+            $response = Invoke-EntraRegistrationWebRequest -Uri $uri -Headers $headers -WebSession $Context.WebSession
+            if ([int]$response.StatusCode -eq 200) { break }
+        } catch { Write-Verbose 'Methods context was not refreshed.' }
+    }
     try {
-        $contextObj = $newfidoContext | ConvertFrom-Json
-        if ($contextObj.Canary) {
-            $fidoCanary = $contextObj.Canary
+        $response = Invoke-EntraRegistrationRestMethod -Uri "$($Context.RedirectUri)/api/session/authorize" `
+            -Method POST -Headers $headers -ContentType 'application/json' -Body '{}' -WebSession $Context.WebSession
+        if ($response.isAuthorized -eq $true -and $response.sessionCtxV2) { $Context.SessionCtxV2 = [string]$response.sessionCtxV2 }
+    } catch { Write-Verbose 'Keeping the existing authorized registration session.' }
+}
+
+function Assert-EntraRegistrationVerified {
+    [CmdletBinding()]
+    param([Parameter(Mandatory)][int]$StatusCode, [Parameter(Mandatory)]$Response, [Parameter(Mandatory)][string]$ExpectedCredentialId)
+    if ($StatusCode -lt 200 -or $StatusCode -ge 300 -or $Response.VerificationState -ne 2 -or
+        ($Response.ErrorCode -and $Response.ErrorCode -ne 0)) { throw 'Registration was not confirmed successful.' }
+    $ids = @($Response.DataUpdates.FidoDevices | ForEach-Object { [string]$_.CredentialId })
+    if ($ids.Count -ne 1 -or $ids[0] -cne $ExpectedCredentialId) { throw 'Registration response did not confirm the expected credential ID.' }
+    $Response
+}
+
+function Invoke-EntraKeyVaultRegistrationVerification {
+    [CmdletBinding()]
+    param(
+        [Parameter(Mandatory)]$Context,
+        [Parameter(Mandatory)][System.Collections.IDictionary]$Request,
+        [Parameter(Mandatory)]$Attestation,
+        [Parameter(Mandatory)][string]$DisplayName,
+        [ValidateRange(1, 10)][int]$AttemptCount = 5,
+        [ValidateRange(0, 60)][int]$RetryDelaySeconds = 2
+    )
+    $template = [ordered]@{
+        Name = $DisplayName; Canary = $Request.Canary; AttestationObject = $Attestation.AttestationObject
+        ClientDataJson = $Attestation.ClientDataJson; CredentialId = $Attestation.CredentialId
+        ClientExtensionResults = $Attestation.ClientExtensionResults
+    }
+    $mode = 'empty'
+    $headers = Get-EntraRegistrationHeaders -Context $Context -IncludeSession
+    $headers['x-rff'] = 'tff,cpfaudit,enslfmg,fwdIam,pKoe,drmm,myAccSi,saap,mregph,mysigninsfido,mysigninsauthappnotification,mysigninsauthappotp,migaam,mrp,hoaref,mregextauth,mreghwoath,mregsq,premr,cepcr,ebtta,otebvpf,mysigninssetdefault,gcu,msieme,msiemedel,mdelsq,mdelhwoath,msidelauthapp,mdelph,msidelfido,msrappp,msdappp,aamp,fwdPhIam,fido2fs,psi2fs,sve,gprp,ctumaru,dhwo,legacyHwOATH,epowe,asnmfc,ppre,sspuispid,mahfc,pkrce,miseclientid,fnmosia,essvc,etmosvc,enmosia,enmosiv,enmosid,enmosisd,enmosidht,enmosiima,enmopr,asnmtabr,onmfrc,eaieci,enlnb,esiastnb,ersiemfa,duc,stffrf,svfae,gcufa,gprpfa,umarufnc,mfarae,gefmassv'
+    for ($attempt = 1; $attempt -le $AttemptCount; $attempt++) {
+        $verification = New-EntraKeyVaultVerificationDataJson -Template $template -PostInfoMode $mode -PostInfo $Request.PostInfo
+        $body = @{ Type = 18; VerificationData = $verification } | ConvertTo-Json -Compress
+        $response = $null; $json = $null
+        try {
+            $response = Invoke-EntraRegistrationWebRequest -Uri "$($Context.RedirectUri)/api/authenticationmethods/verify" `
+                -Method POST -Body $body -ContentType 'application/json' -Headers $headers -WebSession $Context.WebSession
+            $json = $response.Content | ConvertFrom-Json -ErrorAction Stop
+        } catch { Write-Verbose 'Registration verification did not return a valid response.' }
+        if ($json.VerificationState -eq 2) {
+            return (Assert-EntraRegistrationVerified -StatusCode ([int]$response.StatusCode) -Response $json -ExpectedCredentialId $Attestation.CredentialId)
         }
-    } catch {
+        if ($json.ErrorCode -eq 20 -and $json.VerificationState -eq 3 -and $mode -eq 'empty' -and $Request.PostInfo) {
+            $mode = 'context'
+            continue
+        }
+        if ($attempt -lt $AttemptCount) { Start-Sleep -Seconds $RetryDelaySeconds }
     }
-} else {
+    throw 'Registration failed: the server did not confirm the expected credential.'
 }
+# End source: powershell/src/Entra/KeyVaultRegistrationVerification.ps1
 
-# Parse redirectUrl div
-if ($fidoResp.Content -match '<div\s+id="redirectUrl"\s+data-content="([^"]*)"') {
-    $newfidoRedirectUrl = [System.Web.HttpUtility]::HtmlDecode($matches[1])
-    $truncUrl = if ($newfidoRedirectUrl.Length -gt 80) { "$($newfidoRedirectUrl.Substring(0,80))..." } else { $newfidoRedirectUrl }
-} else {
-}
-
-# Navigate to the redirect URL to establish proper session state (simulates browser redirect)
-if ($newfidoRedirectUrl) {
-    $navUrl = $newfidoRedirectUrl -replace '#.*$', ''  # Strip fragment (not sent in HTTP)
+# Source: powershell/src/Local/RegistrationKey.ps1
+function New-SoftwarePasskeyKey {
+    # The returned key is caller-owned. Never return this object through ordinary logging.
+    $key = [Security.Cryptography.ECDsa]::Create([Security.Cryptography.ECCurve]::CreateFromValue('1.2.840.10045.3.1.7'))
     try {
-        $navResp = Invoke-TrustedRegistrationWebRequest -Uri $navUrl -Method GET -UseBasicParsing -WebSession $webSession
+        $public = $key.ExportParameters($false)
+        $privateBytes = $key.ExportPkcs8PrivateKey()
+        try {
+            $pem = "-----BEGIN PRIVATE KEY-----`n$([Convert]::ToBase64String($privateBytes, [System.Base64FormattingOptions]::InsertLineBreaks))`n-----END PRIVATE KEY-----"
+        } finally { [Array]::Clear($privateBytes, 0, $privateBytes.Length) }
+        return [pscustomobject]@{ Key = $key; PublicX = [byte[]]$public.Q.X; PublicY = [byte[]]$public.Q.Y; PrivateKeyPem = $pem }
+    } catch { $key.Dispose(); throw }
+}
+
+function Clear-SoftwarePasskeyKey {
+    param([AllowNull()]$Provider)
+    if ($null -ne $Provider) {
+        if ($null -ne $Provider.Key) { $Provider.Key.Dispose(); $Provider.Key = $null }
+        $property = $Provider.PSObject.Properties['PrivateKeyPem']
+        if ($null -ne $property) { $Provider.PrivateKeyPem = $null }
+    }
+}
+# End source: powershell/src/Local/RegistrationKey.ps1
+
+# Source: powershell/src/Entra/SoftwareAttestation.ps1
+function New-EntraSoftwareAuthenticatorData {
+    param([Parameter(Mandatory)][string]$RpId, [Parameter(Mandatory)][byte[]]$CredentialId,
+        [Parameter(Mandatory)][byte[]]$PublicX, [Parameter(Mandatory)][byte[]]$PublicY, [byte]$Flags = 0x45)
+    if ($RpId -cne 'login.microsoft.com' -or $CredentialId.Length -ne 32 -or $PublicX.Length -ne 32 -or $PublicY.Length -ne 32) {
+        throw 'Software attestation requires the Entra RP and 32-byte P-256 coordinates/credential ID.'
+    }
+    $cose = [ordered]@{ [int]1 = [int]2; [int]3 = [int]-7; [int]-1 = [int]1; [int]-2 = $PublicX; [int]-3 = $PublicY }
+    $bytes = [Collections.Generic.List[byte]]::new()
+    $bytes.AddRange([Security.Cryptography.SHA256]::HashData([Text.Encoding]::UTF8.GetBytes($RpId)))
+    $bytes.Add($Flags); $bytes.AddRange([byte[]]::new(4)); $bytes.AddRange([byte[]]::new(16))
+    $bytes.Add(0); $bytes.Add(32); $bytes.AddRange($CredentialId)
+    $bytes.AddRange([byte[]](New-CBOREncoded $cose))
+    return ,$bytes.ToArray()
+}
+
+function New-EntraSoftwareAttestation {
+    param([Parameter(Mandatory)]$Provider, [Parameter(Mandatory)][string]$Challenge,
+        [ValidateSet('None', 'LegacyPacked')][string]$Format = 'None', [switch]$AllowLegacySoftwareAttestation)
+    if ($Format -eq 'LegacyPacked' -and -not $AllowLegacySoftwareAttestation) {
+        throw 'Packed software attestation requires -AllowLegacySoftwareAttestation acknowledgement.'
+    }
+    $credentialBytes = [byte[]]::new(32)
+    [Security.Cryptography.RandomNumberGenerator]::Fill($credentialBytes)
+    $rpId = 'login.microsoft.com'
+    # Preserved research claims: these bits are synthetic and do not establish UP/UV assurance.
+    $flags = if ($Format -eq 'None') { [byte]0x5D } else { [byte]0x45 }
+    $authData = New-EntraSoftwareAuthenticatorData -RpId $rpId -CredentialId $credentialBytes `
+        -PublicX $Provider.PublicX -PublicY $Provider.PublicY -Flags $flags
+    if ($Format -eq 'LegacyPacked') { $Challenge = ConvertTo-Base64Url ([Text.Encoding]::UTF8.GetBytes($Challenge)) }
+    elseif ((Confirm-Base64Url $Challenge) -cne $Challenge -or (ConvertTo-Base64Url (ConvertFrom-Base64Url $Challenge)) -cne $Challenge) { throw 'Graph creation challenge is not canonical base64url.' }
+    $clientData = [ordered]@{ type = 'webauthn.create'; challenge = $Challenge; origin = "https://$rpId"; crossOrigin = $false } | ConvertTo-Json -Compress
+    $clientBytes = [Text.Encoding]::UTF8.GetBytes($clientData)
+    $statement = [ordered]@{}
+    $formatName = 'none'
+    if ($Format -eq 'LegacyPacked') {
+        $formatName = 'packed'
+        # This self-signed batch certificate is compatibility research, not trusted authenticator provenance.
+        $batch = [Security.Cryptography.ECDsa]::Create([Security.Cryptography.ECCurve]::CreateFromValue('1.2.840.10045.3.1.7'))
+        $certificate = $null
+        try {
+            $request = [Security.Cryptography.X509Certificates.CertificateRequest]::new(
+                'CN=Batch Certificate, OU=Authenticator Attestation, O=Chromium, C=US', $batch, [Security.Cryptography.HashAlgorithmName]::SHA256)
+            $certificate = $request.CreateSelfSigned([DateTimeOffset]::UtcNow.AddMinutes(-5), [DateTimeOffset]::UtcNow.AddYears(1))
+            [byte[]]$signed = $authData + [Security.Cryptography.SHA256]::HashData($clientBytes)
+            $signature = $batch.SignData($signed, [Security.Cryptography.HashAlgorithmName]::SHA256, [Security.Cryptography.DSASignatureFormat]::Rfc3279DerSequence)
+            $statement = [ordered]@{ alg = [int]-7; sig = [byte[]]$signature; x5c = @(,[byte[]]$certificate.RawData) }
+        } finally { if ($null -ne $certificate) { $certificate.Dispose() }; $batch.Dispose() }
+    }
+    return [pscustomobject]@{
+        CredentialId = ConvertTo-Base64Url $credentialBytes
+        ClientDataJson = ConvertTo-Base64Url $clientBytes
+        AttestationObject = ConvertTo-Base64Url ([byte[]](New-CBOREncoded ([ordered]@{ fmt = $formatName; attStmt = $statement; authData = [byte[]]$authData })))
+        ClientExtensionResults = ConvertTo-Base64Url ([Text.Encoding]::UTF8.GetBytes('{"hmacCreateSecret":false}'))
+        RelyingParty = $rpId
+        Authenticator = 'cross-platform'; Transports = 'usb'; AAGuid = '00000000-0000-0000-0000-000000000000'
+    }
+}
+# End source: powershell/src/Entra/SoftwareAttestation.ps1
+
+# Source: powershell/src/Entra/SoftwareCredential.ps1
+function New-EntraSoftwareCredentialRecord {
+    param([Parameter(Mandatory)]$Provider, [Parameter(Mandatory)]$Attestation,
+        [Parameter(Mandatory)][string]$UserHandle, [Parameter(Mandatory)][string]$UserPrincipalName,
+        [Parameter(Mandatory)][string]$DisplayName)
+    if ((Confirm-Base64Url $UserHandle) -cne $UserHandle -or (ConvertTo-Base64Url (ConvertFrom-Base64Url $UserHandle)) -cne $UserHandle) { throw 'Registration user handle is not canonical base64url.' }
+    $record = [ordered]@{
+        credentialId = $Attestation.CredentialId; userHandle = $UserHandle; userName = $UserPrincipalName
+        relyingParty = $Attestation.RelyingParty; url = "https://$($Attestation.RelyingParty)"
+        signCount = 0; displayName = $DisplayName; createdDateTime = [DateTimeOffset]::UtcNow.ToString('o')
+    }
+    if ($Provider.PSObject.Properties['PrivateKeyPem']) { $record.privateKey = $Provider.PrivateKeyPem }
+    elseif ($Provider.PSObject.Properties['keyVault']) { $record.keyVault = $Provider.keyVault }
+    else { throw 'Registration provider cannot serialize a key reference.' }
+    return $record
+}
+# End source: powershell/src/Entra/SoftwareCredential.ps1
+
+# Source: powershell/src/Entra/SoftwareNativeRegistration.ps1
+function Invoke-EntraSoftwareNativeRegistration {
+    param([Parameter(Mandatory)]$Context, [Parameter(Mandatory)][string]$DisplayName)
+    $provider = $null
+    try {
+        $Context = Initialize-EntraRegistrationSession -Context $Context
+        $request = Initialize-EntraRegistrationRequest -Context $Context
+        $provider = New-SoftwarePasskeyKey
+        $attestation = New-EntraSoftwareAttestation -Provider $provider -Challenge $request.ServerChallenge -Format LegacyPacked -AllowLegacySoftwareAttestation
+        $verified = Submit-EntraRegistration -Context $Context -Request $request -Attestation $attestation -DisplayName $DisplayName
+        $record = New-EntraSoftwareCredentialRecord -Provider $provider -Attestation $attestation -UserHandle $request.UserHandle `
+            -UserPrincipalName $Context.UserPrincipalName -DisplayName $DisplayName
+        return [pscustomobject]@{ Credential = $record; Verification = $verified; TenantId = $Context.TenantId; UserPrincipalName = $Context.UserPrincipalName }
+    } finally { Clear-SoftwarePasskeyKey $provider }
+}
+# End source: powershell/src/Entra/SoftwareNativeRegistration.ps1
+
+# Source: powershell/src/GitHub/SecretValues.ps1
+function Assert-GitHubPasskeyRepository {
+    param([Parameter(Mandatory)][string]$Repository)
+    if ($Repository -cnotmatch '^[A-Za-z0-9](?:[A-Za-z0-9-]{0,38})/[A-Za-z0-9_.-]{1,100}$' -or
+        $Repository.Split('/')[1] -in @('.', '..')) {
+        throw 'Repository must be an explicit github.com owner/repo name, without a URL.'
+    }
+}
+
+function Get-GitHubPasskeySecretValues {
+    param([Parameter(Mandatory)][object]$Credential)
+    $values = [ordered]@{}
+    $mapping = [ordered]@{
+        PASSKEY_PRIVATE_CREDENTIAL_ID = 'credentialId'
+        PASSKEY_PRIVATE_USER_HANDLE = 'userHandle'
+        PASSKEY_PRIVATE_USER_PRINCIPAL_NAME = 'userName'
+        PASSKEY_PRIVATE_KEY = 'privateKey'
+    }
+    foreach ($name in $mapping.Keys) {
+        $property = $mapping[$name]
+        $value = $null
+        if ($Credential -is [System.Collections.IDictionary]) {
+            $value = $Credential[$property]
+        } else {
+            $p = $Credential.PSObject.Properties[$property]
+            if ($null -ne $p) { $value = $p.Value }
+        }
+        if ($value -isnot [string] -or [string]::IsNullOrWhiteSpace($value)) {
+            throw "Credential field $property must be a nonempty string."
+        }
+        if ([Text.Encoding]::UTF8.GetByteCount($value) -gt 49152 -or $value.Contains([char]0)) {
+            throw "Credential field $property exceeds the secret size limit or contains NUL."
+        }
+        $values[$name] = $value
+    }
+    foreach ($name in @('PASSKEY_PRIVATE_CREDENTIAL_ID','PASSKEY_PRIVATE_USER_HANDLE')) {
+        $s = $values[$name]
+        if ($s -cnotmatch '^[A-Za-z0-9_-]+$' -or ($s.Length % 4) -eq 1) {
+            throw 'Credential ID and user handle must be unpadded base64url.'
+        }
+        try { $bytes = [Convert]::FromBase64String($s.Replace('-','+').Replace('_','/') + ('=' * ((4 - $s.Length % 4) % 4))) }
+        catch { throw 'Credential ID or user handle is not valid base64url.' }
+        if ([Convert]::ToBase64String($bytes).TrimEnd('=').Replace('+','-').Replace('/','_') -cne $s) {
+            throw 'Credential ID or user handle is not canonical base64url.'
+        }
+    }
+    if ($values.PASSKEY_PRIVATE_USER_PRINCIPAL_NAME -notmatch '^[^\s@]+@[^\s@]+$') {
+        throw 'Credential userName must be a UPN without whitespace.'
+    }
+    $parameters = $null
+    $key = [Security.Cryptography.ECDsa]::Create()
+    try {
+        $key.ImportFromPem($values.PASSKEY_PRIVATE_KEY)
+        $parameters = $key.ExportParameters($true)
+        if ($key.KeySize -ne 256 -or $parameters.Curve.Oid.Value -ne '1.2.840.10045.3.1.7' -or $parameters.D.Length -ne 32) {
+            throw 'Wrong key type.'
+        }
+    } catch { throw 'Credential privateKey must contain a valid unencrypted ECDSA P-256 private PEM key.' }
+    finally { $key.Dispose(); if ($null -ne $parameters -and $null -ne $parameters.D) { [Array]::Clear($parameters.D, 0, $parameters.D.Length) } }
+    return $values
+}
+# End source: powershell/src/GitHub/SecretValues.ps1
+
+# Source: powershell/src/GitHub/Transport.ps1
+function Wait-GitHubPasskeyCliTask {
+    param([Parameter(Mandatory)][Threading.Tasks.Task]$Task,
+        [Parameter(Mandatory)][Diagnostics.Stopwatch]$Clock,
+        [Parameter(Mandatory)][int]$DeadlineMilliseconds)
+    $remaining = [int][Math]::Max(0, $DeadlineMilliseconds - $Clock.ElapsedMilliseconds)
+    if ($remaining -le 0 -or -not $Task.Wait($remaining)) { throw 'CLI deadline exceeded.' }
+}
+
+function Invoke-GitHubPasskeyCli {
+    # Child output is drained and discarded. Never forward gh stderr or exception details.
+    param([Parameter(Mandatory)][string[]]$Arguments, [AllowNull()][string]$InputText,
+          [ValidateRange(1,300)][int]$TimeoutSeconds = 60)
+    $command = Get-Command gh -CommandType Application -ErrorAction SilentlyContinue | Select-Object -First 1
+    if (-not $command) { throw 'GitHub CLI (gh) is required; install it from its official source.' }
+    $psi = [Diagnostics.ProcessStartInfo]::new()
+    $psi.FileName = $command.Source
+    $psi.UseShellExecute = $false
+    $psi.RedirectStandardInput = $true
+    $psi.RedirectStandardOutput = $true
+    $psi.RedirectStandardError = $true
+    $psi.StandardInputEncoding = [Text.UTF8Encoding]::new($false)
+    $psi.Environment['GH_HOST'] = 'github.com'
+    $psi.Environment['GH_PROMPT_DISABLED'] = '1'
+    foreach ($arg in $Arguments) { $psi.ArgumentList.Add($arg) }
+    $process = [Diagnostics.Process]::new()
+    $process.StartInfo = $psi
+    $clock = [Diagnostics.Stopwatch]::StartNew()
+    $deadlineMs = $TimeoutSeconds * 1000
+    try {
+        $null = $process.Start()
+        # Copy to Stream.Null: never accumulate arbitrary child stdout/stderr in memory.
+        $stdout = $process.StandardOutput.BaseStream.CopyToAsync([IO.Stream]::Null)
+        $stderr = $process.StandardError.BaseStream.CopyToAsync([IO.Stream]::Null)
+        if ($null -ne $InputText) { Wait-GitHubPasskeyCliTask -Task ($process.StandardInput.WriteAsync($InputText)) -Clock $clock -DeadlineMilliseconds $deadlineMs }
+        Wait-GitHubPasskeyCliTask -Task ($process.StandardInput.FlushAsync()) -Clock $clock -DeadlineMilliseconds $deadlineMs
+        $process.StandardInput.Close()
+        $remaining = [int][Math]::Max(0, $deadlineMs - $clock.ElapsedMilliseconds)
+        if ($remaining -le 0 -or -not $process.WaitForExit($remaining)) { throw 'CLI deadline exceeded.' }
+        Wait-GitHubPasskeyCliTask -Task $stdout -Clock $clock -DeadlineMilliseconds $deadlineMs
+        Wait-GitHubPasskeyCliTask -Task $stderr -Clock $clock -DeadlineMilliseconds $deadlineMs
+        if ($process.ExitCode -ne 0) { throw 'CLI operation failed.' }
     } catch {
+        try { if (-not $process.HasExited) { $process.Kill($true) } } catch {}
+        throw 'GitHub CLI operation failed or timed out; raw output was suppressed and the current write may be uncertain.'
+    }
+    finally { $process.Dispose() }
+
+}
+
+function Test-GitHubPasskeyDestination {
+    param([Parameter(Mandatory)][string]$Repository)
+    Assert-GitHubPasskeyRepository $Repository
+    Invoke-GitHubPasskeyCli -Arguments @('auth','status','--hostname','github.com')
+    # A read-only preflight checks visibility, not a guarantee of later write permission.
+    Invoke-GitHubPasskeyCli -Arguments @('api', '--hostname', 'github.com', "repos/$Repository/actions/secrets?per_page=1")
+}
+# End source: powershell/src/GitHub/Transport.ps1
+
+# Source: powershell/src/Public/ExportGitHubSecret.ps1
+function Export-PasskeyToGitHubSecret {
+    [CmdletBinding(SupportsShouldProcess, ConfirmImpact='High')]
+    param(
+        [Parameter(Mandatory)][object]$Credential,
+        [Parameter(Mandatory)][string]$Repository,
+        [switch]$ConsumersPaused
+    )
+    Assert-GitHubPasskeyRepository $Repository
+    $values = Get-GitHubPasskeySecretValues $Credential
+    if (-not $ConsumersPaused) { throw 'Pause all workflows/consumers and supply -ConsumersPaused. Four secret writes are not atomic.' }
+    if (-not $PSCmdlet.ShouldProcess("github.com/$Repository", 'Replace four Actions secrets (metadata first, private key last; no rollback)')) { return }
+    Test-GitHubPasskeyDestination $Repository
+    $written = [Collections.Generic.List[string]]::new()
+    foreach ($name in $values.Keys) {
+        try {
+            Invoke-GitHubPasskeyCli -Arguments @('secret','set',$name,'--repo',"github.com/$Repository",'--app','actions') -InputText $values[$name]
+            $written.Add($name)
+        } catch {
+            $completed = if ($written.Count) { $written -join ', ' } else { '(none)' }
+            throw "GitHub export incomplete. Confirmed writes: $completed. Failed or unknown: $name. Keep consumers paused. No rollback was attempted; GitHub cannot return previous secret values. Re-export the same complete credential if it remains available, or remove the orphaned Entra method and re-enroll."
+        }
+    }
+    [pscustomobject]@{ Repository = $Repository; Success = $true; SecretNames = @($written); Atomic = $false }
+}
+# End source: powershell/src/Public/ExportGitHubSecret.ps1
+
+# Source: powershell/src/Public/RegisterGitHubPasskey.ps1
+function Register-GitHubPasskeyViaTAP {
+    <# .SYNOPSIS
+    Experimentally enroll a legacy software passkey and export its verified record to four GitHub Actions secrets.
+    .DESCRIPTION
+    Synthesized packed attestation and UP/UV flags do not prove trusted hardware or fresh presence/verification.
+    ConsumersPaused acknowledges all consumers are already paused; four writes are not atomic.
+    No plaintext credential file is created. WhatIf performs local validation only, with no I/O.
+    #>
+    [CmdletBinding(SupportsShouldProcess, ConfirmImpact = 'High')]
+    param([Parameter(Mandatory)][securestring]$TAP,
+        [Parameter(Mandatory)][ValidatePattern('^[^\s@]+@[^\s@]+$')][string]$UserPrincipalName,
+        [Parameter(Mandatory)][guid]$TenantId, [Parameter(Mandatory)][string]$Repository,
+        [ValidateLength(1,100)][string]$DisplayName = 'Software Passkey',
+        [switch]$ConsumersPaused, [switch]$AllowLegacySoftwareAttestation)
+    Assert-GitHubPasskeyRepository $Repository
+    if ($TenantId -eq [guid]::Empty -or $TAP.Length -eq 0) { throw 'TenantId and TAP cannot be empty.' }
+    if (-not $ConsumersPaused) { throw 'Pause consumers and supply -ConsumersPaused before enrollment.' }
+    if (-not $AllowLegacySoftwareAttestation) { throw 'This experimental flow requires -AllowLegacySoftwareAttestation acknowledgement.' }
+    if (-not $PSCmdlet.ShouldProcess("Entra tenant $TenantId and github.com/$Repository", 'Enroll persistent legacy software passkey and replace four repository secrets')) { return }
+    $context = $null; $result = $null; $exportStarted = $false
+    try {
+        Test-GitHubPasskeyDestination $Repository
+        $context = New-EntraRegistrationContext
+        $context = Invoke-EntraRegistrationTapAuthentication -Context $context -TAP $TAP -UserPrincipalName $UserPrincipalName -TenantId $TenantId
+        $result = Invoke-EntraSoftwareNativeRegistration -Context $context -DisplayName $DisplayName
+        # The registration function returns only after exact credential-ID verification succeeded.
+        $exportStarted = $true
+        return Export-PasskeyToGitHubSecret -Credential $result.Credential -Repository $Repository -ConsumersPaused -Confirm:$false
+    } catch {
+        if ($exportStarted) { throw [InvalidOperationException]::new('Enrollment completed, but export did not finish. Keep consumers paused. ' + $_.Exception.Message) }
+        throw [InvalidOperationException]::new('Registration failed; sensitive error details suppressed. A method may have been partially enrolled. Inspect My Sign-ins before retrying. No credential file was saved.')
+    } finally {
+        if ($null -ne $result) { $result.Credential.privateKey = $null; $result = $null }
+        Clear-EntraRegistrationContext $context
     }
 }
+# End source: powershell/src/Public/RegisterGitHubPasskey.ps1
 
-# ── Step 2: Finalize registration via authenticationmethods/verify ──
-
-# Re-authorize session (the SPA does this after returning from fido/create flow)
-$reAuthHeaders = @{
-    'Authorization'          = "Bearer $selfToken"
-    'SessionCtxV2'           = $sessionCtxV2
-    'Origin'                 = $RedirectUri
-    'Referer'                = "$RedirectUri/security-info"
-    'AjaxRequest'            = 'true'
-    'x-ms-mysignins-region'  = 'westus2'
-    'x-ms-client-session-id' = $clientSessionId
-}
-try {
-    $reAuthResp = Invoke-TrustedRegistrationWebRequest -Uri "$RedirectUri/api/session/authorize" -Method POST `
-        -Headers $reAuthHeaders -ContentType "application/json" -Body '{}' -UseBasicParsing -WebSession $webSession
-    $reAuthJson = $reAuthResp.Content | ConvertFrom-Json
-    if ($reAuthJson.sessionCtxV2) {
-        $sessionCtxV2 = $reAuthJson.sessionCtxV2
-    }
-} catch {
-}
-
-# Build the verification payload matching the SPA's completeFidoRegistration call
-$verificationData = @{
-    Name                   = $DisplayName
-    Canary                 = $fidoCanary
-    AttestationObject      = $attestationObjB64Url
-    ClientDataJson         = $clientDataB64Url
-    CredentialId           = $credentialIdB64Url
-    ClientExtensionResults = $extensionResultsB64Url
-    PostInfo               = ""
-    AAGuid                 = "00000000-0000-0000-0000-000000000000"
-    CredentialDeviceType   = "singleDevice"
-} | ConvertTo-Json -Compress
-
-$verifyBody = @{
-    Type             = 18
-    VerificationData = $verificationData
-} | ConvertTo-Json -Compress
-
-# Browser verify call uses SessionCtxV2 + cookies, NO Authorization Bearer header
-$verifyHeaders = @{
-    'SessionCtxV2'           = $sessionCtxV2
-    'Origin'                 = $RedirectUri
-    'Referer'                = "$RedirectUri/security-info"
-    'AjaxRequest'            = 'true'
-    'x-ms-mysignins-region'  = 'westus2'
-    'x-ms-client-session-id' = $clientSessionId
-    'x-rff'                  = 'tff,cpfaudit,enslfmg,fwdIam,pKoe,drmm,myAccSi,saap,mregph,mysigninsfido,mysigninsauthappnotification,mysigninsauthappotp,migaam,mrp,hoaref,mregextauth,mreghwoath,mregsq,premr,cepcr,ebtta,otebvpf,mysigninssetdefault,gcu,msieme,msiemedel,mdelsq,mdelhwoath,msidelauthapp,mdelph,msidelfido,msrappp,msdappp,aamp,fwdPhIam,fido2fs,psi2fs,sve,gprp,ctumaru,dhwo,legacyHwOATH,epowe,asnmfc,ppre,sspuispid,mahfc,pkrce,miseclientid,fnmosia,essvc,etmosvc,enmosia,enmosiv,enmosid,enmosisd,enmosidht,enmosiima,enmopr,asnmtabr,onmfrc,eaieci,enlnb,esiastnb,ersiemfa,duc,stffrf,svfae,gcufa,gprpfa,umarufnc,mfarae,gefmassv'
-}
-
-$verifyUrl = "$RedirectUri/api/authenticationmethods/verify"
-
-$verifyResp = Invoke-TrustedRegistrationWebRequest -Uri $verifyUrl -Method POST -Body $verifyBody `
-    -ContentType "application/json" -Headers $verifyHeaders -UseBasicParsing -WebSession $webSession
-$verifyJson = $verifyResp.Content | ConvertFrom-Json
-Assert-RegistrationVerified -StatusCode ([int]$verifyResp.StatusCode) -Response $verifyJson -ExpectedCredentialId $credentialIdB64Url
-
-# ══════════════════════════════════════════════════════════════════════
-# Export directly from memory; never create an unencrypted credential file.
-$phase = 'GitHub export'
-$pkcs8Bytes = $ecDsa.ExportPkcs8PrivateKey()
-$pem = "-----BEGIN PRIVATE KEY-----`n$([Convert]::ToBase64String($pkcs8Bytes, [Base64FormattingOptions]::InsertLineBreaks))`n-----END PRIVATE KEY-----"
-$credential = @{
-    credentialId = $credentialIdB64Url
-    userHandle = $fidoUserId
-    userName = $UserPrincipalName
-    privateKey = $pem
-}
-$exportStarted = $true
-Export-PasskeyToGitHubSecret -Credential $credential -Repository $Repository -ConsumersPaused -Confirm:$false
-} finally {
-    $ecDsa.Dispose()
-    if ($null -ne $pkcs8Bytes) { [Array]::Clear($pkcs8Bytes, 0, $pkcs8Bytes.Length) }
-    $pem = $null
-    $credential = $null
-}
-
-} catch {
-    if ($exportStarted) {
-        # Exporter emits only controlled metadata, never gh output or credential values.
-        throw [InvalidOperationException]::new("Enrollment completed, but export did not finish. Keep consumers paused. " + $_.Exception.Message)
-    }
-    throw [InvalidOperationException]::new('Registration failed; sensitive error details suppressed. A method may have been partially enrolled. Inspect My Sign-ins before retrying. No credential file was saved.')
-} finally {
-    $tapText = $null
-    $selfToken = $null
-    $currentRefreshToken = $null
-    $webSession = $null
-    $loginBody = $null
-    $formBody = $null
-    $currentBody = $null
-    $tokenResp = $null
-    $ngcResp = $null
-}
+# Invoke public command
+Register-GitHubPasskeyViaTAP @PSBoundParameters

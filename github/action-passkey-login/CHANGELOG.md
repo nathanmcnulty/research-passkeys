@@ -1,5 +1,17 @@
 ﻿# Changelog
 
+## Upcoming: shared source package 0.1.0
+
+The login script is generated from the reviewed `research-passkeys` source units,
+which also build a module and standalone registration tools. Source package version
+0.1.0 is independent of the historical Action release versions below; no release tags
+are changed. Named Action inputs/output masking remain compatible. PowerShell 7.6
+is required, with offline CI pinned to 7.6.6 and Pester 6.2.0.
+
+Legacy local/software and Key Vault assertion support remains experimental. Software
+UP/UV claims are not trusted authenticator evidence. Pending consent/policy states
+cannot be mistaken for completed authentication merely because an ESTS cookie exists.
+
 ## v1.1.0 - 2026-03-21
 
 Improves private-key workflow isolation and release readiness after the first public release.

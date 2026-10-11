@@ -20,8 +20,12 @@ Application confirmation remains denied by default. `-ConfirmApplication` requir
 
 ## Verification and remaining limits
 
-The offline Pester suite covers hostile Key Vault references, exact-version signing, redirect refusal, credential types, SecureString conversion, cookie selection/output, authorization URL validation and interrupt control flow. Run `Invoke-Pester ./tests -PassThru` with PowerShell 7 and Pester. The publication-time local run passed 43 tests using PowerShell 7.6.6 and Pester 6.2.0; hosted CI uses its separately pinned Pester version.
+The credential-free Pester suite covers hostile Key Vault references, exact-version signing,
+redirect refusal, credential/SecureString types, cookie output and interruption controls.
+Whole-script fixtures cryptographically verify synthetic local and Key Vault assertions and
+reject pending consent/policy states. Use PowerShell 7.6 and Pester 6.2.0; hosted offline CI
+pins PowerShell 7.6.6/Pester 6.2.0, disables telemetry before startup and fails incomplete tests.
 
-No live Entra or Key Vault authentication was performed for this update. Offline tests establish client-side behavior only. General login redirect handling has not been comprehensively redesigned or live-certified.
+No live Entra or Key Vault authentication was performed for this update. Offline tests establish client-side behavior only. Login redirect targets are checked and bounded; live acceptance has not been established.
 
-The existing software-signing path still asserts UP/UV without fresh authenticator-bound evidence. Key Vault protects the signing key but does not establish user presence or verification. This patch does not make the implementation a compliant authenticator or remove Conditional Access requirements. Registration/attestation and broker/token redesign are outside this change.
+The existing software-signing path still asserts UP/UV without fresh authenticator-bound evidence. Key Vault protects the signing key but does not establish user presence or verification. This patch does not make the implementation a compliant authenticator or remove Conditional Access requirements. The research source package also maintains registration/provisioning commands; the Action only distributes login. Broker/token projects remain separate.

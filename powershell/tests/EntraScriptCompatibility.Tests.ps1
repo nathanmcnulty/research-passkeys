@@ -12,94 +12,64 @@ BeforeAll {
     }
 }
 
-Describe 'Entra registration module imports' {
-    It 'loads both modules from the curated script location' {
-        $ast = Read-ScriptAst 'Register-EntraKeyVaultPasskey.ps1'
-        $assignment = $ast.EndBlock.Statements | Where-Object { $_ -is [System.Management.Automation.Language.AssignmentStatementAst] -and $_.Left.Extent.Text -eq '$moduleRoot' }
-        $imports = $ast.EndBlock.Statements | Where-Object { $_.Extent.Text -like 'Import-Module *' }
-        $imports.Count | Should -Be 2
-        & {
-            # Model the actual script root while evaluating only the import statements.
-            $sourceScriptRoot = Join-Path $RepositoryRoot 'powershell/scripts/entra'
-            . ([scriptblock]::Create($assignment.Extent.Text.Replace('$PSScriptRoot', '$sourceScriptRoot')))
-            foreach ($statement in $imports) { . ([scriptblock]::Create($statement.Extent.Text)) }
-            Get-Command ConvertTo-Base64Url -Module Passkey.Common | Should -Not -BeNullOrEmpty
-            foreach ($name in @('Passkey.Common', 'Passkey.EntraAuth')) {
-                (Get-Module $name).Path | Should -Be (Resolve-Path (Join-Path $RepositoryRoot "powershell/modules/$name/$name.psm1")).Path
-            }
+Describe 'Shared legacy modules remain usable by unrelated callers' {
+    It 'imports existing modules without authentication and preserves the shared browser-header function identity' {
+        Mock Invoke-WebRequest {throw 'Unexpected network'}
+        Mock Invoke-RestMethod {throw 'Unexpected network'}
+        foreach ($name in @('Passkey.Common','Passkey.EntraAuth')) {
+            Import-Module (Join-Path $RepositoryRoot "powershell/modules/$name/$name.psm1") -Force
+            (Get-Module $name).Path | Should -Be (Resolve-Path (Join-Path $RepositoryRoot "powershell/modules/$name/$name.psm1")).Path
         }
+        Get-Command ConvertTo-Base64Url -Module Passkey.Common | Should -Not -BeNullOrEmpty
+        $original=(Get-Command Add-PasskeyBrowserHeaders -Module Passkey.EntraAuth).Definition.Trim()
+        $tokens=$null;$errors=$null
+        $sourceAst=[Management.Automation.Language.Parser]::ParseFile((Join-Path $RepositoryRoot 'powershell/src/Entra/SoftwareBrowserHeaders.ps1'),[ref]$tokens,[ref]$errors)
+        $declaration=$sourceAst.Find({param($n)$n -is [Management.Automation.Language.FunctionDefinitionAst] -and $n.Name -eq 'Add-PasskeyBrowserHeaders'},$false)
+        $declaration.Body.Extent.Text.TrimStart('{').TrimEnd('}').Trim() | Should -BeExactly $original
+        Should -Invoke Invoke-WebRequest -Times 0
+        Should -Invoke Invoke-RestMethod -Times 0
     }
 }
-
-Describe 'Entra registration Az token compatibility' {
-    It 'preserves a complete SecureString token in <Path>' -ForEach @(
-        @{ Path = 'Register-EntraKeyVaultPasskey.ps1' }
-        @{ Path = 'reference/Register-EntraKeyVaultPasskeyViaTap.ps1' }
-        @{ Path = 'reference/Register-EntraKeyVaultPasskeyViaEstsAuth.ps1' }
-    ) {
-        $ast = Read-ScriptAst $Path
-        $assignment = $ast.FindAll({ param($node)
-            $node -is [System.Management.Automation.Language.AssignmentStatementAst] -and
-            $node.Left.Extent.Text -eq '$kvToken' -and $node.Right.Extent.Text -match '\$azToken.Token'
-        }, $true)
-        $assignment.Count | Should -Be 1
-        $expected = 'offline-token-ABC.123-é-漢字'
-        $azToken = [pscustomobject]@{ Token = ConvertTo-SecureString $expected -AsPlainText -Force }
-        . ([scriptblock]::Create($assignment[0].Extent.Text))
-        $kvToken | Should -BeOfType ([string])
-        "Bearer $kvToken" | Should -BeExactly "Bearer $expected"
-        # Older Az.Accounts versions returned a string. Retain that contract too.
-        $azToken.Token = $expected
-        . ([scriptblock]::Create($assignment[0].Extent.Text))
-        $kvToken | Should -BeExactly $expected
+Describe 'Canonical SecureString compatibility' {
+    BeforeAll { . (Join-Path $RepositoryRoot 'powershell/src/Common/Values.ps1') }
+    It 'preserves complete string and SecureString values without caller state changes' {
+        $expected="offline-secret-é-漢字`nsecond-line"
+        ConvertTo-PlainTextValue (ConvertTo-SecureString $expected -AsPlainText -Force) | Should -BeExactly $expected
+        ConvertTo-PlainTextValue $expected | Should -BeExactly $expected
+        ConvertTo-PlainTextValue $null | Should -BeNullOrEmpty
     }
-}
+    It 'keeps generated Key Vault token conversion compatible across string and SecureString Az versions' {
+        . (Join-Path $RepositoryRoot 'powershell/src/KeyVault/Token.ps1')
+        function Get-AzAccessToken {param($ResourceUrl,$TenantId)}
+        $expected='offline-token-ABC.123-é-漢字'
+        Mock Get-AzAccessToken { @{Token=(ConvertTo-SecureString 'offline-token-ABC.123-é-漢字' -AsPlainText -Force)} }
+        Get-KeyVaultToken | Should -BeExactly $expected
+        Mock Get-AzAccessToken { @{Token='offline-token-ABC.123-é-漢字'} }
+        Get-KeyVaultToken | Should -BeExactly $expected
+    }
 
-Describe 'Entra reference SecureString compatibility' {
-    It 'decodes every secret conversion without raw unmanaged allocations in <Path>' -ForEach @(
-        @{ Path = 'reference/Invoke-EntraPasskeyLogin.ps1'; ExpectedCount = 2 }
-        @{ Path = 'reference/Register-EntraSoftwarePasskey.ps1'; ExpectedCount = 3 }
+}
+Describe 'Explicit research software assertion contract' {
+    It 'restores local and Key Vault login through separate reviewed signers without claiming trusted UP/UV' {
+        $ast=Read-ScriptAst 'reference/Invoke-EntraPasskeyLogin.ps1'
+        $ast.Extent.Text | Should -Not -Match 'Software-backed assertions are disabled'
+        $ast.Extent.Text | Should -Match 'Invoke-LocalPasskeySignHash|Invoke-KeyVaultPasskeySignHash'
+        $ast.Extent.Text | Should -Match 'UserPresenceVerified=\$false'
+        $ast.Extent.Text | Should -Match 'UserVerificationVerified=\$false'
+    }
+    It 'retains none attestation in the generated canonical registration commands' -ForEach @(
+        @{Path='Register-EntraKeyVaultPasskey.ps1'},
+        @{Path='reference/Register-EntraKeyVaultPasskeyViaTap.ps1'},
+        @{Path='reference/Register-EntraKeyVaultPasskeyViaEstsAuth.ps1'},
+        @{Path='reference/Register-EntraSoftwarePasskey.ps1'}
     ) {
-        $ast = Read-ScriptAst $Path
-        $ast.Extent.Text | Should -Not -Match 'PtrToStringAuto|SecureStringToBSTR'
-        $expressions = $ast.FindAll({ param($node)
-            $node -is [System.Management.Automation.Language.MemberExpressionAst] -and
-            $node.Extent.Text -match '^\[System.Net.NetworkCredential\]::new\(' -and
-            $node.Member.Extent.Text -eq 'Password'
-        }, $true)
-        $expressions.Count | Should -Be $ExpectedCount
-        $expected = "offline-secret-é-漢字`nsecond-line"
-        $secret = ConvertTo-SecureString $expected -AsPlainText -Force
-        $azToken = [pscustomobject]@{ Token = $secret }
-        $PrivateKey = $secret
-        $ClientSecret = $secret
-        $ClientCertificatePassword = $secret
-        foreach ($expression in $expressions) {
-            & ([scriptblock]::Create($expression.Extent.Text)) | Should -BeExactly $expected
+        $ast=Read-ScriptAst $Path
+        if ($Path -eq 'reference/Register-EntraSoftwarePasskey.ps1') {
+            $flow=$ast.Find({param($n)$n -is [Management.Automation.Language.FunctionDefinitionAst] -and $n.Name -eq 'Invoke-EntraSoftwareGraphRegistration'},$false)
+            $flow.Extent.Text | Should -Match 'New-EntraSoftwareAttestation.*-Format None'
+        } else {
+            $ast.Extent.Text | Should -Match 'fmt["'']?\s*=\s*["'']none["'']'
+            $ast.Extent.Text | Should -Not -Match 'fmt["'']?\s*=\s*["'']packed["'']'
         }
-    }
-}
-
-Describe 'Research security boundaries remain intact' {
-    It 'throws before creating an assertion for either key backend' {
-        $ast = Read-ScriptAst 'reference/Invoke-EntraPasskeyLogin.ps1'
-        $guard = $ast.Find({ param($node)
-            $node -is [System.Management.Automation.Language.ThrowStatementAst] -and
-            $node.Extent.Text -match 'Software-backed assertions are disabled'
-        }, $true)
-        $guard | Should -Not -BeNullOrEmpty
-        $guard.Parent.Statements[0] | Should -Be $guard
-        { & ([scriptblock]::Create($guard.Extent.Text)) } | Should -Throw -ExceptionType ([System.NotSupportedException])
-    }
-
-    It 'retains none attestation and no synthetic packed attestation in <Path>' -ForEach @(
-        @{ Path = 'Register-EntraKeyVaultPasskey.ps1' }
-        @{ Path = 'reference/Register-EntraKeyVaultPasskeyViaTap.ps1' }
-        @{ Path = 'reference/Register-EntraKeyVaultPasskeyViaEstsAuth.ps1' }
-        @{ Path = 'reference/Register-EntraSoftwarePasskey.ps1' }
-    ) {
-        $ast = Read-ScriptAst $Path
-        $ast.Extent.Text | Should -Match 'fmt["'']?\s*=\s*["'']none["'']'
-        $ast.Extent.Text | Should -Not -Match 'fmt["'']?\s*=\s*["'']packed["'']'
     }
 }

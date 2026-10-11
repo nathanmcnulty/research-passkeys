@@ -35,14 +35,12 @@ This repo is meant to be the place where shared contracts, reusable helpers, tem
 - `samples/`: end-to-end scenarios and walkthroughs
 - `scripts/`: packaging, deployment, and validation automation
 
-## Maintained downstream source
+## PowerShell source and distributions
 
-- `github/adapters/`: GitHub secret-storage adapters, documentation and offline tests.
-- `github/action-passkey-login/`: complete maintained Action source; `action-passkey-login` is the distribution mirror.
-- `compatibility/nathanmcnulty/Entra/passkeys/`: historical public entry points and generated compatibility copies retained at their existing personal-repository URLs.
-- `scripts/sync/`: explicit file/hash manifest, compatibility renderer, and manual offline exporter/verifier. No scheduled synchronization is installed.
-
-See the [exact mapping and security distinctions](docs/migration/personal-passkeys-map.md). Legacy experiments do not replace the guarded research reference surfaces.
+The Entra software/Key Vault commands and GitHub adapters are maintained in
+[`powershell/src`](powershell/src). One deterministic build produces readable,
+self-contained scripts at their public paths and the `Passkey` module.
+See the [usage, build and distribution guide](powershell/BUILD.md).
 
 ## Current starter assets
 
@@ -57,7 +55,7 @@ See the [exact mapping and security distinctions](docs/migration/personal-passke
 
 ## Source material being consolidated
 
-- `nathanmcnulty\Entra\passkeys`: preserved public compatibility mirrors; maintained source and ownership are now tracked here
+- `nathanmcnulty\Entra\passkeys`: generated standalone distributions from the maintained source here
 - `key-vault-passkey-provider`: source for relevant browser-extension and Windows provider details that should be selectively absorbed into this repo
 
 ## First milestone

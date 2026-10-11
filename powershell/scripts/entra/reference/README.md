@@ -1,9 +1,11 @@
-# reference scripts
+# Standalone Entra commands
 
-These files are imported snapshots of the current PowerShell reference implementation from:
+These are generated, readable, self-contained scripts. Download one script and run
+it using PowerShell 7.6; no sibling modules or runtime source downloads are needed.
 
-- `nathanmcnulty\Entra\passkeys\keyvault`
+Edit the maintained functions in `powershell/src` and the thin help/parameter files
+in `powershell/entrypoints`, then run `build/build.ps1`. Do not edit generated files.
+The same functions build into `powershell/modules/Passkey`.
 
-They are kept here so the repo has the original working research artifacts available while shared helpers and organized wrappers are extracted around them.
-
-`Register-EntraKeyVaultPasskey.ps1` in the parent `scripts\entra\` folder is the curated wrapper where proven fixes are being folded back in without copying the modified one-off script verbatim.
+See the [usage, build and public distribution map](../../../BUILD.md).
+Legacy software assertions do not prove fresh user presence or user verification.

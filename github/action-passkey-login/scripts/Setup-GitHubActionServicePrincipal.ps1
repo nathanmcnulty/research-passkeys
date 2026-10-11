@@ -1,5 +1,5 @@
 ﻿#!/usr/bin/env pwsh
-#Requires -Version 7.0
+#Requires -Version 7.6
 <#
 .SYNOPSIS
     Creates the smallest practical Entra app registration for GitHub Actions OIDC.

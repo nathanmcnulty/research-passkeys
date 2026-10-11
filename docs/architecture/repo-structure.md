@@ -47,9 +47,12 @@ Track-specific code should stay in its track folder unless it becomes broadly re
 
 Templates should be minimal and stable. Samples can be more opinionated and scenario-specific.
 
-## Preserved downstream entry points
+## PowerShell distributions
 
-`compatibility/nathanmcnulty/Entra/passkeys` owns preserved historical public paths and generated compatibility entry points. It is not the guarded reference implementation. `scripts/sync` declares the exact byte/hash export map and verifies generated files before a manual local export. See [the ownership map](../migration/personal-passkeys-map.md). No scheduled synchronization or workflow activation is installed.
+Maintained functions in `powershell/src` and explicit ordered targets in
+`build/targets.psd1` produce self-contained public scripts and one module.
+See the [usage/build guide](../../powershell/BUILD.md). Downstream repositories
+receive exact reviewed built files; there is no runtime downloader or second implementation.
 
 ## Intake rules
 

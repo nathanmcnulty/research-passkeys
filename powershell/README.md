@@ -3,9 +3,12 @@
 See [`docs/examples-matrix.md`](../docs/examples-matrix.md) for the cross-language/provider
 parity matrix and provider-explicit naming map.
 
-This folder now contains the first pass of the extracted PowerShell reference implementation from the existing `keyvault` scripts.
+The Entra commands use small maintained source units that build into both standalone scripts and the `Passkey` module. See [BUILD.md](BUILD.md) for usage, source layout, checks and downstream file mapping.
 
 Current shape:
+
+- `src/` and `entrypoints/`: maintained command functions and thin standalone entrypoints
+- `modules/Passkey/`: generated module with explicit public exports
 
 - `modules/Passkey.Common/`: shared binary and encoding helpers
 - `modules/Passkey.EntraAuth/`: ESTS/TAP login helpers and browser-parity headers
@@ -21,7 +24,7 @@ Real fixes intentionally carried forward into the curated script include:
 - browser-parity headers and better diagnostics around passkey-init and verification calls
 - safer output/key-name sanitization for UPN-derived file and key names
 
-Compatibility-only ESTS or raw session flows can still stay here, but they should be clearly labeled and separated from the preferred shared auth path.
+Native TAP/ESTS flows and Graph application-permission registration are explicit commands. Local software signing, Key Vault signing, and GitHub secret transport are separate responsibilities.
 
 ## Passkey broker client
 
@@ -123,16 +126,10 @@ $state = Read-Host 'Copy the IDX stateHandle' -AsSecureString
   -Challenge '<base64url challenge>' -CredentialFilePath '.\okta-passkey-record.json'
 ```
 
-## Offline Entra compatibility tests
+## Offline checks
 
-Run `Invoke-Pester ./tests/EntraScriptCompatibility.Tests.ps1` from this directory.
-The tests parse the Entra scripts and execute only selected import, token-conversion,
-and denial expressions with synthetic values. They do not enroll credentials, sign
-in, contact Key Vault, or establish server acceptance. The regression suite covers
-curated module resolution, both string and SecureString Az token results, and
-cross-platform SecureString conversion in reference scripts.
-
-These compatibility fixes do not enable reference login: software-backed assertions
-remain explicitly disabled until fresh authenticator-bound user presence and
-verification can be proven. Registration continues to use `none` attestation rather
-than synthetic attestation.
+Run `../build/build.ps1 -Check` and `Invoke-Pester ..` using PowerShell 7.6.
+The suite checks source units, generated standalone scripts, module commands and
+unrelated research projects with synthetic data and mocked service boundaries.
+It does not establish live Entra acceptance or hardware-authenticator compliance.
+See [BUILD.md](BUILD.md) for the explicit legacy software UP/UV limitations.

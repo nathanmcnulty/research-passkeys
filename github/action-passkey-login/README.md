@@ -1,6 +1,6 @@
 ﻿# Passkey Login Action
 
-> Maintained source: [research-passkeys/github/action-passkey-login](https://github.com/nathanmcnulty/research-passkeys/tree/main/github/action-passkey-login). The standalone action repository is the distribution mirror. Propose source changes in research, then use its reviewed offline sync. This remains a legacy experimental software-signing action; it does not establish authenticator-bound presence or verification.
+> Maintained source: [research-passkeys/github/action-passkey-login](https://github.com/nathanmcnulty/research-passkeys/tree/main/github/action-passkey-login). The standalone action repository is the distribution mirror. Propose source changes in research, then copy its reviewed built artifacts. This remains a legacy experimental software-signing action; it does not establish authenticator-bound presence or verification.
 
 Reusable GitHub Action for Entra passkey authentication whose primary purpose is to return an ESTS cookie for downstream tools. The safest supported design is to keep the passkey signing key in Azure Key Vault, authenticate the workflow to Azure with `azure/login`, and let this action return the cookie as a masked output.
 
@@ -276,7 +276,7 @@ The script no longer writes token previews to the console. It only includes the 
 
 ## Notes
 
-- The action bundles `PasskeyLogin.ps1` and runs it with PowerShell 7.
+- The action bundles `PasskeyLogin.ps1` and requires PowerShell 7.6. Hosted and self-hosted runners must have it installed before invoking the action; preflight fails clearly on an older runtime. This action does not install or download its implementation at runtime.
 - The action masks sensitive inputs before invoking the script.
 - `azure/login` should run before this action when using Key Vault-backed signing.
 - If you grant Key Vault data-plane access, use a role or permission set that allows signing but no broader secret access than necessary.

@@ -1,5 +1,5 @@
 name: "Passkey Login"
-description: "Reusable GitHub Action to obtain an ESTS authentication cookie from an Entra passkey, preferring Azure Key Vault-backed signing and falling back to a local private key."
+description: "Reusable GitHub Action to obtain an ESTS authentication cookie from an Entra passkey, using either Azure Key Vault-backed signing or an explicitly supplied local private key."
 author: "nathanmcnulty"
 inputs:
   credential-id:
@@ -79,6 +79,9 @@ runs:
     - name: Verify embedded script
       shell: pwsh
       run: |
+        if ($PSVersionTable.PSVersion -lt [version]'7.6') {
+          throw 'This action requires PowerShell 7.6. Install it on the runner before invoking the action.'
+        }
         $script = Join-Path $env:GITHUB_ACTION_PATH 'PasskeyLogin.ps1'
         if (-not (Test-Path $script)) {
           Write-Error "Embedded script not found: $script"

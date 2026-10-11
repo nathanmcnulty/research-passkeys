@@ -94,40 +94,10 @@ For Azure-hosted orchestration layers, start from:
 These assets intentionally call the Function surfaces instead of re-embedding passkey protocol logic in each orchestration host.
 
 
-## Maintained GitHub and personal-repository mirrors
+## Standalone PowerShell and GitHub distributions
 
-For this concrete source-sync flow, the authoritative mapping is
-`scripts/sync/downstream-manifest.json`. See [personal-passkeys-map.md](personal-passkeys-map.md)
-for each public entry point, imported versus updated status, and security boundaries.
-All paths and SHA-256 values are explicit; the tool does not discover files by wildcard.
-Unlisted downstream files are untouched. The historical DOCX is a documented exclusion.
-
-With Python 3 and reviewed local checkouts under a common directory (one directory
-named `nathanmcnulty` and one named `action-passkey-login`), run from research:
-
-```sh
-python scripts/sync/render_compatibility.py
-python scripts/sync/render_compatibility.py --check
-python scripts/sync/export_downstream.py --refresh-hashes
-python -m unittest discover -s scripts/sync -p 'test_*.py'
-python scripts/sync/export_downstream.py --target-root /path/to/checkouts --apply
-python scripts/sync/export_downstream.py --target-root /path/to/checkouts --check
-```
-
-Review the canonical diff and refreshed manifest before applying. Hash refresh is a
-maintainer operation, not evidence that new code was independently reviewed. The exporter
-checks source hashes before any write, copies exact bytes, and removes only the explicitly
-listed unpublished adapter files when their old hashes match. It does not commit, push,
-merge, authenticate, dispatch workflows, or install scheduled sync. Use `--check` for
-read-only drift detection. This manifest requires generated-compatibility validation: the exporter recomputes
-the expected files with its sibling renderer and refuses stale files before export
-or hash refresh. Run the separate renderer and tests after canonical runtime edits. Rendered personal logins must pass their compatibility tests,
-the canonical action tests, and adapter tests with synthetic inputs only.
-
-The action's four existing workflow files are inert nested source in research and retain
-their downstream paths/behavior. No new GitHub permission or live test is introduced.
-Cross-repository publication is not atomic: land/review source first and update downstream
-mirrors from the same reviewed source revision. Record the research commit in downstream
-PR descriptions; the manifest hashes identify exact file contents without a self-referential
-commit field. Windows checkouts must preserve bytes (for example `core.autocrlf=false`)
-because drift checks intentionally compare hashes, not normalized text.
+Research is the maintained source. Personal public URLs and the Action repository
+receive exact generated artifacts from the same reviewed source version and commit.
+The [build guide](../../powershell/BUILD.md) lists the explicit file mapping and checks.
+Original DOCX and unrelated public content are preserved. No automatic cross-repository
+writer, bot PR or synchronization service is installed.

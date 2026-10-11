@@ -1,17 +1,61 @@
 name: Offline boundaries
 on: [push, pull_request]
+
 permissions:
   contents: read
+
+# Set opt-out before either the runner's or the pinned pwsh process starts.
+env:
+  POWERSHELL_TELEMETRY_OPTOUT: '1'
+  DOTNET_CLI_TELEMETRY_OPTOUT: '1'
+
 jobs:
   test:
     runs-on: ubuntu-latest
+    timeout-minutes: 20
+    defaults:
+      run:
+        shell: pwsh
     steps:
-      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - name: Check out distribution
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
-      - shell: pwsh
+      - name: Install pinned PowerShell runtime
+        shell: bash
         run: |
-          Set-PSRepository PSGallery -InstallationPolicy Trusted
-          Install-Module Pester -RequiredVersion 5.7.1 -Scope CurrentUser -Force -SkipPublisherCheck
-          $result=Invoke-Pester ./tests -PassThru
-          if($result.FailedCount){exit 1}
+          set -euo pipefail
+          archive="$RUNNER_TEMP/powershell-7.6.6-linux-x64.tar.gz"
+          runtime="$RUNNER_TEMP/powershell-7.6.6"
+          # Hash from https://github.com/PowerShell/PowerShell/releases/tag/v7.6.6
+          curl --fail --location --retry 3 --output "$archive" \
+            https://github.com/PowerShell/PowerShell/releases/download/v7.6.6/powershell-7.6.6-linux-x64.tar.gz
+          printf 'DDBC4A2D113BBD46D283CFEDCBCD117A70CAEFD7673F41F2B4E0000BADF103BC  %s\n' "$archive" | sha256sum --check --strict
+          mkdir -p "$runtime"
+          tar --extract --gzip --file "$archive" --directory "$runtime"
+          chmod +x "$runtime/pwsh"
+          echo "$runtime" >> "$GITHUB_PATH"
+      - name: Verify pinned PowerShell runtime
+        run: |
+          if ($PSVersionTable.PSVersion -ne [version]'7.6.6') {
+            throw "Expected PowerShell 7.6.6, got $($PSVersionTable.PSVersion)."
+          }
+          if ([Microsoft.PowerShell.Telemetry.ApplicationInsightsTelemetry]::CanSendTelemetry) {
+            throw 'Telemetry must be disabled before PowerShell starts.'
+          }
+      - name: Install pinned offline test dependency
+        run: |
+          Install-PSResource -Name Pester -Version 6.2.0 -Repository PSGallery -Scope CurrentUser -TrustRepository -Quiet
+          Import-Module Pester -RequiredVersion 6.2.0 -Force
+          if ((Get-Module Pester).Version -ne [version]'6.2.0') { throw 'Unexpected Pester version.' }
+      - name: Run offline distribution tests
+        run: |
+          Import-Module Pester -RequiredVersion 6.2.0 -Force
+          $configuration = New-PesterConfiguration
+          $configuration.Run.Path = @('./tests')
+          $configuration.Run.PassThru = $true
+          $configuration.Output.Verbosity = 'Detailed'
+          $result = Invoke-Pester -Configuration $configuration
+          if ($result.Result -ne 'Passed' -or $result.FailedCount -gt 0 -or $result.SkippedCount -gt 0 -or $result.NotRunCount -gt 0 -or $result.TotalCount -eq 0) {
+            throw "Offline distribution tests failed or did not run: $($result.FailedCount) failed, $($result.SkippedCount) skipped, $($result.NotRunCount) not run."
+          }
