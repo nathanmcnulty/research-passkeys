@@ -201,7 +201,7 @@ Example using the cookie with a downstream PowerShell flow. This action is desig
 
 Do not print the cookie. Do not promote it to an artifact. Keep its use scoped to the smallest possible set of steps.
 
-For a full repository-hosted validation flow, use [test-xdr-key-vault.yml](c:/Users/nathanmcnulty/GitHub/action-passkey-login/.github/workflows/test-xdr-key-vault.yml). It signs in with the action, asserts that the returned cookie is `ESTSAUTH`, and then validates that the cookie can bootstrap a session to `security.microsoft.com`.
+For a full repository-hosted validation flow, use [test-xdr-key-vault.yml](.github/workflows/test-xdr-key-vault.yml). It signs in with the action, asserts that the returned cookie is `ESTSAUTH`, and then validates that the cookie can bootstrap a session to `security.microsoft.com`.
 
 ## Local key mode
 
@@ -238,7 +238,7 @@ You can test this action in the same private repository by using a local path re
 
 That is the simplest way to validate the action before making the repository public. Once you want other repositories to consume it, publish a tag such as `v1` and reference `owner/action-passkey-login@v1`.
 
-For Key Vault-backed testing in this same repository, use the included workflow [test-key-vault.yml](c:/Users/nathanmcnulty/GitHub/action-passkey-login/.github/workflows/test-key-vault.yml) and configure these repository secrets first:
+For Key Vault-backed testing in this same repository, use the included workflow [test-key-vault.yml](.github/workflows/test-key-vault.yml) and configure these repository secrets first:
 
 - `AZURE_CLIENT_ID`
 - `AZURE_TENANT_ID`
@@ -250,7 +250,7 @@ For Key Vault-backed testing in this same repository, use the included workflow 
 
 The workflow signs into Azure with `azure/login`, invokes the local action with Key Vault inputs, and verifies that the action reports `Azure Key Vault` as the signature method.
 
-For local private-key testing in this same repository, use [test-private-key.yml](c:/Users/nathanmcnulty/GitHub/action-passkey-login/.github/workflows/test-private-key.yml) and configure a separate private-key passkey registration with these repository secrets:
+For local private-key testing in this same repository, use [test-private-key.yml](.github/workflows/test-private-key.yml) and configure a separate private-key passkey registration with these repository secrets:
 
 - `PASSKEY_PRIVATE_CREDENTIAL_ID`
 - `PASSKEY_PRIVATE_USER_HANDLE`
@@ -263,8 +263,8 @@ Do not point the private-key workflow at the Key Vault-backed registration value
 
 For local testing outside GitHub Actions, create your own passkey JSON file and keep it out of source control. The repository includes sanitized examples for the expected shape:
 
-- [examples/passkey.private-key.example.json](c:/Users/nathanmcnulty/GitHub/action-passkey-login/examples/passkey.private-key.example.json)
-- [examples/passkey.keyvault.example.json](c:/Users/nathanmcnulty/GitHub/action-passkey-login/examples/passkey.keyvault.example.json)
+- [examples/passkey.private-key.example.json](examples/passkey.private-key.example.json)
+- [examples/passkey.keyvault.example.json](examples/passkey.keyvault.example.json)
 
 Example:
 
@@ -283,7 +283,7 @@ The script no longer writes token previews to the console. It only includes the 
 
 ## Minimal OIDC Setup
 
-The repository includes [scripts/Setup-GitHubActionServicePrincipal.ps1](c:/Users/nathanmcnulty/GitHub/action-passkey-login/scripts/Setup-GitHubActionServicePrincipal.ps1), a minimal helper that:
+The repository includes [scripts/Setup-GitHubActionServicePrincipal.ps1](scripts/Setup-GitHubActionServicePrincipal.ps1), a minimal helper that:
 
 - creates or reuses an Entra app registration
 - creates or reuses its service principal

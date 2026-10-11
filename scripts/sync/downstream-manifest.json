@@ -59,7 +59,7 @@
       "source": "github/action-passkey-login/README.md",
       "repository": "action-passkey-login",
       "path": "README.md",
-      "sha256": "c8c79084face649df611db8cba6d1bca4e52b5e34c23c6caf2d799f95e353f90"
+      "sha256": "765acbb1e16b1f1e51960cffb5611efd661aa6e525a24fca072d505ef75dc5a4"
     },
     {
       "source": "github/action-passkey-login/SECURITY.md",
@@ -119,7 +119,7 @@
       "source": "compatibility/nathanmcnulty/Entra/passkeys/LOGIN-MIGRATION.md",
       "repository": "nathanmcnulty",
       "path": "Entra/passkeys/LOGIN-MIGRATION.md",
-      "sha256": "00a75181288432bc7230d979222b3d388558bad078a80becc9ece87dad7cafdb"
+      "sha256": "c8d69ac341cc09f4e991cc52c0d5939d2a2b9cd21d8785ef09487edbceffd70e"
     },
     {
       "source": "compatibility/nathanmcnulty/Entra/passkeys/PasskeyLogin.ps1",
