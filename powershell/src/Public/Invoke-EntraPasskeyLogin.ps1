@@ -3,9 +3,9 @@ function Invoke-EntraPasskeyLogin {
     .SYNOPSIS
     Performs experimental Entra authentication with a local P-256 or Key Vault signing key.
     .DESCRIPTION
-    Uses legacy software-generated WebAuthn assertions. The UP/UV flags are synthesized
-    compatibility claims, not evidence of fresh user presence or verification. Entra policy
-    and authenticator compliance remain the caller's responsibility. No consent is approved.
+    Unattended software implementation, not a FIDO-certified authenticator. UP/UV flags
+    are synthetic; no authenticator user presence, verification or hardware assurance is
+    provided. Tenant policy may reject this flow. No consent is approved.
     Cookie/session data is returned only by explicit request. This command sets no globals.
     #>
     [CmdletBinding()]
@@ -81,7 +81,7 @@ function Invoke-EntraPasskeyLogin {
         $context=$null
         try {
             $context=Resolve-EntraLoginContext -Parameters $parameters
-            Write-Warning 'Legacy software assertions synthesize UP/UV flags; neither local nor Key Vault signing proves fresh user presence or verification.'
+            Write-PasskeySoftwareWarning
             Start-EntraPasskeyLogin -Context $context
             New-EntraPasskeyAssertion -Context $context
             Submit-EntraPasskeyAssertion -Context $context

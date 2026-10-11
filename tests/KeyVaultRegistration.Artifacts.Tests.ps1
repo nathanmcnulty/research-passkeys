@@ -178,6 +178,18 @@ Describe 'Whole generated Key Vault enrollment workflows' {
         Should -Invoke Get-MgContext -ModuleName Passkey -Times 3
     }
 
+    It 'warns once through the curated <Surface> wrapper and never for WhatIf' -ForEach @(@{Surface='standalone'},@{Surface='module'}) {
+        $target = @($manifest.Scripts | Where-Object { $_.EntryPoint -match '/Register-EntraKeyVaultPasskey\.ps1$' })[0]
+        $command = if ($Surface -eq 'standalone') { Join-Path $root $target.Path } else { 'Passkey\Register-EntraKeyVaultPasskey' }
+        $parameters = @{TAP='offline';UserPrincipalName='offline@example.test';TenantId=$tenant;KeyVaultName='offline-vault';KeyVaultKeyName='offline-key';KeyVaultAccessToken='offline-token';OutputPath='offline.json';Confirm=$false}
+        $warnings = @()
+        $record = & $command @parameters -WarningVariable warnings
+        $record.credentialId | Should -Not -BeNullOrEmpty
+        @($warnings).Count | Should -Be 1
+        $warnings = @()
+        & $command @parameters -WhatIf -WarningVariable warnings
+        @($warnings).Count | Should -Be 0
+    }
     It 'executes the generated TAP standalone artifact through qualified mocked transport' {
         (Microsoft.PowerShell.Utility\Invoke-WebRequest -Uri 'about:synthetic-mock-check').StatusCode | Should -Be 200
         $target = @($manifest.Scripts | Where-Object { $_.EntryPoint -match '/Register-EntraKeyVaultPasskeyViaTap\.ps1$' })[0]

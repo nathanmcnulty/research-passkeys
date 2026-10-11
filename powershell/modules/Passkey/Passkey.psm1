@@ -196,6 +196,10 @@ function Get-HttpErrorMessage {
     # Exceptions and server bodies may echo bearer material. Never forward them to logs.
     return 'Request failed; server details suppressed.'
 }
+
+function Write-PasskeySoftwareWarning {
+    Write-Warning 'Research automation only: not a FIDO-certified authenticator. These flows do not perform authenticator user presence or verification; any UP/UV flags are synthetic. Tenant policy may reject them.'
+}
 # End source: powershell/src/Common/Values.ps1
 
 # Source: powershell/src/Common/Process.ps1
@@ -888,9 +892,9 @@ function Invoke-EntraPasskeyLogin {
     .SYNOPSIS
     Performs experimental Entra authentication with a local P-256 or Key Vault signing key.
     .DESCRIPTION
-    Uses legacy software-generated WebAuthn assertions. The UP/UV flags are synthesized
-    compatibility claims, not evidence of fresh user presence or verification. Entra policy
-    and authenticator compliance remain the caller's responsibility. No consent is approved.
+    Unattended software implementation, not a FIDO-certified authenticator. UP/UV flags
+    are synthetic; no authenticator user presence, verification or hardware assurance is
+    provided. Tenant policy may reject this flow. No consent is approved.
     Cookie/session data is returned only by explicit request. This command sets no globals.
     #>
     [CmdletBinding()]
@@ -966,7 +970,7 @@ function Invoke-EntraPasskeyLogin {
         $context=$null
         try {
             $context=Resolve-EntraLoginContext -Parameters $parameters
-            Write-Warning 'Legacy software assertions synthesize UP/UV flags; neither local nor Key Vault signing proves fresh user presence or verification.'
+            Write-PasskeySoftwareWarning
             Start-EntraPasskeyLogin -Context $context
             New-EntraPasskeyAssertion -Context $context
             Submit-EntraPasskeyAssertion -Context $context
@@ -1535,10 +1539,7 @@ function New-EntraSoftwareAuthenticatorData {
 
 function New-EntraSoftwareAttestation {
     param([Parameter(Mandatory)]$Provider, [Parameter(Mandatory)][string]$Challenge,
-        [ValidateSet('None', 'LegacyPacked')][string]$Format = 'None', [switch]$AllowLegacySoftwareAttestation)
-    if ($Format -eq 'LegacyPacked' -and -not $AllowLegacySoftwareAttestation) {
-        throw 'Packed software attestation requires -AllowLegacySoftwareAttestation acknowledgement.'
-    }
+        [ValidateSet('None', 'Packed')][string]$Format = 'None')
     $credentialBytes = [byte[]]::new(32)
     [Security.Cryptography.RandomNumberGenerator]::Fill($credentialBytes)
     $rpId = 'login.microsoft.com'
@@ -1546,13 +1547,13 @@ function New-EntraSoftwareAttestation {
     $flags = if ($Format -eq 'None') { [byte]0x5D } else { [byte]0x45 }
     $authData = New-EntraSoftwareAuthenticatorData -RpId $rpId -CredentialId $credentialBytes `
         -PublicX $Provider.PublicX -PublicY $Provider.PublicY -Flags $flags
-    if ($Format -eq 'LegacyPacked') { $Challenge = ConvertTo-Base64Url ([Text.Encoding]::UTF8.GetBytes($Challenge)) }
+    if ($Format -eq 'Packed') { $Challenge = ConvertTo-Base64Url ([Text.Encoding]::UTF8.GetBytes($Challenge)) }
     elseif ((Confirm-Base64Url $Challenge) -cne $Challenge -or (ConvertTo-Base64Url (ConvertFrom-Base64Url $Challenge)) -cne $Challenge) { throw 'Graph creation challenge is not canonical base64url.' }
     $clientData = [ordered]@{ type = 'webauthn.create'; challenge = $Challenge; origin = "https://$rpId"; crossOrigin = $false } | ConvertTo-Json -Compress
     $clientBytes = [Text.Encoding]::UTF8.GetBytes($clientData)
     $statement = [ordered]@{}
     $formatName = 'none'
-    if ($Format -eq 'LegacyPacked') {
+    if ($Format -eq 'Packed') {
         $formatName = 'packed'
         # This self-signed batch certificate is compatibility research, not trusted authenticator provenance.
         $batch = [Security.Cryptography.ECDsa]::Create([Security.Cryptography.ECCurve]::CreateFromValue('1.2.840.10045.3.1.7'))
@@ -1830,8 +1831,9 @@ function Register-EntraSoftwarePasskey {
     <# .SYNOPSIS
     Register a research software passkey using Graph application permissions and none attestation.
     .DESCRIPTION
-    Supports local P-256 keys or a Key Vault reference. Synthesized UP/UV flags do not
-    establish fresh human presence, verification or trusted authenticator assurance.
+    Supports local P-256 keys or a Key Vault reference. Unattended software implementation,
+    not a FIDO-certified authenticator. Synthetic UP/UV claims do not establish authenticator
+    presence, verification or hardware assurance. Graph uses none attestation.
     The private-key output is reserved before registration and never silently overwritten.
     WhatIf performs local parameter validation only. Explicit PassThru forwards application configuration
     with ClientSecret kept as SecureString, never plaintext.
@@ -1852,6 +1854,7 @@ function Register-EntraSoftwarePasskey {
         # Defaults absent from PSBoundParameters are still explicit workflow inputs.
         $configuration.DisplayName = $DisplayName
         if (-not $PSCmdlet.ShouldProcess($UserUpn, "Register software passkey '$DisplayName' and save its credential record")) { return }
+        Write-PasskeySoftwareWarning
         $path = Resolve-EntraSoftwareOutputPath -OutputPath $OutputPath -UserPrincipalName $UserUpn -DisplayName $DisplayName
         $stream = $null; $result = $null; $saved = $false
         try {
@@ -2134,7 +2137,7 @@ function Invoke-EntraSoftwareNativeRegistration {
         $Context = Initialize-EntraRegistrationSession -Context $Context
         $request = Initialize-EntraRegistrationRequest -Context $Context
         $provider = New-SoftwarePasskeyKey
-        $attestation = New-EntraSoftwareAttestation -Provider $provider -Challenge $request.ServerChallenge -Format LegacyPacked -AllowLegacySoftwareAttestation
+        $attestation = New-EntraSoftwareAttestation -Provider $provider -Challenge $request.ServerChallenge -Format Packed
         $verified = Submit-EntraRegistration -Context $Context -Request $request -Attestation $attestation -DisplayName $DisplayName
         $record = New-EntraSoftwareCredentialRecord -Provider $provider -Attestation $attestation -UserHandle $request.UserHandle `
             -UserPrincipalName $Context.UserPrincipalName -DisplayName $DisplayName
@@ -2146,20 +2149,21 @@ function Invoke-EntraSoftwareNativeRegistration {
 # Source: powershell/src/Public/RegisterSoftwarePasskeyViaTap.ps1
 function Register-EntraSoftwarePasskeyViaTap {
     <# .SYNOPSIS
-    Experimentally register a legacy packed software passkey through the My Sign-ins TAP flow.
+    Register a software passkey through the My Sign-ins TAP flow with packed attestation.
     .DESCRIPTION
-    Requires acknowledgement of synthetic software attestation and unsupported native endpoints.
-    UP/UV claims are not trusted assurance. WhatIf causes no I/O. Existing output files are never overwritten.
+    Unattended software implementation, not a FIDO-certified authenticator. Packed uses
+    a synthetic self-signed batch certificate; UP/UV claims do not prove authenticator
+    presence, verification or hardware assurance. WhatIf causes no I/O. Existing files are never overwritten.
     #>
     [CmdletBinding(SupportsShouldProcess, ConfirmImpact = 'High')]
     param([Parameter(Mandatory)][object]$TAP,
         [Parameter(Mandatory)][ValidatePattern('^[^\s@]+@[^\s@]+$')][string]$UserPrincipalName,
         [Parameter(Mandatory)][guid]$TenantId, [ValidateLength(1,100)][string]$DisplayName = 'Software Passkey',
-        [string]$OutputPath, [switch]$AllowLegacySoftwareAttestation)
+        [string]$OutputPath)
     if ($TenantId -eq [guid]::Empty -or $null -eq $TAP -or ($TAP -is [securestring] -and $TAP.Length -eq 0) -or
         ($TAP -is [string] -and [string]::IsNullOrWhiteSpace($TAP))) { throw 'TenantId and TAP cannot be empty.' }
-    if (-not $AllowLegacySoftwareAttestation) { throw 'This experimental flow requires -AllowLegacySoftwareAttestation acknowledgement.' }
-    if (-not $PSCmdlet.ShouldProcess($UserPrincipalName, "Enroll legacy software passkey '$DisplayName' and save its private credential")) { return }
+    if (-not $PSCmdlet.ShouldProcess($UserPrincipalName, "Enroll software passkey '$DisplayName' and save its private credential")) { return }
+    Write-PasskeySoftwareWarning
     $context = $null; $stream = $null; $result = $null; $saved = $false
     try {
         $path = Resolve-EntraSoftwareOutputPath -OutputPath $OutputPath -UserPrincipalName $UserPrincipalName -DisplayName $DisplayName
@@ -2183,23 +2187,25 @@ function Register-EntraSoftwarePasskeyViaTap {
 # Source: powershell/src/Public/RegisterSoftwarePasskeyViaEstsAuth.ps1
 function Register-EntraSoftwarePasskeyViaEstsAuth {
     <# .SYNOPSIS
-    Experimentally register a legacy packed software passkey using an existing MFA ESTS session.
+    Register a software passkey using an existing MFA ESTS session and packed attestation.
     .DESCRIPTION
     Resolves tenant and UPN from the transport-returned My Sign-ins token, checks OAuth state/client binding,
-    and refuses consent interruptions. Synthetic software UP/UV claims are not trusted assurance.
+    and refuses consent interruptions. Unattended software implementation, not a FIDO-certified
+    authenticator. Packed uses a synthetic self-signed batch certificate; UP/UV claims do not
+    prove authenticator presence, verification or hardware assurance.
     #>
     [CmdletBinding(SupportsShouldProcess, ConfirmImpact = 'High')]
     param([Parameter(Mandatory)][object]$ESTSAuthCookie, [string]$TenantId,
         [Alias('DisplayName')][ValidateLength(1,100)][string]$PasskeyDisplayName = 'Software Passkey',
-        [string]$OutputPath, [switch]$AllowLegacySoftwareAttestation)
+        [string]$OutputPath)
     if ($null -eq $ESTSAuthCookie -or ($ESTSAuthCookie -is [securestring] -and $ESTSAuthCookie.Length -eq 0) -or
         ($ESTSAuthCookie -is [string] -and [string]::IsNullOrWhiteSpace($ESTSAuthCookie))) { throw 'ESTSAuthCookie cannot be empty.' }
     if ($TenantId) {
         $tenant = [guid]::Empty
         if (-not [guid]::TryParse($TenantId, [ref]$tenant) -or $tenant -eq [guid]::Empty) { throw 'TenantId must be a nonempty GUID.' }
     }
-    if (-not $AllowLegacySoftwareAttestation) { throw 'This experimental flow requires -AllowLegacySoftwareAttestation acknowledgement.' }
-    if (-not $PSCmdlet.ShouldProcess("ESTS session tenant $TenantId", "Enroll legacy software passkey '$PasskeyDisplayName' and save its private credential")) { return }
+    if (-not $PSCmdlet.ShouldProcess("ESTS session tenant $TenantId", "Enroll software passkey '$PasskeyDisplayName' and save its private credential")) { return }
+    Write-PasskeySoftwareWarning
     $context = $null; $stream = $null; $result = $null; $saved = $false
     try {
         $context = New-EntraRegistrationContext
@@ -2372,9 +2378,10 @@ function Export-PasskeyToGitHubSecret {
 # Source: powershell/src/Public/RegisterGitHubPasskey.ps1
 function Register-GitHubPasskeyViaTAP {
     <# .SYNOPSIS
-    Experimentally enroll a legacy software passkey and export its verified record to four GitHub Actions secrets.
+    Enroll a software passkey and export its verified record to four GitHub Actions secrets.
     .DESCRIPTION
-    Synthesized packed attestation and UP/UV flags do not prove trusted hardware or fresh presence/verification.
+    Unattended software implementation, not a FIDO-certified authenticator. Packed uses a synthetic
+    self-signed batch certificate; UP/UV flags do not prove authenticator presence, verification or hardware assurance.
     ConsumersPaused acknowledges all consumers are already paused; four writes are not atomic.
     No plaintext credential file is created. WhatIf performs local validation only, with no I/O.
     #>
@@ -2383,12 +2390,12 @@ function Register-GitHubPasskeyViaTAP {
         [Parameter(Mandatory)][ValidatePattern('^[^\s@]+@[^\s@]+$')][string]$UserPrincipalName,
         [Parameter(Mandatory)][guid]$TenantId, [Parameter(Mandatory)][string]$Repository,
         [ValidateLength(1,100)][string]$DisplayName = 'Software Passkey',
-        [switch]$ConsumersPaused, [switch]$AllowLegacySoftwareAttestation)
+        [switch]$ConsumersPaused)
     Assert-GitHubPasskeyRepository $Repository
     if ($TenantId -eq [guid]::Empty -or $TAP.Length -eq 0) { throw 'TenantId and TAP cannot be empty.' }
     if (-not $ConsumersPaused) { throw 'Pause consumers and supply -ConsumersPaused before enrollment.' }
-    if (-not $AllowLegacySoftwareAttestation) { throw 'This experimental flow requires -AllowLegacySoftwareAttestation acknowledgement.' }
-    if (-not $PSCmdlet.ShouldProcess("Entra tenant $TenantId and github.com/$Repository", 'Enroll persistent legacy software passkey and replace four repository secrets')) { return }
+    if (-not $PSCmdlet.ShouldProcess("Entra tenant $TenantId and github.com/$Repository", 'Enroll persistent software passkey and replace four repository secrets')) { return }
+    Write-PasskeySoftwareWarning
     $context = $null; $result = $null; $exportStarted = $false
     try {
         Test-GitHubPasskeyDestination $Repository
@@ -2853,6 +2860,7 @@ function Save-EntraKeyVaultRegistrationRecord {
 .DESCRIPTION
     Explicit research command. Supports WhatIf without authentication, network or output writes.
     Generates none attestation with AT-only flags. It does not establish authenticator-bound UP/UV.
+    Unattended software implementation, not a FIDO-certified authenticator or evidence of hardware assurance.
     Returns the confirmed credential record after writing its public Key Vault reference.
 #>
 function Register-EntraKeyVaultPasskeyViaTap {
@@ -2889,6 +2897,7 @@ param(
     [string]$RedirectUri = 'https://mysignins.microsoft.com'
 )
     if (-not $PSCmdlet.ShouldProcess("$KeyVaultName / Entra passkey enrollment", 'Authenticate, create a Key Vault key, enroll the passkey, and save its credential record')) { return }
+    Write-PasskeySoftwareWarning
     $context = $null; $key = $null; $token = $null; $attestation = $null
     try {
         $context = New-EntraRegistrationContext -RedirectUri $RedirectUri -UserAgent $UserAgent
@@ -2927,6 +2936,7 @@ param(
 .DESCRIPTION
     Explicit research command. Supports WhatIf without authentication, network or output writes.
     Generates none attestation with AT-only flags. It does not establish authenticator-bound UP/UV.
+    Unattended software implementation, not a FIDO-certified authenticator or evidence of hardware assurance.
     Returns the confirmed credential record after writing its public Key Vault reference.
 #>
 function Register-EntraKeyVaultPasskeyViaEstsAuth {
@@ -2960,6 +2970,7 @@ param(
     [string]$RedirectUri = 'https://mysignins.microsoft.com'
 )
     if (-not $PSCmdlet.ShouldProcess("$KeyVaultName / Entra passkey enrollment", 'Authenticate, create a Key Vault key, enroll the passkey, and save its credential record')) { return }
+    Write-PasskeySoftwareWarning
     $context = $null; $key = $null; $token = $null; $attestation = $null
     try {
         $context = New-EntraRegistrationContext -RedirectUri $RedirectUri -UserAgent $UserAgent
@@ -2998,6 +3009,7 @@ param(
 .DESCRIPTION
     Explicit research command. Supports WhatIf without authentication, network or output writes.
     Generates none attestation with AT-only flags. It does not establish authenticator-bound UP/UV.
+    Unattended software implementation, not a FIDO-certified authenticator or evidence of hardware assurance.
     Returns the confirmed credential record after writing its public Key Vault reference.
 #>
 function Register-EntraKeyVaultPasskey {

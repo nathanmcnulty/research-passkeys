@@ -89,7 +89,7 @@ Describe 'Complete native <Flow> software registration through <Surface>' -ForEa
         } @mockScope
         Mock Invoke-RestMethod { throw 'All native registration requests must use the bounded raw transport.' } @mockScope
         $outputPath = Join-Path $TestDrive "$Flow-$Surface-$([guid]::NewGuid().ToString('N')).json"
-        $parameters = @{ TenantId = '11111111-1111-1111-1111-111111111111'; OutputPath = $outputPath; AllowLegacySoftwareAttestation = $true; Confirm = $false }
+        $parameters = @{ TenantId = '11111111-1111-1111-1111-111111111111'; OutputPath = $outputPath; Confirm = $false }
         if ($Flow -eq 'Tap') {
             $parameters.TAP = ConvertTo-SecureString 'SYNTHETIC-TAP' -AsPlainText -Force
             $parameters.UserPrincipalName = 'fixture@example.invalid'
@@ -100,7 +100,11 @@ Describe 'Complete native <Flow> software registration through <Surface>' -ForEa
         }
     }
     It 'verifies the expected credential before persisting its matching software key' {
-        $result = & $command @parameters
+        (Get-Command $command).Parameters.Keys | Should -Not -Contain 'AllowLegacySoftwareAttestation'
+        $warnings = @()
+        $result = & $command @parameters -WarningVariable warnings
+        @($warnings).Count | Should -Be 1
+        [string]$warnings[0] | Should -Match 'not a FIDO-certified authenticator.*UP/UV flags are synthetic'
         $result.Success | Should -BeTrue
         $saved = Get-Content $outputPath -Raw | ConvertFrom-Json
         $saved.credentialId | Should -BeExactly $global:SoftwareNativeFixture.CredentialId

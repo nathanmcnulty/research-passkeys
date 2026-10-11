@@ -86,7 +86,7 @@ Describe 'Registration dry-run and trust boundaries' {
     BeforeAll {
         $text = Get-Content $registration -Raw
         # Load the COMPLETE generated artifact through its public zero-I/O WhatIf boundary.
-        . $registration -TAP (ConvertTo-SecureString 'synthetic-test-only' -AsPlainText -Force) -UserPrincipalName 'fixture@example.invalid' -TenantId '11111111-1111-1111-1111-111111111111' -Repository 'owner/repo' -ConsumersPaused -AllowLegacySoftwareAttestation -WhatIf
+        . $registration -TAP (ConvertTo-SecureString 'synthetic-test-only' -AsPlainText -Force) -UserPrincipalName 'fixture@example.invalid' -TenantId '11111111-1111-1111-1111-111111111111' -Repository 'owner/repo' -ConsumersPaused -WhatIf
     }
     It 'rejects untrusted endpoint origins' -ForEach @('http://login.microsoftonline.com/x','https://login.microsoftonline.com.evil.invalid/x','https://login.microsoftonline.com:444/x','https://user@login.microsoftonline.com/x','https://evil.invalid/x') {
         { Assert-EntraRegistrationUri $_ } | Should -Throw
@@ -99,17 +99,20 @@ Describe 'Registration dry-run and trust boundaries' {
     }
     It 'WhatIf returns before gh, HTTP and key generation' {
         # Executed in a child scope. Invalid gh PATH is intentionally irrelevant for preview.
-        $output = & $registration -TAP (ConvertTo-SecureString 'synthetic-test-only' -AsPlainText -Force) -UserPrincipalName 'fixture@example.invalid' -TenantId '11111111-1111-1111-1111-111111111111' -Repository 'owner/repo' -ConsumersPaused -AllowLegacySoftwareAttestation -WhatIf
+        $output = & $registration -TAP (ConvertTo-SecureString 'synthetic-test-only' -AsPlainText -Force) -UserPrincipalName 'fixture@example.invalid' -TenantId '11111111-1111-1111-1111-111111111111' -Repository 'owner/repo' -ConsumersPaused -WhatIf
         $output | Should -BeNullOrEmpty
     }
-    It 'requires legacy-attestation opt-in even for preview' {
-        { & $registration -TAP (ConvertTo-SecureString 'synthetic-test-only' -AsPlainText -Force) -UserPrincipalName 'fixture@example.invalid' -TenantId '11111111-1111-1111-1111-111111111111' -Repository 'owner/repo' -ConsumersPaused -WhatIf } | Should -Throw '*AllowLegacySoftwareAttestation*'
+    It 'previews without an acknowledgement-only parameter or warning' {
+        (Get-Command $registration).Parameters.Keys | Should -Not -Contain 'AllowLegacySoftwareAttestation'
+        $warnings = @()
+        { & $registration -TAP (ConvertTo-SecureString 'synthetic-test-only' -AsPlainText -Force) -UserPrincipalName 'fixture@example.invalid' -TenantId '11111111-1111-1111-1111-111111111111' -Repository 'owner/repo' -ConsumersPaused -WhatIf -WarningVariable warnings } | Should -Not -Throw
+        @($warnings).Count | Should -Be 0
     }
 }
 
 Describe 'Registration success must bind the new credential' {
     BeforeAll {
-        . $registration -TAP (ConvertTo-SecureString 'synthetic-test-only' -AsPlainText -Force) -UserPrincipalName 'fixture@example.invalid' -TenantId '11111111-1111-1111-1111-111111111111' -Repository 'owner/repo' -ConsumersPaused -AllowLegacySoftwareAttestation -WhatIf
+        . $registration -TAP (ConvertTo-SecureString 'synthetic-test-only' -AsPlainText -Force) -UserPrincipalName 'fixture@example.invalid' -TenantId '11111111-1111-1111-1111-111111111111' -Repository 'owner/repo' -ConsumersPaused -WhatIf
     }
     BeforeEach { $response = @{ VerificationState = 2; ErrorCode = 0; DataUpdates = @{ FidoDevices = @{ CredentialId = 'AQIDBA' } } } }
     It 'accepts successful bound verification' { { Assert-EntraRegistrationVerified 200 $response 'AQIDBA' } | Should -Not -Throw }

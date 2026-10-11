@@ -6,9 +6,14 @@ The login script is generated from the reviewed `research-passkeys` source units
 which also build a module and standalone registration tools. Source package version
 0.1.0 is independent of the historical Action release versions below; no release tags
 are changed. Named Action inputs/output masking remain compatible. PowerShell 7.6
-is required, with offline CI pinned to 7.6.6 and Pester 6.2.0.
+is required. Offline CI uses the hosted runner's installed PowerShell, validates major
+7/minor 6 without a patch pin or runtime download, and installs Pester 6.2.0.
 
 Legacy local/software and Key Vault assertion support remains experimental. Software
+login emits one shared limitations warning per invocation, without session suppression.
+Genuine authentication failure diagnostics retain warning severity.
+The canonical registration commands use that warning instead of attestation-acceptance switches;
+packed/none formats and existing wire behavior remain unchanged. Software
 UP/UV claims are not trusted authenticator evidence. Pending consent/policy states
 cannot be mistaken for completed authentication merely because an ESTS cookie exists.
 

@@ -20,11 +20,17 @@ Application confirmation remains denied by default. `-ConfirmApplication` requir
 
 ## Verification and remaining limits
 
+Each actual login emits one limitations warning: this unattended implementation is not a
+FIDO-certified authenticator and does not perform authenticator user presence or verification.
+UP/UV flags are synthetic; the existing false verification result fields remain compatible.
+Genuine authentication failure diagnostics retain warning severity.
+
 The credential-free Pester suite covers hostile Key Vault references, exact-version signing,
 redirect refusal, credential/SecureString types, cookie output and interruption controls.
 Whole-script fixtures cryptographically verify synthetic local and Key Vault assertions and
 reject pending consent/policy states. Use PowerShell 7.6 and Pester 6.2.0; hosted offline CI
-pins PowerShell 7.6.6/Pester 6.2.0, disables telemetry before startup and fails incomplete tests.
+prints and validates installed PowerShell major 7/minor 6 without downloading a runtime,
+installs Pester 6.2.0, disables telemetry before startup and fails incomplete tests.
 
 No live Entra or Key Vault authentication was performed for this update. Offline tests establish client-side behavior only. Login redirect targets are checked and bounded; live acceptance has not been established.
 

@@ -117,6 +117,10 @@ permissions:
   contents: read
   id-token: write
 
+env:
+  POWERSHELL_TELEMETRY_OPTOUT: '1'
+  DOTNET_CLI_TELEMETRY_OPTOUT: '1'
+
 jobs:
   passkey-login:
     runs-on: windows-latest
@@ -124,6 +128,17 @@ jobs:
 
     steps:
       - uses: actions/checkout@v6
+
+      - name: Verify installed PowerShell 7.6
+        shell: pwsh
+        run: |
+          Write-Host "Installed PowerShell: $($PSVersionTable.PSVersion) ($([Environment]::ProcessPath))"
+          if ($PSVersionTable.PSVersion.Major -ne 7 -or $PSVersionTable.PSVersion.Minor -ne 6) {
+            throw "Expected installed PowerShell 7.6, got $($PSVersionTable.PSVersion)."
+          }
+          if ([Microsoft.PowerShell.Telemetry.ApplicationInsightsTelemetry]::CanSendTelemetry) {
+            throw 'Telemetry must be disabled before PowerShell starts.'
+          }
 
       - name: Azure login via OIDC
         uses: azure/login@v3

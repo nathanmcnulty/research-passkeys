@@ -91,10 +91,12 @@ Describe 'Complete TAP registration transcript through <Surface>' -ForEach @(@{ 
             return @{ StatusCode = $status; Content = $content; Headers = $responseHeaders }
         } @mockScope
         Mock Invoke-RestMethod { throw 'All native registration requests must use the bounded raw transport.' } @mockScope
-        $params = @{ TAP = (ConvertTo-SecureString 'SYNTHETIC-TAP' -AsPlainText -Force); UserPrincipalName = 'fixture@example.invalid'; TenantId = '11111111-1111-1111-1111-111111111111'; Repository = 'fixture-owner/fixture-repo'; ConsumersPaused = $true; AllowLegacySoftwareAttestation = $true; Confirm = $false }
+        $params = @{ TAP = (ConvertTo-SecureString 'SYNTHETIC-TAP' -AsPlainText -Force); UserPrincipalName = 'fixture@example.invalid'; TenantId = '11111111-1111-1111-1111-111111111111'; Repository = 'fixture-owner/fixture-repo'; ConsumersPaused = $true; Confirm = $false }
     }
     It 'completes the synthetic ceremony and writes exactly four names without credentials in outputs' {
-        $result = & $registrationCommand @params
+        $warnings = @()
+        $result = & $registrationCommand @params -WarningVariable warnings
+        @($warnings).Count | Should -Be 1
         $result.Success | Should -BeTrue
         $result | ConvertTo-Json -Depth 5 | Should -Not -Match 'SYNTHETIC|BEGIN PRIVATE|fixture@'
         $calls = Get-Content $ghCalls

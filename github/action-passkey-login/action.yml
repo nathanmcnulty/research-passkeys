@@ -78,9 +78,16 @@ runs:
   steps:
     - name: Verify embedded script
       shell: pwsh
+      env:
+        POWERSHELL_TELEMETRY_OPTOUT: '1'
+        DOTNET_CLI_TELEMETRY_OPTOUT: '1'
       run: |
-        if ($PSVersionTable.PSVersion -lt [version]'7.6') {
-          throw 'This action requires PowerShell 7.6. Install it on the runner before invoking the action.'
+        Write-Host "Installed PowerShell: $($PSVersionTable.PSVersion) ($([Environment]::ProcessPath))"
+        if ($PSVersionTable.PSVersion.Major -ne 7 -or $PSVersionTable.PSVersion.Minor -ne 6) {
+          throw "This action requires installed PowerShell 7.6, got $($PSVersionTable.PSVersion)."
+        }
+        if ([Microsoft.PowerShell.Telemetry.ApplicationInsightsTelemetry]::CanSendTelemetry) {
+          throw 'Telemetry must be disabled before PowerShell starts.'
         }
         $script = Join-Path $env:GITHUB_ACTION_PATH 'PasskeyLogin.ps1'
         if (-not (Test-Path $script)) {
@@ -92,6 +99,8 @@ runs:
       id: run-passkey
       shell: pwsh
       env:
+        POWERSHELL_TELEMETRY_OPTOUT: '1'
+        DOTNET_CLI_TELEMETRY_OPTOUT: '1'
         CREDENTIAL_ID: ${{ inputs.credential-id }}
         PRIVATE_KEY: ${{ inputs.private-key }}
         USER_HANDLE: ${{ inputs.user-handle }}

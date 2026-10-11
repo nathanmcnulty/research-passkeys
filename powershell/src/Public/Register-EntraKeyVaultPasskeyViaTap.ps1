@@ -5,6 +5,7 @@
 .DESCRIPTION
     Explicit research command. Supports WhatIf without authentication, network or output writes.
     Generates none attestation with AT-only flags. It does not establish authenticator-bound UP/UV.
+    Unattended software implementation, not a FIDO-certified authenticator or evidence of hardware assurance.
     Returns the confirmed credential record after writing its public Key Vault reference.
 #>
 function Register-EntraKeyVaultPasskeyViaTap {
@@ -41,6 +42,7 @@ param(
     [string]$RedirectUri = 'https://mysignins.microsoft.com'
 )
     if (-not $PSCmdlet.ShouldProcess("$KeyVaultName / Entra passkey enrollment", 'Authenticate, create a Key Vault key, enroll the passkey, and save its credential record')) { return }
+    Write-PasskeySoftwareWarning
     $context = $null; $key = $null; $token = $null; $attestation = $null
     try {
         $context = New-EntraRegistrationContext -RedirectUri $RedirectUri -UserAgent $UserAgent

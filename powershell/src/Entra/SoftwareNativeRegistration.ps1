@@ -5,7 +5,7 @@ function Invoke-EntraSoftwareNativeRegistration {
         $Context = Initialize-EntraRegistrationSession -Context $Context
         $request = Initialize-EntraRegistrationRequest -Context $Context
         $provider = New-SoftwarePasskeyKey
-        $attestation = New-EntraSoftwareAttestation -Provider $provider -Challenge $request.ServerChallenge -Format LegacyPacked -AllowLegacySoftwareAttestation
+        $attestation = New-EntraSoftwareAttestation -Provider $provider -Challenge $request.ServerChallenge -Format Packed
         $verified = Submit-EntraRegistration -Context $Context -Request $request -Attestation $attestation -DisplayName $DisplayName
         $record = New-EntraSoftwareCredentialRecord -Provider $provider -Attestation $attestation -UserHandle $request.UserHandle `
             -UserPrincipalName $Context.UserPrincipalName -DisplayName $DisplayName

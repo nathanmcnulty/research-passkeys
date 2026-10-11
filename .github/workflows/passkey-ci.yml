@@ -9,7 +9,7 @@ on:
 permissions:
   contents: read
 
-# Opt out before pwsh starts, including hosted-runner and pinned-runtime processes.
+# Opt out before the hosted runner starts any PowerShell process.
 env:
   POWERSHELL_TELEMETRY_OPTOUT: '1'
   DOTNET_CLI_TELEMETRY_OPTOUT: '1'
@@ -28,24 +28,11 @@ jobs:
         with:
           fetch-depth: 0
           persist-credentials: false
-      - name: Install pinned PowerShell runtime
-        shell: bash
+      - name: Verify installed PowerShell 7.6
         run: |
-          set -euo pipefail
-          archive="$RUNNER_TEMP/powershell-7.6.6-linux-x64.tar.gz"
-          runtime="$RUNNER_TEMP/powershell-7.6.6"
-          # Hash from https://github.com/PowerShell/PowerShell/releases/tag/v7.6.6
-          curl --fail --location --retry 3 --output "$archive" \
-            https://github.com/PowerShell/PowerShell/releases/download/v7.6.6/powershell-7.6.6-linux-x64.tar.gz
-          printf 'DDBC4A2D113BBD46D283CFEDCBCD117A70CAEFD7673F41F2B4E0000BADF103BC  %s\n' "$archive" | sha256sum --check --strict
-          mkdir -p "$runtime"
-          tar --extract --gzip --file "$archive" --directory "$runtime"
-          chmod +x "$runtime/pwsh"
-          echo "$runtime" >> "$GITHUB_PATH"
-      - name: Verify pinned PowerShell runtime
-        run: |
-          if ($PSVersionTable.PSVersion -ne [version]'7.6.6') {
-            throw "Expected PowerShell 7.6.6, got $($PSVersionTable.PSVersion)."
+          Write-Host "Installed PowerShell: $($PSVersionTable.PSVersion) ($([Environment]::ProcessPath))"
+          if ($PSVersionTable.PSVersion.Major -ne 7 -or $PSVersionTable.PSVersion.Minor -ne 6) {
+            throw "Expected installed PowerShell 7.6, got $($PSVersionTable.PSVersion)."
           }
           if ([Microsoft.PowerShell.Telemetry.ApplicationInsightsTelemetry]::CanSendTelemetry) {
             throw 'Telemetry must be disabled before PowerShell starts.'

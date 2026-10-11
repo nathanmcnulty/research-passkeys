@@ -54,7 +54,10 @@ Describe 'Complete Graph software registration through <Surface>' -ForEach @(@{ 
         }
     }
     It 'persists the complete local credential and forwards only SecureString configuration under explicit PassThru' {
-        $result = & $command @parameters -PassThru
+        $warnings = @()
+        $result = & $command @parameters -PassThru -WarningVariable warnings
+        @($warnings).Count | Should -Be 1
+        [string]$warnings[0] | Should -Match 'not a FIDO-certified authenticator.*UP/UV flags are synthetic'
         $result.CredentialFilePath | Should -Be $outputPath
         $result.ClientSecret | Should -BeOfType ([securestring])
         $result | ConvertTo-Json -Depth 5 | Should -Not -Match 'SYNTHETIC-APPLICATION-SECRET|BEGIN PRIVATE'

@@ -3,7 +3,7 @@
 <# .SYNOPSIS
 Register a research Entra software passkey with Graph application authentication and none attestation.
 .DESCRIPTION
-Synthetic software UP/UV claims do not establish trusted assurance. Output files are never silently overwritten. Explicit PassThru forwards application configuration with ClientSecret kept as SecureString, never plaintext. Unix files use 0600; Windows requires a private directory because directory ACLs are inherited. WhatIf performs no I/O.
+Unattended software implementation, not a FIDO-certified authenticator. Synthetic UP/UV claims do not establish authenticator presence, verification or hardware assurance. Output files are never silently overwritten. Explicit PassThru forwards application configuration with ClientSecret kept as SecureString, never plaintext. Unix files use 0600; Windows requires a private directory because directory ACLs are inherited. WhatIf performs no I/O.
 #>
 [CmdletBinding(DefaultParameterSetName = 'ClientSecret', SupportsShouldProcess, ConfirmImpact = 'High')]
 param([Parameter(ValueFromPipeline)][pscustomobject]$ConfigFromPipeline,

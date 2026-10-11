@@ -15,10 +15,7 @@ function New-EntraSoftwareAuthenticatorData {
 
 function New-EntraSoftwareAttestation {
     param([Parameter(Mandatory)]$Provider, [Parameter(Mandatory)][string]$Challenge,
-        [ValidateSet('None', 'LegacyPacked')][string]$Format = 'None', [switch]$AllowLegacySoftwareAttestation)
-    if ($Format -eq 'LegacyPacked' -and -not $AllowLegacySoftwareAttestation) {
-        throw 'Packed software attestation requires -AllowLegacySoftwareAttestation acknowledgement.'
-    }
+        [ValidateSet('None', 'Packed')][string]$Format = 'None')
     $credentialBytes = [byte[]]::new(32)
     [Security.Cryptography.RandomNumberGenerator]::Fill($credentialBytes)
     $rpId = 'login.microsoft.com'
@@ -26,13 +23,13 @@ function New-EntraSoftwareAttestation {
     $flags = if ($Format -eq 'None') { [byte]0x5D } else { [byte]0x45 }
     $authData = New-EntraSoftwareAuthenticatorData -RpId $rpId -CredentialId $credentialBytes `
         -PublicX $Provider.PublicX -PublicY $Provider.PublicY -Flags $flags
-    if ($Format -eq 'LegacyPacked') { $Challenge = ConvertTo-Base64Url ([Text.Encoding]::UTF8.GetBytes($Challenge)) }
+    if ($Format -eq 'Packed') { $Challenge = ConvertTo-Base64Url ([Text.Encoding]::UTF8.GetBytes($Challenge)) }
     elseif ((Confirm-Base64Url $Challenge) -cne $Challenge -or (ConvertTo-Base64Url (ConvertFrom-Base64Url $Challenge)) -cne $Challenge) { throw 'Graph creation challenge is not canonical base64url.' }
     $clientData = [ordered]@{ type = 'webauthn.create'; challenge = $Challenge; origin = "https://$rpId"; crossOrigin = $false } | ConvertTo-Json -Compress
     $clientBytes = [Text.Encoding]::UTF8.GetBytes($clientData)
     $statement = [ordered]@{}
     $formatName = 'none'
-    if ($Format -eq 'LegacyPacked') {
+    if ($Format -eq 'Packed') {
         $formatName = 'packed'
         # This self-signed batch certificate is compatibility research, not trusted authenticator provenance.
         $batch = [Security.Cryptography.ECDsa]::Create([Security.Cryptography.ECCurve]::CreateFromValue('1.2.840.10045.3.1.7'))

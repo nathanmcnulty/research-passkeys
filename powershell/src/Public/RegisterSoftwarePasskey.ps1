@@ -2,8 +2,9 @@ function Register-EntraSoftwarePasskey {
     <# .SYNOPSIS
     Register a research software passkey using Graph application permissions and none attestation.
     .DESCRIPTION
-    Supports local P-256 keys or a Key Vault reference. Synthesized UP/UV flags do not
-    establish fresh human presence, verification or trusted authenticator assurance.
+    Supports local P-256 keys or a Key Vault reference. Unattended software implementation,
+    not a FIDO-certified authenticator. Synthetic UP/UV claims do not establish authenticator
+    presence, verification or hardware assurance. Graph uses none attestation.
     The private-key output is reserved before registration and never silently overwritten.
     WhatIf performs local parameter validation only. Explicit PassThru forwards application configuration
     with ClientSecret kept as SecureString, never plaintext.
@@ -24,6 +25,7 @@ function Register-EntraSoftwarePasskey {
         # Defaults absent from PSBoundParameters are still explicit workflow inputs.
         $configuration.DisplayName = $DisplayName
         if (-not $PSCmdlet.ShouldProcess($UserUpn, "Register software passkey '$DisplayName' and save its credential record")) { return }
+        Write-PasskeySoftwareWarning
         $path = Resolve-EntraSoftwareOutputPath -OutputPath $OutputPath -UserPrincipalName $UserUpn -DisplayName $DisplayName
         $stream = $null; $result = $null; $saved = $false
         try {

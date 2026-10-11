@@ -3,11 +3,11 @@ BeforeAll {
     $workflow = [System.IO.File]::ReadAllText((Join-Path $root '.github/workflows/passkey-ci.yml')).Replace("`r`n", "`n")
 
     function Get-WorkflowRunBlock {
-        param([string]$StepName)
+        param([string]$StepName, [string]$WorkflowText = $workflow)
         $pattern = '(?ms)^      - name: ' + [regex]::Escape($StepName) + '\n.*?^        run: \|\n(?<body>(?:          [^\n]*\n|\n)+)'
-        $match = [regex]::Match($workflow, $pattern)
+        $match = [regex]::Match($WorkflowText, $pattern)
         if (-not $match.Success) { throw "Missing workflow step: $StepName" }
-        return [regex]::Replace($match.Groups['body'].Value, '(?m)^          ', '')
+        return [regex]::Replace($match.Groups['body'].Value, '(?m)^          ', '').TrimEnd("`n")
     }
 }
 
@@ -35,12 +35,11 @@ Describe 'Credential-free passkey CI contract' {
         $workflow.IndexOf('ApplicationInsightsTelemetry') | Should -BeLessThan $workflow.IndexOf('Check deterministic artifacts')
     }
 
-    It 'installs and verifies the official exact PowerShell runtime before project checks' {
-        $workflow | Should -Match 'https://github.com/PowerShell/PowerShell/releases/download/v7\.6\.6/powershell-7\.6\.6-linux-x64.tar.gz'
-        $workflow | Should -Match 'DDBC4A2D113BBD46D283CFEDCBCD117A70CAEFD7673F41F2B4E0000BADF103BC'
-        $workflow | Should -Match 'sha256sum --check --strict'
-        $workflow | Should -Match "PSVersion -ne \[version\]'7\.6\.6'"
-        $workflow.IndexOf('Install pinned PowerShell runtime') | Should -BeLessThan $workflow.IndexOf('Check deterministic artifacts')
+    It 'prints and verifies installed PowerShell major 7/minor 6 before project checks without downloading a runtime' {
+        $workflow | Should -Match 'Installed PowerShell:.*PSVersionTable.PSVersion.*Environment\]::ProcessPath'
+        $workflow | Should -Match 'PSVersion.Major -ne 7 -or \$PSVersionTable.PSVersion.Minor -ne 6'
+        $workflow | Should -Not -Match 'releases/download|powershell-7\.|sha256sum|GITHUB_PATH|curl|tar --|Install pinned PowerShell'
+        $workflow.IndexOf('Verify installed PowerShell 7.6') | Should -BeLessThan $workflow.IndexOf('Check deterministic artifacts')
     }
 
     It 'only checks output and uses the exact pinned Pester version from the official registry' {
@@ -119,11 +118,11 @@ Describe 'Action distribution CI contract' {
         $distributionWorkflow | Should -Not -Match 'paths:|paths-ignore:|secrets\.|pull_request_target|contents: write'
     }
 
-    It 'uses the same verified current runtime, dependency and telemetry guard as the source CI' {
-        $distributionWorkflow | Should -Match 'releases/download/v7\.6\.6/powershell-7\.6\.6-linux-x64.tar.gz'
-        $distributionWorkflow | Should -Match 'DDBC4A2D113BBD46D283CFEDCBCD117A70CAEFD7673F41F2B4E0000BADF103BC'
-        $distributionWorkflow | Should -Match 'sha256sum --check --strict'
-        $distributionWorkflow | Should -Match "PSVersion -ne \[version\]'7\.6\.6'"
+    It 'uses the same installed runtime check, dependency and telemetry guard as the source CI' {
+        $distributionWorkflow | Should -Match 'Installed PowerShell:.*PSVersionTable.PSVersion.*Environment\]::ProcessPath'
+        $distributionWorkflow | Should -Match 'PSVersion.Major -ne 7 -or \$PSVersionTable.PSVersion.Minor -ne 6'
+        $distributionWorkflow | Should -Not -Match 'releases/download|powershell-7\.|sha256sum|GITHUB_PATH|curl|tar --|Install pinned PowerShell'
+        (Get-WorkflowRunBlock 'Verify installed PowerShell 7.6' $distributionWorkflow) | Should -BeExactly (Get-WorkflowRunBlock 'Verify installed PowerShell 7.6')
         $distributionWorkflow | Should -Match "(?m)^env:\n  POWERSHELL_TELEMETRY_OPTOUT: '1'\n  DOTNET_CLI_TELEMETRY_OPTOUT: '1'$"
         $distributionWorkflow | Should -Match 'ApplicationInsightsTelemetry\]::CanSendTelemetry'
         $distributionWorkflow | Should -Match 'Install-PSResource -Name Pester -Version 6\.2\.0 -Repository PSGallery'
@@ -138,5 +137,51 @@ Describe 'Action distribution CI contract' {
         $distributionWorkflow | Should -Match "Result -ne 'Passed'"
         $distributionWorkflow | Should -Match 'TotalCount -eq 0'
         $distributionWorkflow.IndexOf('ApplicationInsightsTelemetry') | Should -BeLessThan $distributionWorkflow.IndexOf('Run offline distribution tests')
+    }
+}
+
+Describe 'Installed runtime version guard' {
+    It 'accepts only major 7/minor 6 for <Version>' -ForEach @(
+        @{ Version = '7.6.0'; Accepted = $true },
+        @{ Version = '7.6.6'; Accepted = $true },
+        @{ Version = '7.6.99'; Accepted = $true },
+        @{ Version = '7.5.99'; Accepted = $false },
+        @{ Version = '7.7.0'; Accepted = $false },
+        @{ Version = '8.6.0'; Accepted = $false }
+    ) {
+        # Execute the exact version if-statement with a synthetic runtime value;
+        # no workflow install, login or HTTP command is executed.
+        $tokens = $null; $errors = $null
+        $ast = [Management.Automation.Language.Parser]::ParseInput((Get-WorkflowRunBlock 'Verify installed PowerShell 7.6'),[ref]$tokens,[ref]$errors)
+        $errors.Count | Should -Be 0
+        $guard = $ast.Find({ param($node) $node -is [Management.Automation.Language.IfStatementAst] -and $node.Clauses[0].Item1.Extent.Text -match 'PSVersionTable' },$true)
+        $body = $guard.Extent.Text.Replace('$PSVersionTable.PSVersion','$candidate')
+        $check = [scriptblock]::Create('param([version]$candidate)' + "`n" + $body)
+        if ($Accepted) { { & $check ([version]$Version) } | Should -Not -Throw }
+        else { { & $check ([version]$Version) } | Should -Throw '*Expected installed PowerShell 7.6*' }
+    }
+}
+
+Describe 'Published Action runtime examples' {
+    It 'checks installed runtime and opts out before live steps in <Path>' -ForEach @(
+        @{ Path = '.github/workflows/test-key-vault.yml' },
+        @{ Path = '.github/workflows/test-private-key.yml' },
+        @{ Path = '.github/workflows/test-xdr-key-vault.yml' },
+        @{ Path = 'README.md' }
+    ) {
+        $example = [IO.File]::ReadAllText((Join-Path $root "github/action-passkey-login/$Path")).Replace("`r`n","`n")
+        $example | Should -Match "(?m)^env:\n  POWERSHELL_TELEMETRY_OPTOUT: '1'\n  DOTNET_CLI_TELEMETRY_OPTOUT: '1'$"
+        (Get-WorkflowRunBlock 'Verify installed PowerShell 7.6' $example) | Should -BeExactly (Get-WorkflowRunBlock 'Verify installed PowerShell 7.6')
+        $example | Should -Not -Match 'releases/download|Install pinned PowerShell'
+        $actionStep = [regex]::Match($example,'uses: (?:\./|nathanmcnulty/action-passkey-login)')
+        $actionStep.Success | Should -BeTrue
+        $example.IndexOf('Verify installed PowerShell 7.6') | Should -BeLessThan $actionStep.Index -Because 'the guard must run before the Action'
+    }
+    It 'checks the installed composite runtime and sets opt-outs before both embedded-script processes' {
+        $action = [IO.File]::ReadAllText((Join-Path $root 'github/action-passkey-login/action.yml')).Replace("`r`n","`n")
+        $action | Should -Match 'PSVersion.Major -ne 7 -or \$PSVersionTable.PSVersion.Minor -ne 6'
+        $action | Should -Match 'ApplicationInsightsTelemetry\]::CanSendTelemetry'
+        ([regex]::Matches($action,"POWERSHELL_TELEMETRY_OPTOUT: '1'")).Count | Should -Be 2
+        ([regex]::Matches($action,"DOTNET_CLI_TELEMETRY_OPTOUT: '1'")).Count | Should -Be 2
     }
 }

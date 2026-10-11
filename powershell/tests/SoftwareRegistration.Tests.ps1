@@ -10,6 +10,7 @@ BeforeAll {
         'Public/RegisterSoftwarePasskey.ps1', 'Public/RegisterSoftwarePasskeyViaTap.ps1', 'Public/RegisterSoftwarePasskeyViaEstsAuth.ps1'
     )
     foreach ($source in $script:Sources) { . "$script:Repo/powershell/src/$source" }
+    $script:EncodeImplementation = ${function:New-CBOREncoded}
     $script:OpenOutputImplementation = ${function:Open-EntraSoftwareCredentialOutput}
     $script:Tenant = '11111111-1111-4111-8111-111111111111'
     $script:Client = '19db86c3-b2b9-44cc-b339-36da233a3be2'
@@ -89,19 +90,44 @@ Describe 'Bounded registration authorization and binding' {
 }
 
 Describe 'Software attestation and provider lifecycle' {
-    It 'keeps Graph attestation none without packed legacy consent' {
+    BeforeEach {
+        $script:EncodedAttestation = $null
+        Mock New-CBOREncoded {
+            if ($Value -is [Collections.IDictionary] -and $Value.Contains('fmt')) { $script:EncodedAttestation = $Value }
+            return & $script:EncodeImplementation -Value $Value
+        }
+    }
+    It 'keeps Graph attestation none with the unchanged canonical challenge' {
         $attestation = New-EntraSoftwareAttestation -Provider $script:Key -Challenge AQID
         $encoded = ConvertFrom-Base64Url $attestation.AttestationObject
         [Text.Encoding]::Latin1.GetString($encoded) | Should -Match 'none'
         $client = [Text.Encoding]::UTF8.GetString((ConvertFrom-Base64Url $attestation.ClientDataJson)) | ConvertFrom-Json
         $client.challenge | Should -Be AQID
         $client.origin | Should -Be 'https://login.microsoft.com'
+        $script:EncodedAttestation.fmt | Should -Be none
+        $script:EncodedAttestation.authData[32] | Should -Be 0x5D
+        $script:EncodedAttestation.attStmt.Count | Should -Be 0
     }
-    It 'requires explicit acknowledgement for packed software attestation' {
-        { New-EntraSoftwareAttestation -Provider $script:Key -Challenge synthetic -Format LegacyPacked } | Should -Throw '*AllowLegacySoftwareAttestation*'
+    It 'uses packed format without an acknowledgement-only parameter or helper warning' {
+        (Get-Command New-EntraSoftwareAttestation).Parameters.Keys | Should -Not -Contain 'AllowLegacySoftwareAttestation'
+        $warnings = @()
+        $attestation = New-EntraSoftwareAttestation -Provider $script:Key -Challenge synthetic -Format Packed -WarningVariable warnings
+        [Text.Encoding]::Latin1.GetString((ConvertFrom-Base64Url $attestation.AttestationObject)) | Should -Match 'packed'
+        @($warnings).Count | Should -Be 0
+        $script:EncodedAttestation.fmt | Should -Be packed
+        $script:EncodedAttestation.authData[32] | Should -Be 0x45
+        $attestation.Authenticator | Should -Be 'cross-platform'
+        $attestation.Transports | Should -Be usb
+        $certificate = [Security.Cryptography.X509Certificates.X509Certificate2]::new([byte[]]$script:EncodedAttestation.attStmt.x5c[0])
+        $verifier = [Security.Cryptography.X509Certificates.ECDsaCertificateExtensions]::GetECDsaPublicKey($certificate)
+        try {
+            $certificate.Subject | Should -Match 'O=Chromium'
+            $signed = [byte[]]($script:EncodedAttestation.authData + [Security.Cryptography.SHA256]::HashData((ConvertFrom-Base64Url $attestation.ClientDataJson)))
+            $verifier.VerifyData($signed,[byte[]]$script:EncodedAttestation.attStmt.sig,[Security.Cryptography.HashAlgorithmName]::SHA256,[Security.Cryptography.DSASignatureFormat]::Rfc3279DerSequence) | Should -BeTrue
+        } finally { $verifier.Dispose(); $certificate.Dispose() }
     }
     It 'encodes native JWE challenge bytes and preserves synthetic claims as research' {
-        $attestation = New-EntraSoftwareAttestation -Provider $script:Key -Challenge synthetic -Format LegacyPacked -AllowLegacySoftwareAttestation
+        $attestation = New-EntraSoftwareAttestation -Provider $script:Key -Challenge synthetic -Format Packed
         $client = [Text.Encoding]::UTF8.GetString((ConvertFrom-Base64Url $attestation.ClientDataJson)) | ConvertFrom-Json
         $client.challenge | Should -Be (ConvertTo-Base64Url ([Text.Encoding]::UTF8.GetBytes('synthetic')))
         $data = New-EntraSoftwareAuthenticatorData -RpId 'login.microsoft.com' -CredentialId ([byte[]]::new(32)) -PublicX $script:Key.PublicX -PublicY $script:Key.PublicY
@@ -131,9 +157,9 @@ Describe 'Software public WhatIf and persistence' {
         Should -Invoke Invoke-EntraSoftwareGraphRegistration -Times 0 -Exactly
     }
     It 'performs no I/O for TAP ESTS and GitHub WhatIf' {
-        Register-EntraSoftwarePasskeyViaTap -TAP $script:Tap -UserPrincipalName 'test@example.test' -TenantId $script:Tenant -AllowLegacySoftwareAttestation -WhatIf
-        Register-EntraSoftwarePasskeyViaEstsAuth -ESTSAuthCookie $script:Tap -AllowLegacySoftwareAttestation -WhatIf
-        Register-GitHubPasskeyViaTAP -TAP $script:Tap -UserPrincipalName 'test@example.test' -TenantId $script:Tenant -Repository 'owner/repo' -ConsumersPaused -AllowLegacySoftwareAttestation -WhatIf
+        Register-EntraSoftwarePasskeyViaTap -TAP $script:Tap -UserPrincipalName 'test@example.test' -TenantId $script:Tenant -WhatIf
+        Register-EntraSoftwarePasskeyViaEstsAuth -ESTSAuthCookie $script:Tap -WhatIf
+        Register-GitHubPasskeyViaTAP -TAP $script:Tap -UserPrincipalName 'test@example.test' -TenantId $script:Tenant -Repository 'owner/repo' -ConsumersPaused -WhatIf
         Should -Invoke New-EntraRegistrationContext -Times 0 -Exactly
         Should -Invoke Open-EntraSoftwareCredentialOutput -Times 0 -Exactly
         Should -Invoke Invoke-EntraSoftwareNativeRegistration -Times 0 -Exactly
@@ -189,7 +215,7 @@ Describe 'GitHub whole-record and partial-write safeguards' {
         Mock Invoke-EntraRegistrationTapAuthentication { $Context }
         Mock Invoke-EntraSoftwareNativeRegistration { throw 'verification did not bind expected ID' }
         Mock Export-PasskeyToGitHubSecret { throw 'must not export' }
-        { Register-GitHubPasskeyViaTAP -TAP $script:Tap -UserPrincipalName 'test@example.test' -TenantId $script:Tenant -Repository owner/repo -ConsumersPaused -AllowLegacySoftwareAttestation -Confirm:$false } | Should -Throw '*partially enrolled*'
+        { Register-GitHubPasskeyViaTAP -TAP $script:Tap -UserPrincipalName 'test@example.test' -TenantId $script:Tenant -Repository owner/repo -ConsumersPaused -Confirm:$false } | Should -Throw '*partially enrolled*'
         Should -Invoke Export-PasskeyToGitHubSecret -Times 0 -Exactly
     }
     It 'preserves export failure as post-enrollment failure' {
@@ -197,7 +223,7 @@ Describe 'GitHub whole-record and partial-write safeguards' {
         Mock Invoke-EntraRegistrationTapAuthentication { $Context }
         Mock Invoke-EntraSoftwareNativeRegistration { [pscustomobject]@{ Credential = [ordered]@{ privateKey = 'synthetic' } } }
         Mock Export-PasskeyToGitHubSecret { throw 'GitHub export incomplete. Keep consumers paused. No rollback was attempted.' }
-        { Register-GitHubPasskeyViaTAP -TAP $script:Tap -UserPrincipalName 'test@example.test' -TenantId $script:Tenant -Repository owner/repo -ConsumersPaused -AllowLegacySoftwareAttestation -Confirm:$false } | Should -Throw '*Enrollment completed, but export did not finish*'
+        { Register-GitHubPasskeyViaTAP -TAP $script:Tap -UserPrincipalName 'test@example.test' -TenantId $script:Tenant -Repository owner/repo -ConsumersPaused -Confirm:$false } | Should -Throw '*Enrollment completed, but export did not finish*'
     }
 }
 

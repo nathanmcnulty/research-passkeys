@@ -296,6 +296,15 @@ Describe 'Complete public Key Vault enrollment with synthetic transport response
         Should -Invoke Invoke-RestMethod -Times 1
         Should -Invoke Set-Content -Times 1
     }
+    It 'emits one warning through the curated wrapper and none under WhatIf' {
+        $warnings = @()
+        $record = Register-EntraKeyVaultPasskey -TAP 'offline-tap' -UserPrincipalName 'offline@example.test' -TenantId $tenant -KeyVaultName 'offline-vault' -KeyVaultKeyName 'offline-key' -KeyVaultAccessToken 'offline-token' -OutputPath 'offline.json' -Confirm:$false -WarningVariable warnings
+        $record.credentialId | Should -Not -BeNullOrEmpty
+        @($warnings).Count | Should -Be 1
+        $warnings = @()
+        Register-EntraKeyVaultPasskey -TAP 'offline-tap' -UserPrincipalName 'offline@example.test' -TenantId $tenant -KeyVaultName 'offline-vault' -WhatIf -WarningVariable warnings
+        @($warnings).Count | Should -Be 0
+    }
     It 'completes cookie authentication with resolved user and tenant through public command' {
         $record = Register-EntraKeyVaultPasskeyViaEstsAuth -ESTSAuthCookie 'offline-cookie' -KeyVaultName 'offline-vault' -KeyVaultKeyName 'offline-key' -KeyVaultAccessToken 'offline-token' -OutputPath 'offline.json' -Confirm:$false
         $record.userName | Should -Be 'offline@example.test'

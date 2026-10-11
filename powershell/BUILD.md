@@ -1,6 +1,10 @@
 # Entra PowerShell: one source, two distributions
 
 Requires PowerShell 7.6. The reviewed local runtime is 7.6.6 with Pester 6.2.0.
+Hosted CI uses the runner's installed PowerShell, prints its version/path, and requires
+major 7/minor 6 without pinning a patch or downloading another runtime. The reviewed
+[Ubuntu image 20261004.327.1](https://github.com/actions/runner-images/blob/ubuntu24/20261004.327/images/ubuntu/Ubuntu2404-Readme.md#powershell-tools)
+includes PowerShell 7.6.6 and Pester 5.9.0, so CI still installs Pester 6.2.0 from PSGallery.
 The scripts and module are experimental research tools; offline tests do not establish
 live service acceptance or security certification.
 
@@ -44,9 +48,15 @@ network, enrollment, file or secret writes.
   Results explicitly report `UserPresenceVerified=false` and `UserVerificationVerified=false`.
   Entra/Conditional Access policies may reject this flow. There is no automatic OAuth consent.
 - Key Vault registration uses `none` attestation and AT-only flags. Native software enrollment
-  retains explicitly acknowledged synthetic packed attestation. Graph software registration
+  retains packed attestation with a synthetic self-signed batch certificate. Graph software registration
   uses `none` attestation and documents its software-generated flags. None of these is a
   hardware-authenticator compliance claim. Premium vault capability does not make `kty=EC` HSM-backed.
+  These unattended implementations do not perform authenticator user presence or verification
+  and are not FIDO-certified authenticators. One limitations warning is emitted per actual public login
+  or registration; genuine failure diagnostics retain warning severity. There is no attestation-acceptance
+  switch. None and packed remain distinct
+  wire formats. The native software `cross-platform`/`usb` metadata and certificate subject
+  `O=Chromium` are inherited wire values, not observed device provenance or certification.
 - Login returns bearer cookies only with `-IncludeAuthenticationCookie`; module sessions only
   with `-IncludeAuthenticationSession`. The standalone-only `-PersistSessionToGlobalScope`
   replaces the named authentication globals, clearing stale identity before an attempt.
@@ -96,7 +106,7 @@ Builds never increment versions or insert timestamps. Repeated unchanged builds 
 
 `-Check` is read-only and rejects missing, stale and extra outputs, including untracked files,
 plus orphan source/entrypoint files. Generated headers identify version and source paths.
-CI uses credential-free mocks, a pinned PowerShell/Pester runtime, read-only repository access
+CI uses credential-free mocks, installed PowerShell 7.6 and pinned Pester 6.2.0, read-only repository access
 and an always-running `passkey-ci` aggregate gate. It includes unrelated research tests.
 A repository ruleset must separately require that check to enforce merge blocking.
 
@@ -123,8 +133,13 @@ Personal repository paths under `Entra/passkeys/` map to these generated researc
 `github/action-passkey-login` maps directly to the Action repository with that prefix removed.
 Its `PasskeyLogin.ps1` is byte-identical to the generated research login. Action inputs/output
 masking and runner delivery stay in `action.yml`; GitHub is transport/CI, not a signer.
+The exact-copy distribution inventory is 29 files: the 10 personal scripts above and all
+19 Action package files. Unit tests stay in research; the Action retains its three offline
+distribution suites. Do not copy any test files to the personal samples repository. The
+personal login named-parameter, alias and pipeline checks are maintained in
+`powershell/tests/EntraScriptCompatibility.Tests.ps1`.
 
-For local tests, set `POWERSHELL_TELEMETRY_OPTOUT=1` in the launching shell before
+For local tests, set `POWERSHELL_TELEMETRY_OPTOUT=1` and `DOTNET_CLI_TELEMETRY_OPTOUT=1` in the launching shell before
 starting PowerShell; CI also asserts that engine telemetry is disabled.
 
 The existing personal DOCX and unrelated public files remain unchanged. The three notification

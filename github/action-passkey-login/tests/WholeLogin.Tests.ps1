@@ -82,6 +82,16 @@ Describe 'Whole login distribution: <Mode>' -ForEach $cases {
         $global:PSPasskeyFixtureGroup.key.VerifyHash($hash,(Read-FixtureBytes $global:PSPasskeyFixtureGroup.assertion.signature),[Security.Cryptography.DSASignatureFormat]::Rfc3279DerSequence) | Should -BeTrue
         $global:PSPasskeyFixtureGroup.signRequests.Count | Should -Be 0
     }
+    It 'warns once about limitations on every invocation and preserves genuine failure warnings' {
+        $scope = if ($mode -eq 'module') { @{ModuleName='Passkey'} } else { @{} }
+        Mock Write-Warning {} @scope
+        $null = Invoke-FixtureLogin
+        Should -Invoke Write-Warning -Times 1 -Exactly @scope -ParameterFilter { $Message -match 'not a FIDO-certified authenticator.*UP/UV flags are synthetic' }
+        $global:PSPasskeyFixtureGroup.issueCookie=$false
+        $null = Invoke-FixtureLogin @{PassThru=$false}
+        Should -Invoke Write-Warning -Times 2 -Exactly @scope -ParameterFilter { $Message -match 'not a FIDO-certified authenticator.*UP/UV flags are synthetic' }
+        Should -Invoke Write-Warning -Times 1 -Exactly @scope -ParameterFilter { $Message -eq 'Entra authentication could not be verified.' }
+    }
     It 'executes versioned KV signing with the same cryptographic boundary' {
         $file=Join-Path $TestDrive credential.json
         @{username='fixture@example.invalid';credentialId='aWQ';userHandle='aGFuZGxl';keyVault=@{vaultName='fixturevault';keyName='fixture-key';keyId='https://fixturevault.vault.azure.net/keys/fixture-key/0123456789abcdef0123456789abcdef'}} | ConvertTo-Json | Set-Content $file

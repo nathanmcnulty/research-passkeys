@@ -5,7 +5,7 @@
 Experimental Entra login using a local software key or a Key Vault signing key.
 .DESCRIPTION
 Self-contained script. No modules or runtime downloads are required.
-Legacy UP/UV flags are synthesized compatibility claims, not verified authenticator evidence.
+Unattended software implementation, not a FIDO-certified authenticator. UP/UV flags are synthetic; no authenticator user presence, verification or hardware assurance is provided.
 Entra policy can reject this unsupported software flow. OAuth consent is never automated.
 Named CredentialId/CredentialIdentifier and UserName/UserPrincipalName are supported.
 Use -PassThru for result metadata; -IncludeAuthenticationCookie to return the bearer cookie.

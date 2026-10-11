@@ -5,6 +5,7 @@
 .DESCRIPTION
     Explicit research command. Supports WhatIf without authentication, network or output writes.
     Generates none attestation with AT-only flags. It does not establish authenticator-bound UP/UV.
+    Unattended software implementation, not a FIDO-certified authenticator or evidence of hardware assurance.
     Returns the confirmed credential record after writing its public Key Vault reference.
 #>
 function Register-EntraKeyVaultPasskey {
