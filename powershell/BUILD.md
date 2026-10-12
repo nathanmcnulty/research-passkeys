@@ -145,3 +145,24 @@ starting PowerShell; CI also asserts that engine telemetry is disabled.
 The existing personal DOCX and unrelated public files remain unchanged. The three notification
 assets map directly from `samples/notifications` to `Entra/passkeys/notifications`; they are
 outside this passkey package's generated inventory.
+
+## Tenant and display-name selection
+
+UPN-based PowerShell TAP commands (`Register-EntraSoftwarePasskeyViaTap`,
+`Register-GitHubPasskeyViaTAP`, `Get-EntraEstsCookieViaTap`,
+`Register-EntraKeyVaultPasskeyViaTap` and its curated wrapper) use one bounded public
+Microsoft OIDC resolver when `TenantId` is omitted. Existing Graph UPN discovery reuses it.
+An explicit nonempty GUID overrides discovery, including guest/resource-tenant use. The
+resolved tenant still must match the returned token's client, tenant and user binding.
+Cookie-based registration derives the identity from its authenticated token.
+
+UPN discovery does not select a Key Vault service-principal or provisioning tenant.
+`KeyVaultTenantId`, application authentication overrides and provisioning context remain
+separate. Disabled Function mutation routes, broker/Easy Auth owner configuration and
+Python host configuration still require their explicit security/resource tenant; changing
+those authorities is outside this PowerShell usability update.
+
+Use a short name such as `TokenForge 261011`. Blank or longer-than-30-character names are
+rejected locally before enrollment. The 30-character bound is verified against the current
+public My Sign-ins frontend; no claim is made about a Graph-specific server maximum or the
+cause of a previous live failure. See the [adapter guide](../github/adapters/README.md).

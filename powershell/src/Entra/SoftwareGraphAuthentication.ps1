@@ -1,21 +1,7 @@
 function Resolve-EntraSoftwareGraphTenant {
     param([AllowNull()][string]$TenantId, [Parameter(Mandatory)][string]$UserUpn, [switch]$UseManagedIdentity)
     if ($UseManagedIdentity) { return $TenantId }
-    if ($TenantId) {
-        $tenant = [guid]::Empty
-        if (-not [guid]::TryParse($TenantId, [ref]$tenant) -or $tenant -eq [guid]::Empty) { throw 'TenantId must be a nonempty GUID.' }
-        return $tenant.ToString()
-    }
-    $domain = [uri]::EscapeDataString($UserUpn.Split('@')[1])
-    $metadata = Invoke-EntraRegistrationRestMethod -Uri "https://login.microsoftonline.com/$domain/v2.0/.well-known/openid-configuration"
-    # Microsoft OIDC v2 metadata: https://learn.microsoft.com/en-us/entra/identity-platform/v2-protocols-oidc
-    $issuer = Assert-EntraRegistrationUri ([string]$metadata.issuer)
-    $tenant = [guid]::Empty
-    if (-not [guid]::TryParse($issuer.AbsolutePath.Trim('/').Split('/')[0], [ref]$tenant) -or $tenant -eq [guid]::Empty) {
-        throw 'Tenant discovery did not return a tenant GUID.'
-    }
-    if ($issuer.Host -ne 'login.microsoftonline.com' -or $issuer.AbsolutePath.Trim('/') -cne "$($tenant.ToString())/v2.0") { throw 'Unexpected tenant discovery issuer.' }
-    return $tenant.ToString()
+    return Resolve-EntraRegistrationTenant -TenantId $TenantId -UserPrincipalName $UserUpn
 }
 
 function Get-EntraSoftwareManagedIdentityToken {

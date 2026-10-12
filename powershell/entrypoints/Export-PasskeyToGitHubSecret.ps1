@@ -8,7 +8,7 @@ Dot-sourcing without arguments loads functions only. Consumers must already be p
 Four repository Actions secret writes are non-atomic. Values are sent over stdin, never CLI arguments.
 #>
 [CmdletBinding(SupportsShouldProcess, ConfirmImpact = 'High')]
-param([object]$Credential, [string]$Repository, [switch]$ConsumersPaused)
+param([object]$Credential, [string]$Repository)
 
 # Invoke public command
 if ($PSBoundParameters.ContainsKey('Credential')) { Export-PasskeyToGitHubSecret @PSBoundParameters }

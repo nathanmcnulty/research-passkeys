@@ -197,6 +197,7 @@
             Path = 'github/adapters/Export-PasskeyToGitHubSecret.ps1'
             EntryPoint = 'powershell/entrypoints/Export-PasskeyToGitHubSecret.ps1'
             Sources = @(
+                'powershell/src/Common/Values.ps1'
                 'powershell/src/GitHub/SecretValues.ps1'
                 'powershell/src/GitHub/Transport.ps1'
                 'powershell/src/Public/ExportGitHubSecret.ps1'

@@ -46,6 +46,7 @@ function Submit-EntraRegistration {
         userIconUrl = ''; userId = $Request.UserHandle
     })
     $createUri = Add-EntraKeyVaultRegistrationQuery -Uri $Request.ProvisionUrl -CorrelationId $Request.CorrelationId
+    $Context.Stage = 'ChallengeSubmission'
     $created = Invoke-EntraRegistrationWebRequest -Uri $createUri -Method POST -Body $createBody `
         -ContentType 'application/x-www-form-urlencoded' -WebSession $Context.WebSession
     if ([int]$created.StatusCode -lt 200 -or [int]$created.StatusCode -ge 300) {
@@ -62,6 +63,8 @@ function Submit-EntraRegistration {
         if ($present) { $fidoFields[$field.ToLowerInvariant()] = [string]$Attestation.$field }
     }
     $body = ConvertTo-EntraRegistrationForm $fidoFields
+    $Context.Stage = 'CredentialSubmission'
+    $Context.EnrollmentStatus = 'Unconfirmed'
     $response = Invoke-EntraRegistrationWebRequest -Uri $postBack -Method POST -Body $body `
         -ContentType 'application/x-www-form-urlencoded' -WebSession $Context.WebSession `
         -Headers @{ Origin = 'https://login.microsoft.com'; Referer = 'https://login.microsoft.com/' }
@@ -94,5 +97,6 @@ function Submit-EntraRegistration {
         } catch { Write-Verbose 'Security-info navigation did not refresh registration state.' }
     }
     Update-EntraKeyVaultVerificationSession -Context $Context
+    $Context.Stage = 'EnrollmentVerification'
     Invoke-EntraKeyVaultRegistrationVerification -Context $Context -Request $Request -Attestation $Attestation -DisplayName $DisplayName
 }

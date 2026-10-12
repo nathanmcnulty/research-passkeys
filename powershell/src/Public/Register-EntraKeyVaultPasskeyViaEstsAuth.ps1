@@ -38,6 +38,8 @@ param(
     [Parameter()]
     [string]$RedirectUri = 'https://mysignins.microsoft.com'
 )
+    if ([string]::IsNullOrEmpty($PasskeyDisplayName)) { $PasskeyDisplayName = "TokenForge $(Get-Date -Format yyMMdd)" }
+    Assert-EntraPasskeyDisplayName $PasskeyDisplayName
     if (-not $PSCmdlet.ShouldProcess("$KeyVaultName / Entra passkey enrollment", 'Authenticate, create a Key Vault key, enroll the passkey, and save its credential record')) { return }
     Write-PasskeySoftwareWarning
     $context = $null; $key = $null; $token = $null; $attestation = $null
@@ -46,7 +48,6 @@ param(
         $context = Invoke-EntraRegistrationCookieAuthentication -Context $context -ESTSAuthCookie (ConvertTo-PlainTextValue $ESTSAuthCookie) -TenantId $TenantId
         $token = Get-KeyVaultToken -AccessToken $KeyVaultAccessToken
         $key = New-EntraKeyVaultRegistrationKey -VaultName $KeyVaultName -KeyName $KeyVaultKeyName -UserPrincipalName $context.UserPrincipalName -AccessToken $token
-        if ([string]::IsNullOrWhiteSpace($PasskeyDisplayName)) { $PasskeyDisplayName = "pk$(Get-Random -Minimum 1000 -Maximum 10000)" }
         $context = Initialize-EntraRegistrationSession -Context $context
         $request = Initialize-EntraRegistrationRequest -Context $context
         $attestation = New-EntraKeyVaultAttestation -PublicX $key.PublicX -PublicY $key.PublicY -ServerChallenge $request.ServerChallenge

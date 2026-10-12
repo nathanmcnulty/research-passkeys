@@ -35,6 +35,8 @@
     The user's UPN (e.g., user@contoso.com).
 
 .PARAMETER TenantId
+    Optional enrollment tenant GUID. Defaults to validated UPN-suffix OIDC discovery.
+    Supply the intended resource tenant for guest/cross-tenant enrollment. This does not select a Key Vault application tenant.
     The Azure AD tenant ID (GUID).
 
 .PARAMETER KeyVaultName
@@ -46,6 +48,7 @@
     if not specified.
 
 .PARAMETER DisplayName
+    Nonblank name, at most 30 characters; for example TokenForge 261011.
     Display name for the passkey (default: "Software Passkey").
 
 .PARAMETER OutputPath
@@ -88,7 +91,7 @@ param(
     [Parameter(Mandatory)]
     [string]$UserPrincipalName,
 
-    [Parameter(Mandatory)]
+    [Parameter()]
     [string]$TenantId,
 
     [Parameter(Mandatory)]

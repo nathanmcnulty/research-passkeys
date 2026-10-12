@@ -9,13 +9,13 @@ CookieValue by default; -AsPlainText explicitly returns a raw bearer-cookie stri
 No passkey is enrolled and no session is stored in global variables.
 .EXAMPLE
 $tap = Read-Host 'Temporary Access Pass' -AsSecureString
-./Get-EntraEstsCookieViaTap.ps1 -TAP $tap -UserPrincipalName 'user@example.com' -TenantId '<tenant-guid>'
+./Get-EntraEstsCookieViaTap.ps1 -TAP $tap -UserPrincipalName 'user@example.com'
 #>
 [CmdletBinding()]
 param(
     [Parameter(Mandatory)][Security.SecureString]$TAP,
     [Parameter(Mandatory)][ValidatePattern('^[^\s@]+@[^\s@]+$')][string]$UserPrincipalName,
-    [Parameter(Mandatory)][guid]$TenantId,
+    [string]$TenantId,
     [ValidateSet('SecurityInfoBootstrap')][string]$Purpose = 'SecurityInfoBootstrap',
     [switch]$AsPlainText
 )

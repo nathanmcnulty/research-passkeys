@@ -7,7 +7,7 @@ Unattended software implementation, not a FIDO-certified authenticator. Syntheti
 #>
 [CmdletBinding(DefaultParameterSetName = 'ClientSecret', SupportsShouldProcess, ConfirmImpact = 'High')]
 param([Parameter(ValueFromPipeline)][pscustomobject]$ConfigFromPipeline,
-        [Parameter(Mandatory)][string]$UserUpn, [ValidateLength(1,100)][string]$DisplayName = 'Software Passkey',
+        [Parameter(Mandatory)][string]$UserUpn, [ValidateLength(1,30)][string]$DisplayName = 'Software Passkey',
         [Parameter(ParameterSetName = 'ClientSecret')][Parameter(ParameterSetName = 'Certificate')][string]$ClientId,
         [Parameter(ParameterSetName = 'ClientSecret')][securestring]$ClientSecret,
         [Parameter(ParameterSetName = 'Certificate')][string]$ClientCertificatePath,

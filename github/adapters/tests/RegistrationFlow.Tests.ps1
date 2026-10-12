@@ -38,7 +38,12 @@ Describe 'Complete TAP registration transcript through <Surface>' -ForEach @(@{ 
         # All requests use the same raw transport. Synthetic JWT claims are consistency fixtures only.
         Mock Invoke-WebRequest {
             $content = ''; $status = 200; $responseHeaders = @{}
-            if ($Uri -match '/authorize\?') {
+            if ($Uri -match '/v2.0/.well-known/openid-configuration$') {
+                $MaximumRedirection | Should -Be 0
+                $ConnectionTimeoutSeconds | Should -Be 60
+                $OperationTimeoutSeconds | Should -Be 60
+                $content = '{"issuer":"https://login.microsoftonline.com/11111111-1111-1111-1111-111111111111/v2.0"}'
+            } elseif ($Uri -match '/authorize\?') {
                 $global:PasskeyOfflineFixture.State = [Web.HttpUtility]::ParseQueryString(([uri]$Uri).Query)['state']
                 $content = '$Config={"pgid":"ConvergedSignIn","sFT":"fixture-flow","sCtx":"fixture-context","canary":"fixture-canary","apiCanary":"fixture-api","sessionId":"fixture-session","urlPost":"/common/login"};'
             } elseif ($Uri -match 'GetCredentialType') {
@@ -91,12 +96,12 @@ Describe 'Complete TAP registration transcript through <Surface>' -ForEach @(@{ 
             return @{ StatusCode = $status; Content = $content; Headers = $responseHeaders }
         } @mockScope
         Mock Invoke-RestMethod { throw 'All native registration requests must use the bounded raw transport.' } @mockScope
-        $params = @{ TAP = (ConvertTo-SecureString 'SYNTHETIC-TAP' -AsPlainText -Force); UserPrincipalName = 'fixture@example.invalid'; TenantId = '11111111-1111-1111-1111-111111111111'; Repository = 'fixture-owner/fixture-repo'; ConsumersPaused = $true; Confirm = $false }
+        $params = @{ TAP = (ConvertTo-SecureString 'SYNTHETIC-TAP' -AsPlainText -Force); UserPrincipalName = 'fixture@example.invalid'; TenantId = '11111111-1111-1111-1111-111111111111'; Repository = 'fixture-owner/fixture-repo'; Confirm = $false }
     }
     It 'completes the synthetic ceremony and writes exactly four names without credentials in outputs' {
         $warnings = @()
         $result = & $registrationCommand @params -WarningVariable warnings
-        @($warnings).Count | Should -Be 1
+        @($warnings).Count | Should -Be 2
         $result.Success | Should -BeTrue
         $result | ConvertTo-Json -Depth 5 | Should -Not -Match 'SYNTHETIC|BEGIN PRIVATE|fixture@'
         $calls = Get-Content $ghCalls
@@ -106,9 +111,49 @@ Describe 'Complete TAP registration transcript through <Surface>' -ForEach @(@{ 
         $global:PasskeyOfflineFixture.TokenRequests | Should -Be 2
         Should -Invoke Invoke-RestMethod -Times 0 -Exactly @mockScope
     }
+    It 'discovers the UPN tenant and exports only after bound verification' {
+        $params.Remove('TenantId')
+        $params.DisplayName = 'TokenForge 261011'
+        $result = & $registrationCommand @params
+        $result.EnrollmentStatus | Should -Be Verified
+        $result.ExportStatus | Should -Be Complete
+        Should -Invoke Invoke-WebRequest -Times 1 -Exactly -ParameterFilter { $Uri -eq 'https://login.microsoftonline.com/example.invalid/v2.0/.well-known/openid-configuration' } @mockScope
+    }
+    It 'does no discovery under WhatIf when the tenant argument is omitted' {
+        $params.Remove('TenantId')
+        & $registrationCommand @params -WhatIf
+        Should -Invoke Invoke-WebRequest -Times 0 -Exactly @mockScope
+        Test-Path $ghCalls | Should -BeFalse
+    }
+    It 'rejects blank or oversized names before CLI authentication or HTTP' -ForEach @('   ', ('x' * 31)) {
+        $params.DisplayName = $_
+        { & $registrationCommand @params } | Should -Throw
+        Should -Invoke Invoke-WebRequest -Times 0 -Exactly @mockScope
+        Test-Path $ghCalls | Should -BeFalse
+    }
+    It 'reports preflight failure without claiming partial enrollment or exposing raw details' {
+        Mock Get-Command { $null } -ParameterFilter { $Name -eq 'gh' } @mockScope
+        $caught = $null
+        try { & $registrationCommand @params } catch { $caught = $_ }
+        $caught.TargetObject.Stage | Should -Be GitHubPreflight
+        $caught.TargetObject.Code | Should -Be PasskeyGitHubPreflightFailed
+        $caught.TargetObject.EnrollmentStatus | Should -Be NotStarted
+        $caught.TargetObject.ExportStatus | Should -Be NotStarted
+        $caught.Exception.InnerException | Should -BeNullOrEmpty
+        $caught.Exception.Message | Should -Not -Match 'may exist|partially|SYNTHETIC|fixture@|BEGIN PRIVATE'
+        Should -Invoke Invoke-WebRequest -Times 0 -Exactly @mockScope
+    }
     It 'rejects invalid response without any secret write' -ForEach @('badstate','consent','badclient','badtenant','baduser','createfail','mismatch','protocolerror','httperror') {
         $global:PasskeyOfflineFixture.Mode = $_
-        { & $registrationCommand @params } | Should -Throw
+        $caught = $null
+        try { & $registrationCommand @params } catch { $caught = $_ }
+        $caught | Should -Not -BeNullOrEmpty
+        $expectedEnrollment = if ($global:PasskeyOfflineFixture.Mode -in @('mismatch','protocolerror','httperror')) { 'Unconfirmed' } else { 'NotStarted' }
+        $caught.TargetObject.EnrollmentStatus | Should -Be $expectedEnrollment
+        $caught.TargetObject.ExportStatus | Should -Be NotStarted
+        $caught.TargetObject.Stage | Should -Not -BeNullOrEmpty
+        ($caught.TargetObject | ConvertTo-Json -Depth 5) | Should -Not -Match 'SYNTHETIC|fixture@|BEGIN PRIVATE'
+        $caught.Exception.InnerException | Should -BeNullOrEmpty
         # Both read-only preflight invocations reached the real platform-native fixture.
         $calls = @(Get-Content $ghCalls -ErrorAction Stop)
         $calls.Count | Should -Be 2

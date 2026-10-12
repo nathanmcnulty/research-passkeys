@@ -14,7 +14,7 @@ function Get-EntraEstsCookieViaTap {
     param(
         [Parameter(Mandatory)][Security.SecureString]$TAP,
         [Parameter(Mandatory)][ValidatePattern('^[^\s@]+@[^\s@]+$')][string]$UserPrincipalName,
-        [Parameter(Mandatory)][guid]$TenantId,
+        [string]$TenantId,
         [ValidateSet('SecurityInfoBootstrap')][string]$Purpose = 'SecurityInfoBootstrap',
         [switch]$AsPlainText
     )

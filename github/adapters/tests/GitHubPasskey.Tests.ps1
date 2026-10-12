@@ -12,7 +12,7 @@ Describe 'GitHub secret validation and atomicity boundaries' {
         $c = $fixture.Clone()
     }
     It 'maps exactly four established names with the private key last' {
-        $result = Export-PasskeyToGitHubSecret -Credential $c -Repository 'test-owner/test-repo' -ConsumersPaused -Confirm:$false
+        $result = Export-PasskeyToGitHubSecret -Credential $c -Repository 'test-owner/test-repo' -Confirm:$false
         $result.Success | Should -BeTrue
         $result.Atomic | Should -BeFalse
         $result.SecretNames -join ',' | Should -Be 'PASSKEY_PRIVATE_CREDENTIAL_ID,PASSKEY_PRIVATE_USER_HANDLE,PASSKEY_PRIVATE_USER_PRINCIPAL_NAME,PASSKEY_PRIVATE_KEY'
@@ -20,24 +20,27 @@ Describe 'GitHub secret validation and atomicity boundaries' {
         Should -Invoke Invoke-GitHubPasskeyCli -Times 1 -Exactly -ParameterFilter { $Arguments[0] -eq 'secret' -and $Arguments[2] -eq 'PASSKEY_PRIVATE_KEY' -and $InputText -ceq $fixture.privateKey -and $Arguments -notcontains $fixture.privateKey }
     }
     It 'accepts the registration PSCustomObject schema' {
-        $result = Export-PasskeyToGitHubSecret -Credential ([pscustomobject]$c) -Repository 'test-owner/repo' -ConsumersPaused -Confirm:$false
+        $result = Export-PasskeyToGitHubSecret -Credential ([pscustomobject]$c) -Repository 'test-owner/repo' -Confirm:$false
         $result.Success | Should -BeTrue
     }
     It 'does nothing under WhatIf including preflight' {
-        Export-PasskeyToGitHubSecret -Credential $c -Repository 'test-owner/repo' -ConsumersPaused -WhatIf
+        Export-PasskeyToGitHubSecret -Credential $c -Repository 'test-owner/repo' -WhatIf
         Should -Invoke Invoke-GitHubPasskeyCli -Times 0 -Exactly
     }
-    It 'requires explicit consumers-paused acknowledgement' {
-        { Export-PasskeyToGitHubSecret -Credential $c -Repository 'test-owner/repo' -Confirm:$false } | Should -Throw '*Pause*'
-        Should -Invoke Invoke-GitHubPasskeyCli -Times 0 -Exactly
+    It 'warns without an acknowledgement-only switch' {
+        $warnings = @()
+        $result = Export-PasskeyToGitHubSecret -Credential $c -Repository 'test-owner/repo' -Confirm:$false -WarningVariable warnings
+        (Get-Command Export-PasskeyToGitHubSecret).Parameters.Keys | Should -Not -Contain 'ConsumersPaused'
+        [string]$warnings[0] | Should -Match 'not atomic.*does not pause'
+        $result.ExportStatus | Should -Be Complete
     }
     It 'rejects malformed repository before any operation' -ForEach @('https://github.com/owner/repo','owner/repo/extra','owner/repo --evil','/repo','owner/..','owner/repo?x=1') {
-        { Export-PasskeyToGitHubSecret -Credential $c -Repository $_ -ConsumersPaused -Confirm:$false } | Should -Throw
+        { Export-PasskeyToGitHubSecret -Credential $c -Repository $_ -Confirm:$false } | Should -Throw
         Should -Invoke Invoke-GitHubPasskeyCli -Times 0 -Exactly
     }
     It 'validates every field before first operation' -ForEach @('credentialId','userHandle','userName','privateKey') {
         $c[$_] = ''
-        { Export-PasskeyToGitHubSecret -Credential $c -Repository 'owner/repo' -ConsumersPaused -Confirm:$false } | Should -Throw
+        { Export-PasskeyToGitHubSecret -Credential $c -Repository 'owner/repo' -Confirm:$false } | Should -Throw
         Should -Invoke Invoke-GitHubPasskeyCli -Times 0 -Exactly
     }
     It 'rejects wrong field types' {
@@ -70,15 +73,19 @@ Describe 'GitHub secret validation and atomicity boundaries' {
             }
         }
         $caught = $null
-        try { Export-PasskeyToGitHubSecret -Credential $c -Repository 'owner/repo' -ConsumersPaused -Confirm:$false } catch { $caught = $_ }
+        try { Export-PasskeyToGitHubSecret -Credential $c -Repository 'owner/repo' -Confirm:$false } catch { $caught = $_ }
         $caught | Should -Not -BeNullOrEmpty
+        $caught.TargetObject.Stage | Should -Be GitHubExport
+        $caught.TargetObject.ExportStatus | Should -Be Incomplete
+        @($caught.TargetObject.ConfirmedWrites).Count | Should -Be $script:failAt
+        $caught.TargetObject.FailedOrUnknownSecret | Should -Be (@('PASSKEY_PRIVATE_CREDENTIAL_ID','PASSKEY_PRIVATE_USER_HANDLE','PASSKEY_PRIVATE_USER_PRINCIPAL_NAME','PASSKEY_PRIVATE_KEY')[$script:failAt])
         $caught.Exception.Message | Should -Match 'Failed or unknown'
         $caught.Exception.Message | Should -Not -Match 'DO_NOT_LEAK|BEGIN PRIVATE|fixture@'
         $script:writeCount | Should -Be ($script:failAt + 1)
         Should -Invoke Invoke-GitHubPasskeyCli -Times 0 -Exactly -ParameterFilter { $Arguments -contains 'delete' }
     }
     It 'does not expose credential contents in successful results' {
-        $result = Export-PasskeyToGitHubSecret -Credential $c -Repository 'owner/repo' -ConsumersPaused -Confirm:$false | ConvertTo-Json -Depth 10
+        $result = Export-PasskeyToGitHubSecret -Credential $c -Repository 'owner/repo' -Confirm:$false | ConvertTo-Json -Depth 10
         $result | Should -Not -Match 'BEGIN PRIVATE|fixture@|AQIDBA|BQYHCA'
     }
 }
@@ -86,7 +93,7 @@ Describe 'Registration dry-run and trust boundaries' {
     BeforeAll {
         $text = Get-Content $registration -Raw
         # Load the COMPLETE generated artifact through its public zero-I/O WhatIf boundary.
-        . $registration -TAP (ConvertTo-SecureString 'synthetic-test-only' -AsPlainText -Force) -UserPrincipalName 'fixture@example.invalid' -TenantId '11111111-1111-1111-1111-111111111111' -Repository 'owner/repo' -ConsumersPaused -WhatIf
+        . $registration -TAP (ConvertTo-SecureString 'synthetic-test-only' -AsPlainText -Force) -UserPrincipalName 'fixture@example.invalid' -TenantId '11111111-1111-1111-1111-111111111111' -Repository 'owner/repo' -WhatIf
     }
     It 'rejects untrusted endpoint origins' -ForEach @('http://login.microsoftonline.com/x','https://login.microsoftonline.com.evil.invalid/x','https://login.microsoftonline.com:444/x','https://user@login.microsoftonline.com/x','https://evil.invalid/x') {
         { Assert-EntraRegistrationUri $_ } | Should -Throw
@@ -99,20 +106,20 @@ Describe 'Registration dry-run and trust boundaries' {
     }
     It 'WhatIf returns before gh, HTTP and key generation' {
         # Executed in a child scope. Invalid gh PATH is intentionally irrelevant for preview.
-        $output = & $registration -TAP (ConvertTo-SecureString 'synthetic-test-only' -AsPlainText -Force) -UserPrincipalName 'fixture@example.invalid' -TenantId '11111111-1111-1111-1111-111111111111' -Repository 'owner/repo' -ConsumersPaused -WhatIf
+        $output = & $registration -TAP (ConvertTo-SecureString 'synthetic-test-only' -AsPlainText -Force) -UserPrincipalName 'fixture@example.invalid' -TenantId '11111111-1111-1111-1111-111111111111' -Repository 'owner/repo' -WhatIf
         $output | Should -BeNullOrEmpty
     }
     It 'previews without an acknowledgement-only parameter or warning' {
         (Get-Command $registration).Parameters.Keys | Should -Not -Contain 'AllowLegacySoftwareAttestation'
         $warnings = @()
-        { & $registration -TAP (ConvertTo-SecureString 'synthetic-test-only' -AsPlainText -Force) -UserPrincipalName 'fixture@example.invalid' -TenantId '11111111-1111-1111-1111-111111111111' -Repository 'owner/repo' -ConsumersPaused -WhatIf -WarningVariable warnings } | Should -Not -Throw
+        { & $registration -TAP (ConvertTo-SecureString 'synthetic-test-only' -AsPlainText -Force) -UserPrincipalName 'fixture@example.invalid' -TenantId '11111111-1111-1111-1111-111111111111' -Repository 'owner/repo' -WhatIf -WarningVariable warnings } | Should -Not -Throw
         @($warnings).Count | Should -Be 0
     }
 }
 
 Describe 'Registration success must bind the new credential' {
     BeforeAll {
-        . $registration -TAP (ConvertTo-SecureString 'synthetic-test-only' -AsPlainText -Force) -UserPrincipalName 'fixture@example.invalid' -TenantId '11111111-1111-1111-1111-111111111111' -Repository 'owner/repo' -ConsumersPaused -WhatIf
+        . $registration -TAP (ConvertTo-SecureString 'synthetic-test-only' -AsPlainText -Force) -UserPrincipalName 'fixture@example.invalid' -TenantId '11111111-1111-1111-1111-111111111111' -Repository 'owner/repo' -WhatIf
     }
     BeforeEach { $response = @{ VerificationState = 2; ErrorCode = 0; DataUpdates = @{ FidoDevices = @{ CredentialId = 'AQIDBA' } } } }
     It 'accepts successful bound verification' { { Assert-EntraRegistrationVerified 200 $response 'AQIDBA' } | Should -Not -Throw }

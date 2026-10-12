@@ -4,11 +4,12 @@ function Invoke-EntraEstsCookieViaTapUtility {
     param(
         [Parameter(Mandatory)][Security.SecureString]$TAP,
         [Parameter(Mandatory)][ValidatePattern('^[^\s@]+@[^\s@]+$')][string]$UserPrincipalName,
-        [Parameter(Mandatory)][guid]$TenantId,
+        [string]$TenantId,
         [ValidateSet('SecurityInfoBootstrap')][string]$Purpose = 'SecurityInfoBootstrap',
         [switch]$AsPlainText
     )
-    if ($TenantId -eq [guid]::Empty -or $TAP.Length -eq 0) { throw 'A nonempty tenant GUID and secure TAP are required.' }
+    if ($TAP.Length -eq 0) { throw 'A nonempty secure TAP is required.' }
+    if ($TenantId) { $null = Resolve-EntraRegistrationTenant -TenantId $TenantId -UserPrincipalName $UserPrincipalName }
     $context = $null
     try {
         $context = New-EntraRegistrationContext
@@ -26,7 +27,7 @@ function Invoke-EntraEstsCookieViaTapUtility {
         return [pscustomobject]@{
             CookieName = [string]$cookie.Name
             CookieValue = ConvertTo-SecureString -String $cookie.Value -AsPlainText -Force
-            TenantId = $TenantId.ToString()
+            TenantId = $context.TenantId
             UserPrincipalName = $UserPrincipalName
             Purpose = $Purpose
         }

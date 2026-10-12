@@ -12,7 +12,7 @@ function Register-EntraSoftwarePasskey {
     #>
     [CmdletBinding(DefaultParameterSetName = 'ClientSecret', SupportsShouldProcess, ConfirmImpact = 'High')]
     param([Parameter(ValueFromPipeline)][pscustomobject]$ConfigFromPipeline,
-        [Parameter(Mandatory)][string]$UserUpn, [ValidateLength(1,100)][string]$DisplayName = 'Software Passkey',
+        [Parameter(Mandatory)][string]$UserUpn, [ValidateLength(1,30)][string]$DisplayName = 'Software Passkey',
         [Parameter(ParameterSetName = 'ClientSecret')][Parameter(ParameterSetName = 'Certificate')][string]$ClientId,
         [Parameter(ParameterSetName = 'ClientSecret')][securestring]$ClientSecret,
         [Parameter(ParameterSetName = 'Certificate')][string]$ClientCertificatePath,
@@ -24,6 +24,7 @@ function Register-EntraSoftwarePasskey {
             -ConfigFromPipeline $ConfigFromPipeline -ParameterSetName $PSCmdlet.ParameterSetName
         # Defaults absent from PSBoundParameters are still explicit workflow inputs.
         $configuration.DisplayName = $DisplayName
+        Assert-EntraPasskeyDisplayName $DisplayName
         if (-not $PSCmdlet.ShouldProcess($UserUpn, "Register software passkey '$DisplayName' and save its credential record")) { return }
         Write-PasskeySoftwareWarning
         $path = Resolve-EntraSoftwareOutputPath -OutputPath $OutputPath -UserPrincipalName $UserUpn -DisplayName $DisplayName

@@ -200,6 +200,29 @@ function Get-HttpErrorMessage {
 function Write-PasskeySoftwareWarning {
     Write-Warning 'Research automation only: not a FIDO-certified authenticator. These flows do not perform authenticator user presence or verification; any UP/UV flags are synthetic. Tenant policy may reject them.'
 }
+
+function New-PasskeyOperationError {
+    param(
+        [Parameter(Mandatory)][ValidateSet('GitHubPreflight','TenantDiscovery','TapSignInPage','CredentialType','TapAuthorization','TokenExchange','CookieAuthentication','OutputReservation','SessionAuthorization','RegistrationOptions','Attestation','ChallengeSubmission','CredentialSubmission','EnrollmentVerification','CredentialRecord','CredentialPersistence','GitHubExport')][string]$Stage,
+        [ValidateSet('NotStarted','Unconfirmed','Verified')][string]$EnrollmentStatus = 'NotStarted',
+        [ValidateSet('NotStarted','Incomplete','Complete')][string]$ExportStatus = 'NotStarted',
+        [string[]]$ConfirmedWrites = @(),
+        [ValidateSet('PASSKEY_PRIVATE_CREDENTIAL_ID','PASSKEY_PRIVATE_USER_HANDLE','PASSKEY_PRIVATE_USER_PRINCIPAL_NAME','PASSKEY_PRIVATE_KEY')][string]$FailedOrUnknownSecret
+    )
+    $names = @('PASSKEY_PRIVATE_CREDENTIAL_ID','PASSKEY_PRIVATE_USER_HANDLE','PASSKEY_PRIVATE_USER_PRINCIPAL_NAME','PASSKEY_PRIVATE_KEY')
+    $confirmed = @($ConfirmedWrites | Where-Object { $_ -cin $names })
+    $code = "Passkey$($Stage)Failed"
+    $status = [pscustomobject]@{ Code = $code; Stage = $Stage; EnrollmentStatus = $EnrollmentStatus; ExportStatus = $ExportStatus
+        ConfirmedWrites = $confirmed; FailedOrUnknownSecret = $FailedOrUnknownSecret }
+    $message = "$code. Stage: $Stage. Enrollment: $EnrollmentStatus. Export: $ExportStatus. Service details suppressed."
+    if ($EnrollmentStatus -eq 'Unconfirmed') { $message += ' A method may exist; inspect My Sign-ins before retrying.' }
+    if ($EnrollmentStatus -eq 'Verified' -and $ExportStatus -ne 'NotStarted') { $message += ' Enrollment completed, but export did not finish.' }
+    if ($ExportStatus -eq 'Incomplete') {
+        $completed = if ($confirmed.Count) { $confirmed -join ', ' } else { '(none)' }
+        $message += " Confirmed writes: $completed. Failed or unknown: $FailedOrUnknownSecret. Keep consumers paused or disabled until the complete credential is exported. No rollback was attempted; GitHub cannot return previous secret values."
+    }
+    return [Management.Automation.ErrorRecord]::new([InvalidOperationException]::new($message), $code, [Management.Automation.ErrorCategory]::InvalidOperation, $status)
+}
 # End source: powershell/src/Common/Values.ps1
 
 # Source: powershell/src/Common/Process.ps1
@@ -1150,6 +1173,38 @@ function Add-PasskeyBrowserHeaders {
 # End source: powershell/src/Entra/SoftwareBrowserHeaders.ps1
 
 # Source: powershell/src/Entra/SoftwareSession.ps1
+function Resolve-EntraRegistrationTenant {
+    param([AllowNull()][string]$TenantId, [Parameter(Mandatory)][string]$UserPrincipalName)
+    if ($UserPrincipalName -notmatch '^[^\s@]+@([^\s@]+)$') { throw 'A valid UPN is required for tenant discovery.' }
+    $suffix = $matches[1]
+    if ($TenantId) {
+        $tenant = [guid]::Empty
+        if (-not [guid]::TryParse($TenantId, [ref]$tenant) -or $tenant -eq [guid]::Empty) { throw 'TenantId must be a nonempty GUID.' }
+        return $tenant.ToString()
+    }
+    # DNS suffix only: no path, query, fragment, port or encoded authority components.
+    if ([uri]::CheckHostName($suffix) -ne [UriHostNameType]::Dns -or $suffix.Contains('%')) { throw 'UPN suffix must be a DNS name.' }
+    $domain = [uri]::EscapeDataString($suffix)
+    $metadata = Invoke-EntraRegistrationRestMethod -Uri "https://login.microsoftonline.com/$domain/v2.0/.well-known/openid-configuration"
+    # Public OIDC discovery selects the suffix's tenant. Guest/resource tenants require an explicit override.
+    # https://learn.microsoft.com/en-us/entra/identity-platform/v2-protocols-oidc
+    $issuer = Assert-EntraRegistrationUri ([string]$metadata.issuer)
+    $tenant = [guid]::Empty
+    if (-not [guid]::TryParse($issuer.AbsolutePath.Trim('/').Split('/')[0], [ref]$tenant) -or $tenant -eq [guid]::Empty -or
+        $issuer.Host -ne 'login.microsoftonline.com' -or $issuer.Query -or $issuer.Fragment -or
+        $issuer.AbsolutePath -cne "/$($tenant.ToString())/v2.0") { throw 'Tenant discovery did not return the expected Microsoft tenant GUID issuer.' }
+    return $tenant.ToString()
+}
+
+function Assert-EntraPasskeyDisplayName {
+    param([Parameter(Mandatory)][AllowEmptyString()][string]$DisplayName)
+    # Current public My Sign-ins passkey-name field maxLength is 30; use this conservative bound across routes.
+    # https://mysignins.microsoft.com/security-info (app 4.0.2289, main.e79f2476.js).
+    if ([string]::IsNullOrWhiteSpace($DisplayName) -or $DisplayName.Length -gt 30) {
+        throw 'Passkey display name must contain 1 to 30 characters; use a short name such as TokenForge 261011.'
+    }
+}
+
 # Shared My Sign-ins registration transport and request state. Loading this file has no side effects.
 function Assert-EntraRegistrationUri {
     param([Parameter(Mandatory)][string]$Uri)
@@ -1237,6 +1292,7 @@ function New-EntraRegistrationContext {
         WebSession = $session
         ClientSessionId = [guid]::NewGuid().ToString()
         TenantId = $null; UserPrincipalName = $null; Token = $null; RefreshToken = $null; SessionCtxV2 = $null
+        Stage = 'NotStarted'; EnrollmentStatus = 'NotStarted'
     }
 }
 
@@ -1402,16 +1458,19 @@ function Complete-EntraRegistrationTokenExchange {
 # Source: powershell/src/Entra/SoftwareAuthentication.ps1
 function Invoke-EntraRegistrationTapAuthentication {
     param([Parameter(Mandatory)]$Context, [Parameter(Mandatory)][object]$TAP,
-        [Parameter(Mandatory)][string]$UserPrincipalName, [Parameter(Mandatory)][guid]$TenantId)
-    if ($TenantId -eq [guid]::Empty -or $UserPrincipalName -notmatch '^[^\s@]+@[^\s@]+$') { throw 'A nonempty tenant GUID and UPN are required.' }
+        [Parameter(Mandatory)][string]$UserPrincipalName, [AllowNull()][string]$TenantId)
+    $Context.Stage = 'TenantDiscovery'
+    $TenantId = Resolve-EntraRegistrationTenant -TenantId $TenantId -UserPrincipalName $UserPrincipalName
     $tapText = ConvertTo-PlainTextValue $TAP
     if ([string]::IsNullOrWhiteSpace($tapText)) { throw 'TAP cannot be empty.' }
     try {
+        $Context.Stage = 'TapSignInPage'
         $uri = Get-EntraRegistrationAuthorizeUri -Context $Context -Authority $TenantId.ToString() -UserPrincipalName $UserPrincipalName -Tap
         $response = Invoke-EntraRegistrationWebRequest -Uri $uri -WebSession $Context.WebSession
         if ([int]$response.StatusCode -ne 200) { throw 'Registration sign-in page was not returned.' }
         $config = Get-EntraRegistrationPageConfig -Content $response.Content
         if ($config.pgid -ne 'ConvergedSignIn' -or -not $config.sFT -or -not $config.sCtx) { throw 'Unexpected registration sign-in page.' }
+        $Context.Stage = 'CredentialType'
         $gct = Invoke-EntraRegistrationRestMethod -Uri 'https://login.microsoftonline.com/common/GetCredentialType?mkt=en-US' `
             -Method POST -Body (@{
                 username = $UserPrincipalName; isOtherIdpSupported = $false; checkPhones = $false
@@ -1430,7 +1489,9 @@ function Invoke-EntraRegistrationTapAuthentication {
             PPSX = ''; NewUser = '1'; FoundMSAs = ''; fspost = '0'; i21 = '0'; CookieDisclosure = '0'
             IsFidoSupported = '1'; isSignupPost = '0'; DfpArtifact = ''; i19 = '10000'
         }
+        $Context.Stage = 'TapAuthorization'
         $code = Invoke-EntraRegistrationAuthorization -Context $Context -Uri $postUri.AbsoluteUri -Method POST -Body $body
+        $Context.Stage = 'TokenExchange'
         return Complete-EntraRegistrationTokenExchange -Context $Context -Authority $TenantId.ToString() -Code $code `
             -TenantId $TenantId.ToString() -UserPrincipalName $UserPrincipalName
     } finally { $tapText = $null; $body = $null }
@@ -1636,21 +1697,7 @@ function Write-EntraSoftwareCredentialOutput {
 function Resolve-EntraSoftwareGraphTenant {
     param([AllowNull()][string]$TenantId, [Parameter(Mandatory)][string]$UserUpn, [switch]$UseManagedIdentity)
     if ($UseManagedIdentity) { return $TenantId }
-    if ($TenantId) {
-        $tenant = [guid]::Empty
-        if (-not [guid]::TryParse($TenantId, [ref]$tenant) -or $tenant -eq [guid]::Empty) { throw 'TenantId must be a nonempty GUID.' }
-        return $tenant.ToString()
-    }
-    $domain = [uri]::EscapeDataString($UserUpn.Split('@')[1])
-    $metadata = Invoke-EntraRegistrationRestMethod -Uri "https://login.microsoftonline.com/$domain/v2.0/.well-known/openid-configuration"
-    # Microsoft OIDC v2 metadata: https://learn.microsoft.com/en-us/entra/identity-platform/v2-protocols-oidc
-    $issuer = Assert-EntraRegistrationUri ([string]$metadata.issuer)
-    $tenant = [guid]::Empty
-    if (-not [guid]::TryParse($issuer.AbsolutePath.Trim('/').Split('/')[0], [ref]$tenant) -or $tenant -eq [guid]::Empty) {
-        throw 'Tenant discovery did not return a tenant GUID.'
-    }
-    if ($issuer.Host -ne 'login.microsoftonline.com' -or $issuer.AbsolutePath.Trim('/') -cne "$($tenant.ToString())/v2.0") { throw 'Unexpected tenant discovery issuer.' }
-    return $tenant.ToString()
+    return Resolve-EntraRegistrationTenant -TenantId $TenantId -UserPrincipalName $UserUpn
 }
 
 function Get-EntraSoftwareManagedIdentityToken {
@@ -1841,7 +1888,7 @@ function Register-EntraSoftwarePasskey {
     #>
     [CmdletBinding(DefaultParameterSetName = 'ClientSecret', SupportsShouldProcess, ConfirmImpact = 'High')]
     param([Parameter(ValueFromPipeline)][pscustomobject]$ConfigFromPipeline,
-        [Parameter(Mandatory)][string]$UserUpn, [ValidateLength(1,100)][string]$DisplayName = 'Software Passkey',
+        [Parameter(Mandatory)][string]$UserUpn, [ValidateLength(1,30)][string]$DisplayName = 'Software Passkey',
         [Parameter(ParameterSetName = 'ClientSecret')][Parameter(ParameterSetName = 'Certificate')][string]$ClientId,
         [Parameter(ParameterSetName = 'ClientSecret')][securestring]$ClientSecret,
         [Parameter(ParameterSetName = 'Certificate')][string]$ClientCertificatePath,
@@ -1853,6 +1900,7 @@ function Register-EntraSoftwarePasskey {
             -ConfigFromPipeline $ConfigFromPipeline -ParameterSetName $PSCmdlet.ParameterSetName
         # Defaults absent from PSBoundParameters are still explicit workflow inputs.
         $configuration.DisplayName = $DisplayName
+        Assert-EntraPasskeyDisplayName $DisplayName
         if (-not $PSCmdlet.ShouldProcess($UserUpn, "Register software passkey '$DisplayName' and save its credential record")) { return }
         Write-PasskeySoftwareWarning
         $path = Resolve-EntraSoftwareOutputPath -OutputPath $OutputPath -UserPrincipalName $UserUpn -DisplayName $DisplayName
@@ -2007,6 +2055,7 @@ function Submit-EntraRegistration {
         userIconUrl = ''; userId = $Request.UserHandle
     })
     $createUri = Add-EntraKeyVaultRegistrationQuery -Uri $Request.ProvisionUrl -CorrelationId $Request.CorrelationId
+    $Context.Stage = 'ChallengeSubmission'
     $created = Invoke-EntraRegistrationWebRequest -Uri $createUri -Method POST -Body $createBody `
         -ContentType 'application/x-www-form-urlencoded' -WebSession $Context.WebSession
     if ([int]$created.StatusCode -lt 200 -or [int]$created.StatusCode -ge 300) {
@@ -2023,6 +2072,8 @@ function Submit-EntraRegistration {
         if ($present) { $fidoFields[$field.ToLowerInvariant()] = [string]$Attestation.$field }
     }
     $body = ConvertTo-EntraRegistrationForm $fidoFields
+    $Context.Stage = 'CredentialSubmission'
+    $Context.EnrollmentStatus = 'Unconfirmed'
     $response = Invoke-EntraRegistrationWebRequest -Uri $postBack -Method POST -Body $body `
         -ContentType 'application/x-www-form-urlencoded' -WebSession $Context.WebSession `
         -Headers @{ Origin = 'https://login.microsoft.com'; Referer = 'https://login.microsoft.com/' }
@@ -2055,6 +2106,7 @@ function Submit-EntraRegistration {
         } catch { Write-Verbose 'Security-info navigation did not refresh registration state.' }
     }
     Update-EntraKeyVaultVerificationSession -Context $Context
+    $Context.Stage = 'EnrollmentVerification'
     Invoke-EntraKeyVaultRegistrationVerification -Context $Context -Request $Request -Attestation $Attestation -DisplayName $DisplayName
 }
 # End source: powershell/src/Entra/KeyVaultRegistrationRequests.ps1
@@ -2134,11 +2186,16 @@ function Invoke-EntraSoftwareNativeRegistration {
     param([Parameter(Mandatory)]$Context, [Parameter(Mandatory)][string]$DisplayName)
     $provider = $null
     try {
+        $Context.Stage = 'SessionAuthorization'
         $Context = Initialize-EntraRegistrationSession -Context $Context
+        $Context.Stage = 'RegistrationOptions'
         $request = Initialize-EntraRegistrationRequest -Context $Context
+        $Context.Stage = 'Attestation'
         $provider = New-SoftwarePasskeyKey
         $attestation = New-EntraSoftwareAttestation -Provider $provider -Challenge $request.ServerChallenge -Format Packed
         $verified = Submit-EntraRegistration -Context $Context -Request $request -Attestation $attestation -DisplayName $DisplayName
+        $Context.Stage = 'CredentialRecord'
+        $Context.EnrollmentStatus = 'Verified'
         $record = New-EntraSoftwareCredentialRecord -Provider $provider -Attestation $attestation -UserHandle $request.UserHandle `
             -UserPrincipalName $Context.UserPrincipalName -DisplayName $DisplayName
         return [pscustomobject]@{ Credential = $record; Verification = $verified; TenantId = $Context.TenantId; UserPrincipalName = $Context.UserPrincipalName }
@@ -2158,23 +2215,31 @@ function Register-EntraSoftwarePasskeyViaTap {
     [CmdletBinding(SupportsShouldProcess, ConfirmImpact = 'High')]
     param([Parameter(Mandatory)][object]$TAP,
         [Parameter(Mandatory)][ValidatePattern('^[^\s@]+@[^\s@]+$')][string]$UserPrincipalName,
-        [Parameter(Mandatory)][guid]$TenantId, [ValidateLength(1,100)][string]$DisplayName = 'Software Passkey',
+        [string]$TenantId, [ValidateLength(1,30)][string]$DisplayName = 'Software Passkey',
         [string]$OutputPath)
-    if ($TenantId -eq [guid]::Empty -or $null -eq $TAP -or ($TAP -is [securestring] -and $TAP.Length -eq 0) -or
-        ($TAP -is [string] -and [string]::IsNullOrWhiteSpace($TAP))) { throw 'TenantId and TAP cannot be empty.' }
+    if ($null -eq $TAP -or ($TAP -is [securestring] -and $TAP.Length -eq 0) -or
+        ($TAP -is [string] -and [string]::IsNullOrWhiteSpace($TAP))) { throw 'TAP cannot be empty.' }
+    Assert-EntraPasskeyDisplayName $DisplayName
+    if ($TenantId) { $null = Resolve-EntraRegistrationTenant -TenantId $TenantId -UserPrincipalName $UserPrincipalName }
     if (-not $PSCmdlet.ShouldProcess($UserPrincipalName, "Enroll software passkey '$DisplayName' and save its private credential")) { return }
     Write-PasskeySoftwareWarning
-    $context = $null; $stream = $null; $result = $null; $saved = $false
+    $context = $null; $stream = $null; $result = $null; $saved = $false; $stage = 'OutputReservation'
     try {
         $path = Resolve-EntraSoftwareOutputPath -OutputPath $OutputPath -UserPrincipalName $UserPrincipalName -DisplayName $DisplayName
+        $stage = 'OutputReservation'
         $stream = Open-EntraSoftwareCredentialOutput $path
         $context = New-EntraRegistrationContext
         $context = Invoke-EntraRegistrationTapAuthentication -Context $context -TAP $TAP -UserPrincipalName $UserPrincipalName -TenantId $TenantId
         $result = Invoke-EntraSoftwareNativeRegistration -Context $context -DisplayName $DisplayName
+        $stage = 'CredentialPersistence'
         Write-EntraSoftwareCredentialOutput -Stream $stream -Credential $result.Credential
         $saved = $true
         [pscustomobject]@{ CredentialFilePath = $path; CredentialId = $result.Credential.credentialId; Success = $true }
-    } catch { throw 'Software registration or persistence failed; sensitive details suppressed. Inspect My Sign-ins for a partially enrolled method before retrying. No rollback was attempted.' }
+    } catch {
+        $enrollment = if ($null -ne $result) { 'Verified' } elseif ($context -and $context.EnrollmentStatus) { $context.EnrollmentStatus } else { 'NotStarted' }
+        if ($stage -ne 'CredentialPersistence' -and $context -and $context.Stage -and $context.Stage -ne 'NotStarted') { $stage = $context.Stage }
+        $PSCmdlet.ThrowTerminatingError((New-PasskeyOperationError -Stage $stage -EnrollmentStatus $enrollment))
+    }
     finally {
         if ($null -ne $stream) { $stream.Dispose() }
         if (-not $saved -and $null -ne $stream) { [IO.File]::Delete($path) }
@@ -2196,7 +2261,7 @@ function Register-EntraSoftwarePasskeyViaEstsAuth {
     #>
     [CmdletBinding(SupportsShouldProcess, ConfirmImpact = 'High')]
     param([Parameter(Mandatory)][object]$ESTSAuthCookie, [string]$TenantId,
-        [Alias('DisplayName')][ValidateLength(1,100)][string]$PasskeyDisplayName = 'Software Passkey',
+        [Alias('DisplayName')][ValidateLength(1,30)][string]$PasskeyDisplayName = 'Software Passkey',
         [string]$OutputPath)
     if ($null -eq $ESTSAuthCookie -or ($ESTSAuthCookie -is [securestring] -and $ESTSAuthCookie.Length -eq 0) -or
         ($ESTSAuthCookie -is [string] -and [string]::IsNullOrWhiteSpace($ESTSAuthCookie))) { throw 'ESTSAuthCookie cannot be empty.' }
@@ -2204,19 +2269,27 @@ function Register-EntraSoftwarePasskeyViaEstsAuth {
         $tenant = [guid]::Empty
         if (-not [guid]::TryParse($TenantId, [ref]$tenant) -or $tenant -eq [guid]::Empty) { throw 'TenantId must be a nonempty GUID.' }
     }
+    Assert-EntraPasskeyDisplayName $PasskeyDisplayName
     if (-not $PSCmdlet.ShouldProcess("ESTS session tenant $TenantId", "Enroll software passkey '$PasskeyDisplayName' and save its private credential")) { return }
     Write-PasskeySoftwareWarning
-    $context = $null; $stream = $null; $result = $null; $saved = $false
+    $context = $null; $stream = $null; $result = $null; $saved = $false; $stage = 'CookieAuthentication'
     try {
         $context = New-EntraRegistrationContext
+        $stage = 'CookieAuthentication'
         $context = Invoke-EntraRegistrationCookieAuthentication -Context $context -ESTSAuthCookie $ESTSAuthCookie -TenantId $TenantId
         $path = Resolve-EntraSoftwareOutputPath -OutputPath $OutputPath -UserPrincipalName $context.UserPrincipalName -DisplayName $PasskeyDisplayName
+        $stage = 'OutputReservation'
         $stream = Open-EntraSoftwareCredentialOutput $path
         $result = Invoke-EntraSoftwareNativeRegistration -Context $context -DisplayName $PasskeyDisplayName
+        $stage = 'CredentialPersistence'
         Write-EntraSoftwareCredentialOutput -Stream $stream -Credential $result.Credential
         $saved = $true
         [pscustomobject]@{ CredentialFilePath = $path; CredentialId = $result.Credential.credentialId; Success = $true }
-    } catch { throw 'Software registration or persistence failed; sensitive details suppressed. Inspect My Sign-ins for a partially enrolled method before retrying. No rollback was attempted.' }
+    } catch {
+        $enrollment = if ($null -ne $result) { 'Verified' } elseif ($context -and $context.EnrollmentStatus) { $context.EnrollmentStatus } else { 'NotStarted' }
+        if ($stage -ne 'CredentialPersistence' -and $context -and $context.Stage -and $context.Stage -ne 'NotStarted') { $stage = $context.Stage }
+        $PSCmdlet.ThrowTerminatingError((New-PasskeyOperationError -Stage $stage -EnrollmentStatus $enrollment))
+    }
     finally {
         if ($null -ne $stream) { $stream.Dispose() }
         if (-not $saved -and $null -ne $stream) { [IO.File]::Delete($path) }
@@ -2351,27 +2424,36 @@ function Test-GitHubPasskeyDestination {
 # Source: powershell/src/Public/ExportGitHubSecret.ps1
 function Export-PasskeyToGitHubSecret {
     [CmdletBinding(SupportsShouldProcess, ConfirmImpact='High')]
-    param(
-        [Parameter(Mandatory)][object]$Credential,
-        [Parameter(Mandatory)][string]$Repository,
-        [switch]$ConsumersPaused
-    )
+    param([Parameter(Mandatory)][object]$Credential, [Parameter(Mandatory)][string]$Repository)
     Assert-GitHubPasskeyRepository $Repository
     $values = Get-GitHubPasskeySecretValues $Credential
-    if (-not $ConsumersPaused) { throw 'Pause all workflows/consumers and supply -ConsumersPaused. Four secret writes are not atomic.' }
     if (-not $PSCmdlet.ShouldProcess("github.com/$Repository", 'Replace four Actions secrets (metadata first, private key last; no rollback)')) { return }
-    Test-GitHubPasskeyDestination $Repository
+    Write-GitHubPasskeyExportWarning
+    try { Test-GitHubPasskeyDestination $Repository }
+    catch { $PSCmdlet.ThrowTerminatingError((New-PasskeyOperationError -Stage GitHubPreflight)) }
+    Invoke-GitHubPasskeySecretExport -Values $values -Repository $Repository
+}
+
+function Write-GitHubPasskeyExportWarning {
+    Write-Warning 'Four GitHub secret writes are not atomic. Pause or disable consumers yourself before continuing; this command does not pause them. Resume only after all four values are confirmed. Previous secret values cannot be recovered for rollback.'
+}
+
+function Invoke-GitHubPasskeySecretExport {
+    [CmdletBinding()]
+    param([Parameter(Mandatory)][Collections.IDictionary]$Values, [Parameter(Mandatory)][string]$Repository,
+        [ValidateSet('NotStarted','Verified')][string]$EnrollmentStatus = 'NotStarted')
     $written = [Collections.Generic.List[string]]::new()
-    foreach ($name in $values.Keys) {
+    foreach ($name in $Values.Keys) {
         try {
-            Invoke-GitHubPasskeyCli -Arguments @('secret','set',$name,'--repo',"github.com/$Repository",'--app','actions') -InputText $values[$name]
+            Invoke-GitHubPasskeyCli -Arguments @('secret','set',$name,'--repo',"github.com/$Repository",'--app','actions') -InputText $Values[$name]
             $written.Add($name)
         } catch {
-            $completed = if ($written.Count) { $written -join ', ' } else { '(none)' }
-            throw "GitHub export incomplete. Confirmed writes: $completed. Failed or unknown: $name. Keep consumers paused. No rollback was attempted; GitHub cannot return previous secret values. Re-export the same complete credential if it remains available, or remove the orphaned Entra method and re-enroll."
+            $PSCmdlet.ThrowTerminatingError((New-PasskeyOperationError -Stage GitHubExport -EnrollmentStatus $EnrollmentStatus `
+                -ExportStatus Incomplete -ConfirmedWrites @($written) -FailedOrUnknownSecret $name))
         }
     }
-    [pscustomobject]@{ Repository = $Repository; Success = $true; SecretNames = @($written); Atomic = $false }
+    [pscustomobject]@{ Repository = $Repository; Success = $true; SecretNames = @($written); Atomic = $false
+        EnrollmentStatus = $EnrollmentStatus; ExportStatus = 'Complete' }
 }
 # End source: powershell/src/Public/ExportGitHubSecret.ps1
 
@@ -2382,32 +2464,39 @@ function Register-GitHubPasskeyViaTAP {
     .DESCRIPTION
     Unattended software implementation, not a FIDO-certified authenticator. Packed uses a synthetic
     self-signed batch certificate; UP/UV flags do not prove authenticator presence, verification or hardware assurance.
-    ConsumersPaused acknowledges all consumers are already paused; four writes are not atomic.
+    Four writes are not atomic. Pause consumers yourself; this command does not pause them.
     No plaintext credential file is created. WhatIf performs local validation only, with no I/O.
+    TenantId overrides UPN-suffix discovery, including guest/resource-tenant scenarios.
     #>
     [CmdletBinding(SupportsShouldProcess, ConfirmImpact = 'High')]
     param([Parameter(Mandatory)][securestring]$TAP,
         [Parameter(Mandatory)][ValidatePattern('^[^\s@]+@[^\s@]+$')][string]$UserPrincipalName,
-        [Parameter(Mandatory)][guid]$TenantId, [Parameter(Mandatory)][string]$Repository,
-        [ValidateLength(1,100)][string]$DisplayName = 'Software Passkey',
-        [switch]$ConsumersPaused)
+        [string]$TenantId, [Parameter(Mandatory)][string]$Repository,
+        [ValidateLength(1,30)][string]$DisplayName = 'Software Passkey')
     Assert-GitHubPasskeyRepository $Repository
-    if ($TenantId -eq [guid]::Empty -or $TAP.Length -eq 0) { throw 'TenantId and TAP cannot be empty.' }
-    if (-not $ConsumersPaused) { throw 'Pause consumers and supply -ConsumersPaused before enrollment.' }
-    if (-not $PSCmdlet.ShouldProcess("Entra tenant $TenantId and github.com/$Repository", 'Enroll persistent software passkey and replace four repository secrets')) { return }
+    Assert-EntraPasskeyDisplayName $DisplayName
+    if ($TAP.Length -eq 0) { throw 'TAP cannot be empty.' }
+    if ($TenantId) { $null = Resolve-EntraRegistrationTenant -TenantId $TenantId -UserPrincipalName $UserPrincipalName }
+    if (-not $PSCmdlet.ShouldProcess("$UserPrincipalName in Entra and github.com/$Repository", 'Enroll persistent software passkey and replace four repository secrets')) { return }
     Write-PasskeySoftwareWarning
-    $context = $null; $result = $null; $exportStarted = $false
+    Write-GitHubPasskeyExportWarning
+    $context = $null; $result = $null; $stage = 'GitHubPreflight'
     try {
         Test-GitHubPasskeyDestination $Repository
+        $stage = 'TenantDiscovery'
         $context = New-EntraRegistrationContext
         $context = Invoke-EntraRegistrationTapAuthentication -Context $context -TAP $TAP -UserPrincipalName $UserPrincipalName -TenantId $TenantId
         $result = Invoke-EntraSoftwareNativeRegistration -Context $context -DisplayName $DisplayName
-        # The registration function returns only after exact credential-ID verification succeeded.
-        $exportStarted = $true
-        return Export-PasskeyToGitHubSecret -Credential $result.Credential -Repository $Repository -ConsumersPaused -Confirm:$false
+        # Only exact credential-ID verification permits export. No second enrollment or rollback.
+        $stage = 'GitHubExport'
+        return Invoke-GitHubPasskeySecretExport -Values (Get-GitHubPasskeySecretValues $result.Credential) -Repository $Repository -EnrollmentStatus Verified
     } catch {
-        if ($exportStarted) { throw [InvalidOperationException]::new('Enrollment completed, but export did not finish. Keep consumers paused. ' + $_.Exception.Message) }
-        throw [InvalidOperationException]::new('Registration failed; sensitive error details suppressed. A method may have been partially enrolled. Inspect My Sign-ins before retrying. No credential file was saved.')
+        # Exporter errors are locally constructed, secret-free records; preserve write accounting.
+        if ($_.FullyQualifiedErrorId -like 'PasskeyGitHubExportFailed,*') { $PSCmdlet.ThrowTerminatingError($_) }
+        $enrollment = if ($null -ne $result) { 'Verified' } elseif ($context -and $context.EnrollmentStatus) { $context.EnrollmentStatus } else { 'NotStarted' }
+        if ($stage -ne 'GitHubExport' -and $context -and $context.Stage -and $context.Stage -ne 'NotStarted') { $stage = $context.Stage }
+        $export = if ($stage -eq 'GitHubExport') { 'Incomplete' } else { 'NotStarted' }
+        $PSCmdlet.ThrowTerminatingError((New-PasskeyOperationError -Stage $stage -EnrollmentStatus $enrollment -ExportStatus $export))
     } finally {
         if ($null -ne $result) { $result.Credential.privateKey = $null; $result = $null }
         Clear-EntraRegistrationContext $context
@@ -2872,7 +2961,7 @@ param(
     [Parameter(Mandatory)]
     [string]$UserPrincipalName,
 
-    [Parameter(Mandatory)]
+    [Parameter()]
     [string]$TenantId,
 
     [Parameter(Mandatory)]
@@ -2896,6 +2985,8 @@ param(
     [Parameter()]
     [string]$RedirectUri = 'https://mysignins.microsoft.com'
 )
+    if ([string]::IsNullOrEmpty($DisplayName)) { $DisplayName = "TokenForge $(Get-Date -Format yyMMdd)" }
+    Assert-EntraPasskeyDisplayName $DisplayName
     if (-not $PSCmdlet.ShouldProcess("$KeyVaultName / Entra passkey enrollment", 'Authenticate, create a Key Vault key, enroll the passkey, and save its credential record')) { return }
     Write-PasskeySoftwareWarning
     $context = $null; $key = $null; $token = $null; $attestation = $null
@@ -2904,7 +2995,6 @@ param(
         $context = Invoke-EntraRegistrationTapAuthentication -Context $context -TAP (ConvertTo-PlainTextValue $TAP) -UserPrincipalName $UserPrincipalName -TenantId $TenantId
         $token = Get-KeyVaultToken -AccessToken $KeyVaultAccessToken
         $key = New-EntraKeyVaultRegistrationKey -VaultName $KeyVaultName -KeyName $KeyVaultKeyName -UserPrincipalName $context.UserPrincipalName -AccessToken $token
-        if ([string]::IsNullOrWhiteSpace($DisplayName)) { $DisplayName = "pk$(Get-Random -Minimum 1000 -Maximum 10000)" }
         $context = Initialize-EntraRegistrationSession -Context $context
         $request = Initialize-EntraRegistrationRequest -Context $context
         $attestation = New-EntraKeyVaultAttestation -PublicX $key.PublicX -PublicY $key.PublicY -ServerChallenge $request.ServerChallenge
@@ -2969,6 +3059,8 @@ param(
     [Parameter()]
     [string]$RedirectUri = 'https://mysignins.microsoft.com'
 )
+    if ([string]::IsNullOrEmpty($PasskeyDisplayName)) { $PasskeyDisplayName = "TokenForge $(Get-Date -Format yyMMdd)" }
+    Assert-EntraPasskeyDisplayName $PasskeyDisplayName
     if (-not $PSCmdlet.ShouldProcess("$KeyVaultName / Entra passkey enrollment", 'Authenticate, create a Key Vault key, enroll the passkey, and save its credential record')) { return }
     Write-PasskeySoftwareWarning
     $context = $null; $key = $null; $token = $null; $attestation = $null
@@ -2977,7 +3069,6 @@ param(
         $context = Invoke-EntraRegistrationCookieAuthentication -Context $context -ESTSAuthCookie (ConvertTo-PlainTextValue $ESTSAuthCookie) -TenantId $TenantId
         $token = Get-KeyVaultToken -AccessToken $KeyVaultAccessToken
         $key = New-EntraKeyVaultRegistrationKey -VaultName $KeyVaultName -KeyName $KeyVaultKeyName -UserPrincipalName $context.UserPrincipalName -AccessToken $token
-        if ([string]::IsNullOrWhiteSpace($PasskeyDisplayName)) { $PasskeyDisplayName = "pk$(Get-Random -Minimum 1000 -Maximum 10000)" }
         $context = Initialize-EntraRegistrationSession -Context $context
         $request = Initialize-EntraRegistrationRequest -Context $context
         $attestation = New-EntraKeyVaultAttestation -PublicX $key.PublicX -PublicY $key.PublicY -ServerChallenge $request.ServerChallenge
@@ -3021,7 +3112,7 @@ param(
     [Parameter(Mandatory)]
     [string]$UserPrincipalName,
 
-    [Parameter(Mandatory)]
+    [Parameter()]
     [string]$TenantId,
 
     [Parameter(Mandatory)]
@@ -3061,11 +3152,12 @@ function Invoke-EntraEstsCookieViaTapUtility {
     param(
         [Parameter(Mandatory)][Security.SecureString]$TAP,
         [Parameter(Mandatory)][ValidatePattern('^[^\s@]+@[^\s@]+$')][string]$UserPrincipalName,
-        [Parameter(Mandatory)][guid]$TenantId,
+        [string]$TenantId,
         [ValidateSet('SecurityInfoBootstrap')][string]$Purpose = 'SecurityInfoBootstrap',
         [switch]$AsPlainText
     )
-    if ($TenantId -eq [guid]::Empty -or $TAP.Length -eq 0) { throw 'A nonempty tenant GUID and secure TAP are required.' }
+    if ($TAP.Length -eq 0) { throw 'A nonempty secure TAP is required.' }
+    if ($TenantId) { $null = Resolve-EntraRegistrationTenant -TenantId $TenantId -UserPrincipalName $UserPrincipalName }
     $context = $null
     try {
         $context = New-EntraRegistrationContext
@@ -3083,7 +3175,7 @@ function Invoke-EntraEstsCookieViaTapUtility {
         return [pscustomobject]@{
             CookieName = [string]$cookie.Name
             CookieValue = ConvertTo-SecureString -String $cookie.Value -AsPlainText -Force
-            TenantId = $TenantId.ToString()
+            TenantId = $context.TenantId
             UserPrincipalName = $UserPrincipalName
             Purpose = $Purpose
         }
@@ -3111,7 +3203,7 @@ function Get-EntraEstsCookieViaTap {
     param(
         [Parameter(Mandatory)][Security.SecureString]$TAP,
         [Parameter(Mandatory)][ValidatePattern('^[^\s@]+@[^\s@]+$')][string]$UserPrincipalName,
-        [Parameter(Mandatory)][guid]$TenantId,
+        [string]$TenantId,
         [ValidateSet('SecurityInfoBootstrap')][string]$Purpose = 'SecurityInfoBootstrap',
         [switch]$AsPlainText
     )

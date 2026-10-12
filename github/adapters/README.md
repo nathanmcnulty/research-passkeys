@@ -6,9 +6,41 @@ GitHub provides secret storage and CI transport; it is not a cryptographic signe
 
 See the [usage/build guide](../../powershell/BUILD.md) and [Action package](../action-passkey-login/README.md).
 
-`Register-GitHubPasskeyViaTAP.ps1` requires consumers paused and explicit legacy
-software-attestation acknowledgement. It verifies the expected registration before
+`Register-GitHubPasskeyViaTAP.ps1` warns about software limitations and non-atomic
+secret updates. It verifies the expected registration before
 export. `Export-PasskeyToGitHubSecret.ps1` can be dot-sourced to load functions, or
 invoked with an explicit credential and repository. Four secret writes are not atomic;
 private-key secret is written last. Inspect any partial failure before resuming consumers.
 Use `-WhatIf` for no-I/O validation. No real credential is used by the offline tests.
+
+## TAP enrollment preflight and result
+
+Use a short display name such as `TokenForge 261011` (17 characters). The current public
+My Sign-ins passkey-name field limits names to 30 characters; these commands reject blank
+or longer names before authentication/enrollment. This does not establish why any earlier
+attempt failed. Source: [My Sign-ins](https://mysignins.microsoft.com/security-info), app
+4.0.2289, [public JavaScript bundle](https://mysignins.microsoft.com/bundle/main.e79f2476.js).
+
+```powershell
+Register-GitHubPasskeyViaTAP -TAP $tap -UserPrincipalName 'user@example.com' `
+    -Repository 'owner/repo' -DisplayName 'TokenForge 261011'
+```
+
+`TenantId` is optional for UPN-based TAP flows. Public Microsoft OIDC metadata resolves the
+UPN suffix to a tenant GUID; no redirects are followed and the issuer must be the exact
+Microsoft HTTPS GUID issuer. Use `-TenantId '<tenant-guid>'` for a different intended guest
+or resource tenant. Discovery does not prove which tenant you intend. Token client/tenant/user
+binding remains mandatory. ESTS-cookie flows use the authenticated identity instead.
+
+Pause or disable consumers yourself before confirming: the command does not pause them.
+Four writes are non-atomic, metadata first and private key last. No rollback is available.
+A failed export reports confirmed names and the failed or uncertain current name. Resume
+consumers only after a complete verified export. `Success` is returned only after all four writes.
+
+Failures expose a safe `TargetObject` with `Code`, `Stage`, `EnrollmentStatus`, `ExportStatus`,
+`ConfirmedWrites` and `FailedOrUnknownSecret`. Print only these fields if a handoff catches
+errors; do not replace them with `NOT_CONFIRMED` or print raw exception/response bodies.
+`NotStarted` means this operation has not submitted a credential; `Unconfirmed` means a
+submission may have enrolled it; `Verified` means exact credential-ID verification succeeded.
+Preflight/authentication failures do not imply partial enrollment. Never retry an unconfirmed
+enrollment automatically. Check My Sign-ins first. No TAP, cookie, token or private key is included.

@@ -32,6 +32,7 @@ Describe 'TAP cookie input and output boundaries' {
         $script:capturedContext = $null
         Mock Invoke-EntraRegistrationTapAuthentication {
             $script:capturedContext = $Context
+            $Context.TenantId = '33333333-3333-3333-3333-333333333333'
             $Context.Token = 'synthetic-token'; $Context.RefreshToken = 'synthetic-refresh-token'
             $Context.WebSession.Cookies.Add([Net.Cookie]::new('ESTSAUTH', 'synthetic-cookie', '/', '.login.microsoftonline.com'))
             $Context
@@ -41,8 +42,9 @@ Describe 'TAP cookie input and output boundaries' {
 
     It 'requires a secure TAP and has no hardcoded identity or secret defaults' {
         $command = Get-Command Get-EntraEstsCookieViaTap
+        @($command.Parameters['TenantId'].Attributes | Where-Object { $_ -is [Management.Automation.ParameterAttribute] })[0].Mandatory | Should -BeFalse
         $command.Parameters['TAP'].ParameterType | Should -Be ([Security.SecureString])
-        foreach ($name in @('TAP', 'UserPrincipalName', 'TenantId')) {
+        foreach ($name in @('TAP', 'UserPrincipalName')) {
             @($command.Parameters[$name].Attributes | Where-Object { $_ -is [Management.Automation.ParameterAttribute] })[0].Mandatory | Should -BeTrue
         }
         { Get-EntraEstsCookieViaTap -TAP 'plain-secret' -UserPrincipalName 'user@example.test' -TenantId $tenant } | Should -Throw
@@ -58,6 +60,7 @@ Describe 'TAP cookie input and output boundaries' {
 
     It 'returns a structured secure cookie and clears transient state' {
         $result = Get-EntraEstsCookieViaTap -TAP $tap -UserPrincipalName 'user@example.test' -TenantId $tenant
+        $result.TenantId | Should -BeExactly '33333333-3333-3333-3333-333333333333'
         $result.CookieName | Should -BeExactly 'ESTSAUTH'
         $result.CookieValue | Should -BeOfType ([Security.SecureString])
         [Net.NetworkCredential]::new('', $result.CookieValue).Password | Should -BeExactly 'synthetic-cookie'

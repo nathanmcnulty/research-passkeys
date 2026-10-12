@@ -17,7 +17,7 @@ param(
     [Parameter(Mandatory)]
     [string]$UserPrincipalName,
 
-    [Parameter(Mandatory)]
+    [Parameter()]
     [string]$TenantId,
 
     [Parameter(Mandatory)]

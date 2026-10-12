@@ -1,3 +1,35 @@
+function Resolve-EntraRegistrationTenant {
+    param([AllowNull()][string]$TenantId, [Parameter(Mandatory)][string]$UserPrincipalName)
+    if ($UserPrincipalName -notmatch '^[^\s@]+@([^\s@]+)$') { throw 'A valid UPN is required for tenant discovery.' }
+    $suffix = $matches[1]
+    if ($TenantId) {
+        $tenant = [guid]::Empty
+        if (-not [guid]::TryParse($TenantId, [ref]$tenant) -or $tenant -eq [guid]::Empty) { throw 'TenantId must be a nonempty GUID.' }
+        return $tenant.ToString()
+    }
+    # DNS suffix only: no path, query, fragment, port or encoded authority components.
+    if ([uri]::CheckHostName($suffix) -ne [UriHostNameType]::Dns -or $suffix.Contains('%')) { throw 'UPN suffix must be a DNS name.' }
+    $domain = [uri]::EscapeDataString($suffix)
+    $metadata = Invoke-EntraRegistrationRestMethod -Uri "https://login.microsoftonline.com/$domain/v2.0/.well-known/openid-configuration"
+    # Public OIDC discovery selects the suffix's tenant. Guest/resource tenants require an explicit override.
+    # https://learn.microsoft.com/en-us/entra/identity-platform/v2-protocols-oidc
+    $issuer = Assert-EntraRegistrationUri ([string]$metadata.issuer)
+    $tenant = [guid]::Empty
+    if (-not [guid]::TryParse($issuer.AbsolutePath.Trim('/').Split('/')[0], [ref]$tenant) -or $tenant -eq [guid]::Empty -or
+        $issuer.Host -ne 'login.microsoftonline.com' -or $issuer.Query -or $issuer.Fragment -or
+        $issuer.AbsolutePath -cne "/$($tenant.ToString())/v2.0") { throw 'Tenant discovery did not return the expected Microsoft tenant GUID issuer.' }
+    return $tenant.ToString()
+}
+
+function Assert-EntraPasskeyDisplayName {
+    param([Parameter(Mandatory)][AllowEmptyString()][string]$DisplayName)
+    # Current public My Sign-ins passkey-name field maxLength is 30; use this conservative bound across routes.
+    # https://mysignins.microsoft.com/security-info (app 4.0.2289, main.e79f2476.js).
+    if ([string]::IsNullOrWhiteSpace($DisplayName) -or $DisplayName.Length -gt 30) {
+        throw 'Passkey display name must contain 1 to 30 characters; use a short name such as TokenForge 261011.'
+    }
+}
+
 # Shared My Sign-ins registration transport and request state. Loading this file has no side effects.
 function Assert-EntraRegistrationUri {
     param([Parameter(Mandatory)][string]$Uri)
@@ -85,6 +117,7 @@ function New-EntraRegistrationContext {
         WebSession = $session
         ClientSessionId = [guid]::NewGuid().ToString()
         TenantId = $null; UserPrincipalName = $null; Token = $null; RefreshToken = $null; SessionCtxV2 = $null
+        Stage = 'NotStarted'; EnrollmentStatus = 'NotStarted'
     }
 }
 

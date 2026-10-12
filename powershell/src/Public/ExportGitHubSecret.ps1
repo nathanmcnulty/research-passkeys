@@ -1,24 +1,33 @@
 function Export-PasskeyToGitHubSecret {
     [CmdletBinding(SupportsShouldProcess, ConfirmImpact='High')]
-    param(
-        [Parameter(Mandatory)][object]$Credential,
-        [Parameter(Mandatory)][string]$Repository,
-        [switch]$ConsumersPaused
-    )
+    param([Parameter(Mandatory)][object]$Credential, [Parameter(Mandatory)][string]$Repository)
     Assert-GitHubPasskeyRepository $Repository
     $values = Get-GitHubPasskeySecretValues $Credential
-    if (-not $ConsumersPaused) { throw 'Pause all workflows/consumers and supply -ConsumersPaused. Four secret writes are not atomic.' }
     if (-not $PSCmdlet.ShouldProcess("github.com/$Repository", 'Replace four Actions secrets (metadata first, private key last; no rollback)')) { return }
-    Test-GitHubPasskeyDestination $Repository
+    Write-GitHubPasskeyExportWarning
+    try { Test-GitHubPasskeyDestination $Repository }
+    catch { $PSCmdlet.ThrowTerminatingError((New-PasskeyOperationError -Stage GitHubPreflight)) }
+    Invoke-GitHubPasskeySecretExport -Values $values -Repository $Repository
+}
+
+function Write-GitHubPasskeyExportWarning {
+    Write-Warning 'Four GitHub secret writes are not atomic. Pause or disable consumers yourself before continuing; this command does not pause them. Resume only after all four values are confirmed. Previous secret values cannot be recovered for rollback.'
+}
+
+function Invoke-GitHubPasskeySecretExport {
+    [CmdletBinding()]
+    param([Parameter(Mandatory)][Collections.IDictionary]$Values, [Parameter(Mandatory)][string]$Repository,
+        [ValidateSet('NotStarted','Verified')][string]$EnrollmentStatus = 'NotStarted')
     $written = [Collections.Generic.List[string]]::new()
-    foreach ($name in $values.Keys) {
+    foreach ($name in $Values.Keys) {
         try {
-            Invoke-GitHubPasskeyCli -Arguments @('secret','set',$name,'--repo',"github.com/$Repository",'--app','actions') -InputText $values[$name]
+            Invoke-GitHubPasskeyCli -Arguments @('secret','set',$name,'--repo',"github.com/$Repository",'--app','actions') -InputText $Values[$name]
             $written.Add($name)
         } catch {
-            $completed = if ($written.Count) { $written -join ', ' } else { '(none)' }
-            throw "GitHub export incomplete. Confirmed writes: $completed. Failed or unknown: $name. Keep consumers paused. No rollback was attempted; GitHub cannot return previous secret values. Re-export the same complete credential if it remains available, or remove the orphaned Entra method and re-enroll."
+            $PSCmdlet.ThrowTerminatingError((New-PasskeyOperationError -Stage GitHubExport -EnrollmentStatus $EnrollmentStatus `
+                -ExportStatus Incomplete -ConfirmedWrites @($written) -FailedOrUnknownSecret $name))
         }
     }
-    [pscustomobject]@{ Repository = $Repository; Success = $true; SecretNames = @($written); Atomic = $false }
+    [pscustomobject]@{ Repository = $Repository; Success = $true; SecretNames = @($written); Atomic = $false
+        EnrollmentStatus = $EnrollmentStatus; ExportStatus = 'Complete' }
 }

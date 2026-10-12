@@ -159,7 +159,7 @@ Describe 'Software public WhatIf and persistence' {
     It 'performs no I/O for TAP ESTS and GitHub WhatIf' {
         Register-EntraSoftwarePasskeyViaTap -TAP $script:Tap -UserPrincipalName 'test@example.test' -TenantId $script:Tenant -WhatIf
         Register-EntraSoftwarePasskeyViaEstsAuth -ESTSAuthCookie $script:Tap -WhatIf
-        Register-GitHubPasskeyViaTAP -TAP $script:Tap -UserPrincipalName 'test@example.test' -TenantId $script:Tenant -Repository 'owner/repo' -ConsumersPaused -WhatIf
+        Register-GitHubPasskeyViaTAP -TAP $script:Tap -UserPrincipalName 'test@example.test' -TenantId $script:Tenant -Repository 'owner/repo' -WhatIf
         Should -Invoke New-EntraRegistrationContext -Times 0 -Exactly
         Should -Invoke Open-EntraSoftwareCredentialOutput -Times 0 -Exactly
         Should -Invoke Invoke-EntraSoftwareNativeRegistration -Times 0 -Exactly
@@ -179,19 +179,24 @@ Describe 'GitHub whole-record and partial-write safeguards' {
         $values = Get-GitHubPasskeySecretValues $script:Credential
         ($values.Keys -join ',') | Should -Be 'PASSKEY_PRIVATE_CREDENTIAL_ID,PASSKEY_PRIVATE_USER_HANDLE,PASSKEY_PRIVATE_USER_PRINCIPAL_NAME,PASSKEY_PRIVATE_KEY'
     }
-    It 'requires paused consumers even for valid credentials' {
-        { Export-PasskeyToGitHubSecret -Credential $script:Credential -Repository owner/repo -Confirm:$false } | Should -Throw '*ConsumersPaused*'
+    It 'warns about non-atomic writes without an acknowledgement-only switch' {
+        Mock Invoke-GitHubPasskeyCli {}
+        $warnings = @()
+        Export-PasskeyToGitHubSecret -Credential $script:Credential -Repository owner/repo -Confirm:$false -WarningVariable warnings
+        (Get-Command Export-PasskeyToGitHubSecret).Parameters.Keys | Should -Not -Contain 'ConsumersPaused'
+        @($warnings).Count | Should -Be 1
+        [string]$warnings[0] | Should -Match 'not atomic.*does not pause'
     }
     It 'validates the complete record before invoking CLI' {
         Mock Invoke-GitHubPasskeyCli { throw 'unexpected' }
         $bad = [ordered]@{} + $script:Credential
         $bad.userHandle = 'noncanonical+'
-        { Export-PasskeyToGitHubSecret -Credential $bad -Repository owner/repo -ConsumersPaused -Confirm:$false } | Should -Throw
+        { Export-PasskeyToGitHubSecret -Credential $bad -Repository owner/repo -Confirm:$false } | Should -Throw
         Should -Invoke Invoke-GitHubPasskeyCli -Times 0 -Exactly
     }
     It 'performs no I/O on exporter WhatIf' {
         Mock Invoke-GitHubPasskeyCli { throw 'unexpected' }
-        Export-PasskeyToGitHubSecret -Credential $script:Credential -Repository owner/repo -ConsumersPaused -WhatIf
+        Export-PasskeyToGitHubSecret -Credential $script:Credential -Repository owner/repo -WhatIf
         Should -Invoke Invoke-GitHubPasskeyCli -Times 0 -Exactly
         Should -Invoke Test-GitHubPasskeyDestination -Times 0 -Exactly
     }
@@ -204,26 +209,26 @@ Describe 'GitHub whole-record and partial-write safeguards' {
             $Arguments | Should -Not -Contain '--body'
         }
         $failure = $null
-        try { Export-PasskeyToGitHubSecret -Credential $script:Credential -Repository owner/repo -ConsumersPaused -Confirm:$false } catch { $failure = $_.Exception.Message }
+        try { Export-PasskeyToGitHubSecret -Credential $script:Credential -Repository owner/repo -Confirm:$false } catch { $failure = $_.Exception.Message }
         $failure | Should -Match 'Keep consumers paused'
         $failure | Should -Not -Match 'raw synthetic'
         $failure | Should -Match 'No rollback'
         Should -Invoke Invoke-GitHubPasskeyCli -Times $Position -Exactly
     }
     It 'does not export or claim success after unverified enrollment' {
-        Mock New-EntraRegistrationContext { [pscustomobject]@{ Token = $null; RefreshToken = $null; CodeVerifier = $null; SessionCtxV2 = $null; WebSession = $null } }
+        Mock New-EntraRegistrationContext { [pscustomobject]@{ Token = $null; RefreshToken = $null; CodeVerifier = $null; SessionCtxV2 = $null; WebSession = $null; Stage = 'NotStarted'; EnrollmentStatus = 'NotStarted' } }
         Mock Invoke-EntraRegistrationTapAuthentication { $Context }
-        Mock Invoke-EntraSoftwareNativeRegistration { throw 'verification did not bind expected ID' }
-        Mock Export-PasskeyToGitHubSecret { throw 'must not export' }
-        { Register-GitHubPasskeyViaTAP -TAP $script:Tap -UserPrincipalName 'test@example.test' -TenantId $script:Tenant -Repository owner/repo -ConsumersPaused -Confirm:$false } | Should -Throw '*partially enrolled*'
-        Should -Invoke Export-PasskeyToGitHubSecret -Times 0 -Exactly
+        Mock Invoke-EntraSoftwareNativeRegistration { $Context.Stage = 'EnrollmentVerification'; $Context.EnrollmentStatus = 'Unconfirmed'; throw 'verification did not bind expected ID' }
+        Mock Invoke-GitHubPasskeySecretExport { throw 'must not export' }
+        { Register-GitHubPasskeyViaTAP -TAP $script:Tap -UserPrincipalName 'test@example.test' -TenantId $script:Tenant -Repository owner/repo -Confirm:$false } | Should -Throw '*Enrollment: Unconfirmed*'
+        Should -Invoke Invoke-GitHubPasskeySecretExport -Times 0 -Exactly
     }
     It 'preserves export failure as post-enrollment failure' {
-        Mock New-EntraRegistrationContext { [pscustomobject]@{ Token = $null; RefreshToken = $null; CodeVerifier = $null; SessionCtxV2 = $null; WebSession = $null } }
+        Mock New-EntraRegistrationContext { [pscustomobject]@{ Token = $null; RefreshToken = $null; CodeVerifier = $null; SessionCtxV2 = $null; WebSession = $null; Stage = 'NotStarted'; EnrollmentStatus = 'NotStarted' } }
         Mock Invoke-EntraRegistrationTapAuthentication { $Context }
         Mock Invoke-EntraSoftwareNativeRegistration { [pscustomobject]@{ Credential = [ordered]@{ privateKey = 'synthetic' } } }
-        Mock Export-PasskeyToGitHubSecret { throw 'GitHub export incomplete. Keep consumers paused. No rollback was attempted.' }
-        { Register-GitHubPasskeyViaTAP -TAP $script:Tap -UserPrincipalName 'test@example.test' -TenantId $script:Tenant -Repository owner/repo -ConsumersPaused -Confirm:$false } | Should -Throw '*Enrollment completed, but export did not finish*'
+        Mock Invoke-GitHubPasskeySecretExport { throw 'GitHub export incomplete. Keep consumers paused. No rollback was attempted.' }
+        { Register-GitHubPasskeyViaTAP -TAP $script:Tap -UserPrincipalName 'test@example.test' -TenantId $script:Tenant -Repository owner/repo -Confirm:$false } | Should -Throw '*Enrollment completed, but export did not finish*'
     }
 }
 
@@ -246,6 +251,30 @@ Describe 'Graph and native authentication transport details' {
     It 'rejects a discovery issuer with an unrelated origin' {
         Mock Invoke-EntraRegistrationRestMethod { @{ issuer = "https://mysignins.microsoft.com/$script:Tenant/v2.0" } }
         { Resolve-EntraSoftwareGraphTenant -UserUpn 'test@example.test' } | Should -Throw '*issuer*'
+    }
+    It 'validates UPN even when a tenant override skips discovery' {
+        Mock Invoke-EntraRegistrationRestMethod { throw 'no I/O' }
+        { Resolve-EntraRegistrationTenant -UserPrincipalName 'bad-upn' -TenantId $script:Tenant } | Should -Throw '*UPN*'
+        Should -Invoke Invoke-EntraRegistrationRestMethod -Times 0 -Exactly
+    }
+    It 'rejects non-GUID issuer origins paths queries fragments and empty tenants' -ForEach @(
+        'https://login.microsoftonline.com/organizations/v2.0',
+        'https://login.microsoftonline.com/00000000-0000-0000-0000-000000000000/v2.0',
+        'https://login.microsoftonline.com/11111111-1111-1111-1111-111111111111/v2.0?secret=synthetic',
+        'https://login.microsoftonline.com/11111111-1111-1111-1111-111111111111/v2.0#synthetic',
+        'https://login.microsoftonline.com/11111111-1111-1111-1111-111111111111/v2.0/extra',
+        'https://user@login.microsoftonline.com/11111111-1111-1111-1111-111111111111/v2.0',
+        'https://login.microsoftonline.com.evil.invalid/11111111-1111-1111-1111-111111111111/v2.0'
+    ) {
+        $script:Issuer = $_
+        Mock Invoke-EntraRegistrationRestMethod { @{ issuer = $script:Issuer } }
+        { Resolve-EntraRegistrationTenant -UserPrincipalName 'test@example.test' } | Should -Throw
+    }
+    It 'uses a supplied resource tenant without metadata or inferring a vault tenant' {
+        Mock Invoke-EntraRegistrationRestMethod { throw 'no discovery' }
+        Resolve-EntraRegistrationTenant -UserPrincipalName 'guest@example.test' -TenantId $script:Tenant | Should -Be $script:Tenant
+        Resolve-EntraSoftwareGraphTenant -UserUpn 'guest@example.test' -TenantId $script:Tenant -UseManagedIdentity | Should -Be $script:Tenant
+        Should -Invoke Invoke-EntraRegistrationRestMethod -Times 0 -Exactly
     }
     It 'creates a verifiable synthetic RSA client certificate assertion with base64url thumbprint' {
         $rsa = [Security.Cryptography.RSA]::Create(2048)
