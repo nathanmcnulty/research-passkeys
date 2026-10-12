@@ -38,9 +38,19 @@ A failed export reports confirmed names and the failed or uncertain current name
 consumers only after a complete verified export. `Success` is returned only after all four writes.
 
 Failures expose a safe `TargetObject` with `Code`, `Stage`, `EnrollmentStatus`, `ExportStatus`,
-`ConfirmedWrites` and `FailedOrUnknownSecret`. Print only these fields if a handoff catches
-errors; do not replace them with `NOT_CONFIRMED` or print raw exception/response bodies.
+`ConfirmedWrites` and `FailedOrUnknownSecret`. Authorization-continuation failures also expose
+`FailureCategory`, `HttpStatus`, `ServiceErrorCode`, `AadstsCode`, `ContinuationPage` and
+`MissingField` when available. Print only these safe fields if a handoff catches errors;
+do not replace them with `NOT_CONFIRMED` or print raw exception/response bodies.
 `NotStarted` means this operation has not submitted a credential; `Unconfirmed` means a
 submission may have enrolled it; `Verified` means exact credential-ID verification succeeded.
 Preflight/authentication failures do not imply partial enrollment. Never retry an unconfirmed
 enrollment automatically. Check My Sign-ins first. No TAP, cookie, token or private key is included.
+
+Known KMSI continuation supports quoted or unquoted HTML attributes and the existing
+config-driven `KmsiInterrupt` payload only when no form starts exist and all required
+fields are scalar strings. Config-less auto-submit forms, consent/policy pages, malformed
+forms and mismatched callback state remain refused. A returned sign-in page alone does
+not identify the cause. TAP expiration or prior one-time use can prevent authorization;
+the [Microsoft TAP guide](https://learn.microsoft.com/entra/identity/authentication/howto-authentication-temporary-access-pass)
+documents a default one-hour lifetime, but the tenant's configured lifetime may differ.

@@ -36,7 +36,7 @@ function Register-GitHubPasskeyViaTAP {
         $enrollment = if ($null -ne $result) { 'Verified' } elseif ($context -and $context.EnrollmentStatus) { $context.EnrollmentStatus } else { 'NotStarted' }
         if ($stage -ne 'GitHubExport' -and $context -and $context.Stage -and $context.Stage -ne 'NotStarted') { $stage = $context.Stage }
         $export = if ($stage -eq 'GitHubExport') { 'Incomplete' } else { 'NotStarted' }
-        $PSCmdlet.ThrowTerminatingError((New-PasskeyOperationError -Stage $stage -EnrollmentStatus $enrollment -ExportStatus $export))
+        $PSCmdlet.ThrowTerminatingError((New-PasskeyOperationError -Stage $stage -EnrollmentStatus $enrollment -ExportStatus $export -AuthorizationFailure $(if ($context) { $context.AuthorizationFailure })))
     } finally {
         if ($null -ne $result) { $result.Credential.privateKey = $null; $result = $null }
         Clear-EntraRegistrationContext $context

@@ -49,12 +49,24 @@ Describe 'Complete TAP registration transcript through <Surface>' -ForEach @(@{ 
             } elseif ($Uri -match 'GetCredentialType') {
                 $content = '{"FlowToken":"fixture-flow"}'
             } elseif ($Uri -match '/common/login$') {
-                if ($global:PasskeyOfflineFixture.Mode -eq 'consent') {
+                if ($global:PasskeyOfflineFixture.Mode -eq 'kmsi-config') {
+                    $content = '$Config={"pgid":"KmsiInterrupt","sCtx":"SYNTHETIC-CONTEXT","sFT":"SYNTHETIC-FLOW","canary":"SYNTHETIC-CANARY","correlationId":"SYNTHETIC-CORRELATION"};'
+                } elseif ($global:PasskeyOfflineFixture.Mode -eq 'service-rejected') {
+                    $content = '$Config={"pgid":"ConvergedSignIn","iErrorCode":50126,"strServiceExceptionMessage":"AADSTS50126: SYNTHETIC-TAP raw-secret"};'
+                } elseif ($global:PasskeyOfflineFixture.Mode -eq 'consent') {
                     $content = '$Config={"pgid":"Consent"};<form action="/consent"><input type="hidden" name="accept" value="yes"></form>'
                 } else {
                     $state = if ($global:PasskeyOfflineFixture.Mode -eq 'badstate') { 'wrong-state' } else { $global:PasskeyOfflineFixture.State }
                     $status = 302; $responseHeaders.Location = @("https://mysignins.microsoft.com/#code=SYNTHETIC-CODE&state=$state")
                 }
+            } elseif ($Uri -match '/kmsi$') {
+                $form = [Web.HttpUtility]::ParseQueryString([string]$Body)
+                $form['LoginOptions'] | Should -Be '1'
+                $form['type'] | Should -Be '28'
+                $form['flowToken'] | Should -Be 'SYNTHETIC-FLOW'
+                $form['ctx'] | Should -Be 'SYNTHETIC-CONTEXT'
+                $form.AllKeys.Count | Should -Be 7
+                $status = 302; $responseHeaders.Location = @("https://mysignins.microsoft.com/#code=SYNTHETIC-CODE&state=$($global:PasskeyOfflineFixture.State)")
             } elseif ($Uri -match '/token$') {
                 $global:PasskeyOfflineFixture.TokenRequests++
                 $form = [Web.HttpUtility]::ParseQueryString([string]$Body)
@@ -142,6 +154,31 @@ Describe 'Complete TAP registration transcript through <Surface>' -ForEach @(@{ 
         $caught.Exception.InnerException | Should -BeNullOrEmpty
         $caught.Exception.Message | Should -Not -Match 'may exist|partially|SYNTHETIC|fixture@|BEGIN PRIVATE'
         Should -Invoke Invoke-WebRequest -Times 0 -Exactly @mockScope
+    }
+    It 'completes the existing config-driven KMSI branch before verified export' {
+        $global:PasskeyOfflineFixture.Mode = 'kmsi-config'
+        $result = & $registrationCommand @params
+        $result.Success | Should -BeTrue
+        $result.EnrollmentStatus | Should -Be Verified
+        $result.ExportStatus | Should -Be Complete
+        @((Get-Content $ghCalls) | Where-Object { $_ -match '^secret set ' }).Count | Should -Be 4
+    }
+    It 'preserves safe service details through the public error without enrollment or secret writes' {
+        $global:PasskeyOfflineFixture.Mode = 'service-rejected'
+        $caught = $null
+        try { & $registrationCommand @params } catch { $caught = $_ }
+        $caught.TargetObject.Stage | Should -Be TapAuthorization
+        $caught.TargetObject.FailureCategory | Should -Be ServiceRejected
+        $caught.TargetObject.HttpStatus | Should -Be 200
+        $caught.TargetObject.AadstsCode | Should -Be AADSTS50126
+        $caught.TargetObject.ServiceErrorCode | Should -Be 50126
+        $caught.TargetObject.ContinuationPage | Should -Be ConvergedSignIn
+        $caught.TargetObject.EnrollmentStatus | Should -Be NotStarted
+        $caught.TargetObject.ExportStatus | Should -Be NotStarted
+        ($caught | Out-String) | Should -Not -Match 'SYNTHETIC-TAP|raw-secret|fixture@|BEGIN PRIVATE'
+        $caught.Exception.InnerException | Should -BeNullOrEmpty
+        $global:PasskeyOfflineFixture.TokenRequests | Should -Be 0
+        @((Get-Content $ghCalls) | Where-Object { $_ -match '^secret set ' }).Count | Should -Be 0
     }
     It 'rejects invalid response without any secret write' -ForEach @('badstate','consent','badclient','badtenant','baduser','createfail','mismatch','protocolerror','httperror') {
         $global:PasskeyOfflineFixture.Mode = $_

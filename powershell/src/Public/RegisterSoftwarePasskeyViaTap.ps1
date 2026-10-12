@@ -32,7 +32,7 @@ function Register-EntraSoftwarePasskeyViaTap {
     } catch {
         $enrollment = if ($null -ne $result) { 'Verified' } elseif ($context -and $context.EnrollmentStatus) { $context.EnrollmentStatus } else { 'NotStarted' }
         if ($stage -ne 'CredentialPersistence' -and $context -and $context.Stage -and $context.Stage -ne 'NotStarted') { $stage = $context.Stage }
-        $PSCmdlet.ThrowTerminatingError((New-PasskeyOperationError -Stage $stage -EnrollmentStatus $enrollment))
+        $PSCmdlet.ThrowTerminatingError((New-PasskeyOperationError -Stage $stage -EnrollmentStatus $enrollment -AuthorizationFailure $(if ($context) { $context.AuthorizationFailure })))
     }
     finally {
         if ($null -ne $stream) { $stream.Dispose() }

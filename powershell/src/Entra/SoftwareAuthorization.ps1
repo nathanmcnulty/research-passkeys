@@ -1,3 +1,32 @@
+function Stop-EntraRegistrationAuthorization {
+    param([Parameter(Mandatory)]$Context, [Parameter(Mandatory)][string]$Category,
+        [int]$HttpStatus, [AllowNull()]$Config, [AllowNull()][string]$ErrorText, [AllowNull()][string]$MissingField)
+    $aadsts = $null; $service = 0
+    # Extract identifiers only. Descriptions may contain credentials or identifying data.
+    $text = if ($Config) { [string]$Config.strServiceExceptionMessage } else { $ErrorText }
+    if ($text -cmatch '\b(AADSTS[0-9]{4,12})\b') { $aadsts = $matches[1] }
+    $null = [int]::TryParse([string]$Config.iErrorCode, [ref]$service)
+    $page = if ($Config.pgid -is [string] -and $Config.pgid -cin @('KmsiBroker','KmsiInterrupt','ConvergedSignIn','Consent','ConvergedConsent','CmsiInterrupt','ConvergedProofUp')) { $Config.pgid } else { 'Unknown' }
+    $Context.AuthorizationFailure = [pscustomobject]@{ Category=$Category; HttpStatus=$HttpStatus; AadstsCode=$aadsts; ServiceErrorCode=$service; Page=$page; MissingField=$MissingField }
+    $summary = switch ($Category) {
+        'UnsupportedContinuation' { 'Unrecognized login continuation or consent/policy interrupt; manual review required.' }
+        'RedirectLimit' { 'Registration authorization exceeded the redirect limit.' }
+        'UntrustedRedirect' { 'Cross-origin or untrusted registration redirect refused; only allowed HTTPS origins are supported.' }
+        default { "Registration authorization refused: $Category ($page); sensitive details suppressed." }
+    }
+    throw $summary
+}
+
+function Get-EntraRegistrationHtmlAttribute {
+    param([Parameter(Mandatory)][string]$Tag, [Parameter(Mandatory)][string]$Name)
+    # Attribute order, whitespace and either quote style are valid HTML. Duplicate attributes remain invalid.
+    $pattern = '(?is)(?:^|\s)(?<name>[a-z_:][a-z0-9_:.-]*)\s*=\s*(?:"(?<value>[^"]*)"|''(?<value>[^'']*)''|(?<value>[^\s"''=<>`]+))'
+    $values = @([regex]::Matches($Tag, $pattern) | Where-Object { $_.Groups['name'].Value -ieq $Name })
+    if ($values.Count -gt 1) { throw 'Ambiguous continuation attribute.' }
+    if ($values.Count -eq 0) { return $null }
+    return [Web.HttpUtility]::HtmlDecode($values[0].Groups['value'].Value)
+}
+
 # Bounded OAuth continuation; only known KMSI pages are eligible for form submission.
 function Invoke-EntraRegistrationAuthorization {
     param([Parameter(Mandatory)]$Context, [Parameter(Mandatory)][string]$Uri,
@@ -6,46 +35,75 @@ function Invoke-EntraRegistrationAuthorization {
     for ($step = 0; $step -lt 15; $step++) {
         $request = @{ Uri = $current; Method = $Method; WebSession = $Context.WebSession }
         if ($Method -eq 'POST') { $request.Body = $Body; $request.ContentType = 'application/x-www-form-urlencoded' }
-        $response = Invoke-EntraRegistrationWebRequest @request
+        try { $response = Invoke-EntraRegistrationWebRequest @request }
+        catch { Stop-EntraRegistrationAuthorization -Context $Context -Category TransportFailure }
         $status = [int]$response.StatusCode
         if ($status -in @(301, 302, 303, 307, 308)) {
             $locations = @($response.Headers.Location)
-            if ($locations.Count -ne 1 -or [string]::IsNullOrWhiteSpace($locations[0])) { throw 'Missing or ambiguous registration redirect.' }
-            $next = [uri]::new([uri]$current, [string]$locations[0]).AbsoluteUri
-            $nextUri = Assert-EntraRegistrationUri $next
+            if ($locations.Count -ne 1 -or [string]::IsNullOrWhiteSpace($locations[0])) { Stop-EntraRegistrationAuthorization -Context $Context -Category RedirectShape -HttpStatus $status }
+            try {
+                $next = [uri]::new([uri]$current, [string]$locations[0]).AbsoluteUri
+                $nextUri = Assert-EntraRegistrationUri $next
+            } catch { Stop-EntraRegistrationAuthorization -Context $Context -Category UntrustedRedirect -HttpStatus $status }
             $fields = [Web.HttpUtility]::ParseQueryString($nextUri.Query.TrimStart('?') + '&' + $nextUri.Fragment.TrimStart('#'))
-            if ($fields['code'] -or $fields['error']) {
-                return Get-EntraRegistrationAuthorizationCode -Callback $next -ExpectedState $Context.State
+            if ($fields['error']) { Stop-EntraRegistrationAuthorization -Context $Context -Category OAuthRejected -HttpStatus $status -ErrorText $fields['error_description'] }
+            if ($fields['code']) {
+                try { return Get-EntraRegistrationAuthorizationCode -Callback $next -ExpectedState $Context.State }
+                catch { Stop-EntraRegistrationAuthorization -Context $Context -Category CallbackBinding -HttpStatus $status }
             }
-            # Do not forward a TAP/form through 307/308 or to another origin.
+            # Never forward a TAP/form through 307/308 to another origin.
             if ($status -in @(307, 308) -and $Method -eq 'POST') {
-                if ($nextUri.Host -ne ([uri]$current).Host) { throw 'Cross-origin registration form redirect refused.' }
+                if ($nextUri.Host -ne ([uri]$current).Host) { Stop-EntraRegistrationAuthorization -Context $Context -Category UntrustedRedirect -HttpStatus $status }
             } else { $Method = 'GET'; $Body = $null }
             $current = $next
             continue
         }
-        if ($status -ne 200) { throw 'Registration authorization was not successful.' }
-        $config = Get-EntraRegistrationPageConfig -Content $response.Content
-        if ($config.pgid -notin @('KmsiBroker', 'KmsiInterrupt') -or $config.strServiceExceptionMessage) {
-            throw 'Unrecognized login continuation or consent interrupt; manual review required.'
+        if ($status -ne 200) { Stop-EntraRegistrationAuthorization -Context $Context -Category HttpFailure -HttpStatus $status }
+        if ($response.Content -notmatch '(?s)\$Config\s*=\s*(\{.*?\});') { Stop-EntraRegistrationAuthorization -Context $Context -Category ConfigMissing -HttpStatus $status }
+        try { $config = Get-EntraRegistrationPageConfig -Content $response.Content }
+        catch { Stop-EntraRegistrationAuthorization -Context $Context -Category ConfigInvalid -HttpStatus $status }
+        if ($config.strServiceExceptionMessage -or ($config.iErrorCode -and $config.iErrorCode -ne 0)) { Stop-EntraRegistrationAuthorization -Context $Context -Category ServiceRejected -HttpStatus $status -Config $config }
+        if ($config.pgid -eq 'ConvergedSignIn') { Stop-EntraRegistrationAuthorization -Context $Context -Category SignInReturned -HttpStatus $status -Config $config }
+        if ($config.pgid -isnot [string] -or $config.pgid -cnotin @('KmsiBroker', 'KmsiInterrupt')) { Stop-EntraRegistrationAuthorization -Context $Context -Category UnsupportedContinuation -HttpStatus $status -Config $config }
+        $forms = [regex]::Matches($response.Content, '(?is)<form\b[^>]*>')
+        # The curated passkey login already supports this JS-only KMSI payload.
+        # Require zero form starts, so malformed/ambiguous HTML cannot trigger a fallback.
+        if ($config.pgid -ceq 'KmsiInterrupt' -and $response.Content -notmatch '(?is)<form\b') {
+            foreach ($field in @('sCtx','sFT','canary','correlationId')) {
+                if ($config.$field -isnot [string] -or [string]::IsNullOrWhiteSpace($config.$field)) {
+                    Stop-EntraRegistrationAuthorization -Context $Context -Category KmsiFieldsMissing -HttpStatus $status -Config $config -MissingField $field
+                }
+            }
+            $current = 'https://login.microsoftonline.com/kmsi'; $Method = 'POST'
+            $Body = ConvertTo-EntraRegistrationForm @{ LoginOptions=1; type=28; ctx=$config.sCtx; hpgrequestid=$config.correlationId; flowToken=$config.sFT; canary=$config.canary; i19=4130 }
+            continue
         }
-        $actions = [regex]::Matches($response.Content, '(?is)<form\b[^>]*\baction="([^"]+)"')
-        if ($actions.Count -ne 1) { throw 'Registration continuation form is missing or ambiguous.' }
-        $nextUri = Assert-EntraRegistrationUri ([uri]::new([uri]$current, [Web.HttpUtility]::HtmlDecode($actions[0].Groups[1].Value)).AbsoluteUri)
-        if ($nextUri.Host -ne 'login.microsoftonline.com') { throw 'Unexpected registration continuation destination.' }
-        $fields = [ordered]@{}
-        foreach ($input in [regex]::Matches($response.Content, '(?is)<input\b[^>]*>')) {
-            $tag = $input.Value
-            if ($tag -notmatch '\btype="hidden"' -or $tag -notmatch '\bname="([^"]+)"') { continue }
-            $name = [Web.HttpUtility]::HtmlDecode($matches[1])
-            if ($tag -notmatch '\bvalue="([^"]*)"') { throw 'Registration continuation field has no value.' }
-            if ($fields.Contains($name)) { throw 'Duplicate registration continuation field.' }
-            $fields[$name] = [Web.HttpUtility]::HtmlDecode($matches[1])
+        if ($forms.Count -eq 0) { Stop-EntraRegistrationAuthorization -Context $Context -Category FormMissing -HttpStatus $status -Config $config }
+        if ($forms.Count -ne 1) { Stop-EntraRegistrationAuthorization -Context $Context -Category FormAmbiguous -HttpStatus $status -Config $config }
+        try { $action = Get-EntraRegistrationHtmlAttribute -Tag $forms[0].Value -Name action; $formMethod = Get-EntraRegistrationHtmlAttribute -Tag $forms[0].Value -Name method }
+        catch { Stop-EntraRegistrationAuthorization -Context $Context -Category FormAmbiguous -HttpStatus $status -Config $config }
+        if (-not $action) { Stop-EntraRegistrationAuthorization -Context $Context -Category FormAction -HttpStatus $status -Config $config -MissingField form.action }
+        if ($formMethod -and $formMethod -ine 'post') { Stop-EntraRegistrationAuthorization -Context $Context -Category FormMethod -HttpStatus $status -Config $config }
+        try { $nextUri = Assert-EntraRegistrationUri ([uri]::new([uri]$current, $action).AbsoluteUri) }
+        catch { Stop-EntraRegistrationAuthorization -Context $Context -Category FormAction -HttpStatus $status -Config $config }
+        if ($nextUri.Host -ne 'login.microsoftonline.com') { Stop-EntraRegistrationAuthorization -Context $Context -Category FormAction -HttpStatus $status -Config $config }
+        $formFields = [ordered]@{}
+        foreach ($inputTag in [regex]::Matches($response.Content, '(?is)<input\b[^>]*>')) {
+            try {
+                $type = Get-EntraRegistrationHtmlAttribute -Tag $inputTag.Value -Name type
+                if ($type -ine 'hidden') { continue }
+                $name = Get-EntraRegistrationHtmlAttribute -Tag $inputTag.Value -Name name
+                $value = Get-EntraRegistrationHtmlAttribute -Tag $inputTag.Value -Name value
+            } catch { Stop-EntraRegistrationAuthorization -Context $Context -Category InputAmbiguous -HttpStatus $status -Config $config }
+            if ([string]::IsNullOrWhiteSpace($name)) { Stop-EntraRegistrationAuthorization -Context $Context -Category InputMissing -HttpStatus $status -Config $config -MissingField input.name }
+            if ($null -eq $value) { Stop-EntraRegistrationAuthorization -Context $Context -Category InputMissing -HttpStatus $status -Config $config -MissingField input.value }
+            if ($formFields.Contains($name)) { Stop-EntraRegistrationAuthorization -Context $Context -Category DuplicateField -HttpStatus $status -Config $config }
+            $formFields[$name] = $value
         }
-        if (-not $fields.Count) { throw 'Registration continuation has no hidden fields.' }
-        $current = $nextUri.AbsoluteUri; $Method = 'POST'; $Body = ConvertTo-EntraRegistrationForm $fields
+        if (-not $formFields.Count) { Stop-EntraRegistrationAuthorization -Context $Context -Category HiddenFieldsMissing -HttpStatus $status -Config $config }
+        $current = $nextUri.AbsoluteUri; $Method = 'POST'; $Body = ConvertTo-EntraRegistrationForm $formFields
     }
-    throw 'Registration authorization exceeded the redirect limit.'
+    Stop-EntraRegistrationAuthorization -Context $Context -Category RedirectLimit
 }
 
 function Assert-EntraRegistrationTokenBinding {
