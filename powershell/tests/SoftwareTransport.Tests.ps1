@@ -36,12 +36,20 @@ BeforeAll {
 }
 Describe 'Real PowerShell no-redirect transport on credential-free loopback HTTP' {
     BeforeEach {
+        # Pester's aggregate run can fill PowerShell's bounded error history.
+        # Isolate this preservation contract, then restore the caller's history after each case.
+        $callerErrors = @($Error)
+        $Error.Clear()
         # Test-only substitution. Production continues to require its three Microsoft HTTPS hosts.
         Mock Assert-EntraRegistrationUri {
             $parsed = [uri]$Uri
             if ($parsed.Host -ne '127.0.0.1' -or $parsed.Scheme -ne 'http') { throw 'Fixture refuses non-loopback traffic.' }
             return $parsed
         }
+    }
+    AfterEach {
+        $Error.Clear()
+        foreach ($record in $callerErrors) { $null = $Error.Add($record) }
     }
     It 'returns real HTTP <Status> without following it or retaining the expected request error' -ForEach @(
         @{ Status=301 }, @{ Status=302 }, @{ Status=303 }, @{ Status=307 }, @{ Status=308 }
