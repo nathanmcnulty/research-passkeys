@@ -296,7 +296,7 @@ function New-PasskeyOperationError {
         ConfirmedWrites = $confirmed; FailedOrUnknownSecret = $FailedOrUnknownSecret }
     # Only locally allowlisted categories and numeric service identifiers leave the operation.
     if ($AuthorizationFailure) {
-        $categories = @('TransportFailure','HttpFailure','RedirectShape','UntrustedRedirect','OAuthRejected','CallbackBinding','ConfigMissing','ConfigInvalid','ServiceRejected','SignInReturned','UnsupportedContinuation','FormMissing','FormAmbiguous','FormMethod','FormAction','InputMissing','InputAmbiguous','DuplicateField','HiddenFieldsMissing','KmsiFieldsMissing','RedirectLimit')
+        $categories = @('TransportFailure','HttpFailure','RedirectShape','UntrustedRedirect','OAuthRejected','CallbackBinding','ConfigMissing','ConfigInvalid','ServiceRejected','SignInReturned','UnsupportedContinuation','FormMissing','FormAmbiguous','FormMethod','FormAction','FormControls','InputMissing','InputAmbiguous','DuplicateField','HiddenFieldsMissing','KmsiFieldsMissing','RedirectLimit')
         $pages = @('KmsiBroker','KmsiInterrupt','ConvergedSignIn','Consent','ConvergedConsent','CmsiInterrupt','ConvergedProofUp','Unknown')
         $status | Add-Member -NotePropertyName FailureCategory -NotePropertyValue $(if ($AuthorizationFailure.Category -is [string] -and $AuthorizationFailure.Category -cin $categories) { $AuthorizationFailure.Category } else { 'UnsupportedContinuation' })
         $http = 0; $service = 0
@@ -722,7 +722,26 @@ function Invoke-EntraRegistrationWebRequest {
     $request.Verbose = $false
     $request.Debug = $false
     # No automatic redirects: authentication data must stay on the checked origin.
-    Microsoft.PowerShell.Utility\Invoke-WebRequest @request
+    # PS 7.6 emits MaximumRedirectExceeded even after returning a 3xx with SkipHttpErrorCheck.
+    # Capture that exact expected record locally; every other transport error still fails.
+    $null = $request.Remove('ErrorAction'); $null = $request.Remove('ErrorVariable')
+    $transportErrors = @()
+    try {
+        $responses = @(Microsoft.PowerShell.Utility\Invoke-WebRequest @request -ErrorAction SilentlyContinue -ErrorVariable transportErrors)
+        if ($responses.Count -ne 1) { throw 'Registration transport did not return one response.' }
+        foreach ($record in $transportErrors) {
+            if ($record.FullyQualifiedErrorId -cne 'MaximumRedirectExceeded,Microsoft.PowerShell.Commands.InvokeWebRequestCommand' -or
+                [int]$responses[0].StatusCode -notin @(301,302,303,307,308)) { throw 'Registration transport returned an unexpected error.' }
+        }
+        return $responses[0]
+    } catch {
+        $Error.Remove($_)
+        throw 'Registration transport failed; sensitive details suppressed.'
+    } finally {
+        # Request error records can retain the form body. Remove only records from this request.
+        foreach ($record in $transportErrors) { $Error.Remove($record) }
+        $transportErrors = $null
+    }
 }
 
 function Invoke-EntraRegistrationRestMethod {
@@ -861,7 +880,7 @@ function Get-EntraRegistrationHtmlAttribute {
     return [Web.HttpUtility]::HtmlDecode($values[0].Groups['value'].Value)
 }
 
-# Bounded OAuth continuation; only known KMSI pages are eligible for form submission.
+# Bounded OAuth continuation; only the fixed authentication-only KMSI target is eligible for form submission.
 function Invoke-EntraRegistrationAuthorization {
     param([Parameter(Mandatory)]$Context, [Parameter(Mandatory)][string]$Uri,
         [string]$Method = 'GET', [AllowNull()][string]$Body)
@@ -893,13 +912,16 @@ function Invoke-EntraRegistrationAuthorization {
             continue
         }
         if ($status -ne 200) { Stop-EntraRegistrationAuthorization -Context $Context -Category HttpFailure -HttpStatus $status }
-        if ($response.Content -notmatch '(?s)\$Config\s*=\s*(\{.*?\});') { Stop-EntraRegistrationAuthorization -Context $Context -Category ConfigMissing -HttpStatus $status }
-        try { $config = Get-EntraRegistrationPageConfig -Content $response.Content }
-        catch { Stop-EntraRegistrationAuthorization -Context $Context -Category ConfigInvalid -HttpStatus $status }
-        if ($config.strServiceExceptionMessage -or ($config.iErrorCode -and $config.iErrorCode -ne 0)) { Stop-EntraRegistrationAuthorization -Context $Context -Category ServiceRejected -HttpStatus $status -Config $config }
-        if ($config.pgid -eq 'ConvergedSignIn') { Stop-EntraRegistrationAuthorization -Context $Context -Category SignInReturned -HttpStatus $status -Config $config }
-        if ($config.pgid -isnot [string] -or $config.pgid -cnotin @('KmsiBroker', 'KmsiInterrupt')) { Stop-EntraRegistrationAuthorization -Context $Context -Category UnsupportedContinuation -HttpStatus $status -Config $config }
-        $forms = [regex]::Matches($response.Content, '(?is)<form\b[^>]*>')
+        $config = $null
+        if ($response.Content -match '(?s)\$Config\s*=') {
+            try { $config = Get-EntraRegistrationPageConfig -Content $response.Content }
+            catch { Stop-EntraRegistrationAuthorization -Context $Context -Category ConfigInvalid -HttpStatus $status }
+            if ($config.strServiceExceptionMessage -or ($config.iErrorCode -and $config.iErrorCode -ne 0)) { Stop-EntraRegistrationAuthorization -Context $Context -Category ServiceRejected -HttpStatus $status -Config $config }
+            if ($config.pgid -eq 'ConvergedSignIn') { Stop-EntraRegistrationAuthorization -Context $Context -Category SignInReturned -HttpStatus $status -Config $config }
+            if ($config.pgid -isnot [string] -or $config.pgid -cnotin @('KmsiBroker', 'KmsiInterrupt')) { Stop-EntraRegistrationAuthorization -Context $Context -Category UnsupportedContinuation -HttpStatus $status -Config $config }
+        }
+        $formStarts = [regex]::Matches($response.Content, '(?is)<form\b')
+        $forms = [regex]::Matches($response.Content, '(?is)(?<tag><form\b[^>]*>)(?<fields>.*?)</form\s*>')
         # The curated passkey login already supports this JS-only KMSI payload.
         # Require zero form starts, so malformed/ambiguous HTML cannot trigger a fallback.
         if ($config.pgid -ceq 'KmsiInterrupt' -and $response.Content -notmatch '(?is)<form\b') {
@@ -912,23 +934,30 @@ function Invoke-EntraRegistrationAuthorization {
             $Body = ConvertTo-EntraRegistrationForm @{ LoginOptions=1; type=28; ctx=$config.sCtx; hpgrequestid=$config.correlationId; flowToken=$config.sFT; canary=$config.canary; i19=4130 }
             continue
         }
+        if (-not $config -and $formStarts.Count -eq 0) { Stop-EntraRegistrationAuthorization -Context $Context -Category ConfigMissing -HttpStatus $status }
         if ($forms.Count -eq 0) { Stop-EntraRegistrationAuthorization -Context $Context -Category FormMissing -HttpStatus $status -Config $config }
-        if ($forms.Count -ne 1) { Stop-EntraRegistrationAuthorization -Context $Context -Category FormAmbiguous -HttpStatus $status -Config $config }
-        try { $action = Get-EntraRegistrationHtmlAttribute -Tag $forms[0].Value -Name action; $formMethod = Get-EntraRegistrationHtmlAttribute -Tag $forms[0].Value -Name method }
+        if ($forms.Count -ne 1 -or $formStarts.Count -ne 1) { Stop-EntraRegistrationAuthorization -Context $Context -Category FormAmbiguous -HttpStatus $status -Config $config }
+        try { $action = Get-EntraRegistrationHtmlAttribute -Tag $forms[0].Groups['tag'].Value -Name action; $formMethod = Get-EntraRegistrationHtmlAttribute -Tag $forms[0].Groups['tag'].Value -Name method }
         catch { Stop-EntraRegistrationAuthorization -Context $Context -Category FormAmbiguous -HttpStatus $status -Config $config }
         if (-not $action) { Stop-EntraRegistrationAuthorization -Context $Context -Category FormAction -HttpStatus $status -Config $config -MissingField form.action }
         if ($formMethod -and $formMethod -ine 'post') { Stop-EntraRegistrationAuthorization -Context $Context -Category FormMethod -HttpStatus $status -Config $config }
         try { $nextUri = Assert-EntraRegistrationUri ([uri]::new([uri]$current, $action).AbsoluteUri) }
         catch { Stop-EntraRegistrationAuthorization -Context $Context -Category FormAction -HttpStatus $status -Config $config }
-        if ($nextUri.Host -ne 'login.microsoftonline.com') { Stop-EntraRegistrationAuthorization -Context $Context -Category FormAction -HttpStatus $status -Config $config }
+        if ($nextUri.Host -ne 'login.microsoftonline.com' -or
+            (-not $config -and ($nextUri.AbsolutePath -cne '/kmsi' -or $nextUri.Query -or $nextUri.Fragment))) { Stop-EntraRegistrationAuthorization -Context $Context -Category FormAction -HttpStatus $status -Config $config }
+        $fieldMarkup = $forms[0].Groups['fields'].Value
+        if (-not $config -and $fieldMarkup -match '(?is)<(?:button|select|textarea)\b') { Stop-EntraRegistrationAuthorization -Context $Context -Category FormControls -HttpStatus $status -Config $config }
         $formFields = [ordered]@{}
-        foreach ($inputTag in [regex]::Matches($response.Content, '(?is)<input\b[^>]*>')) {
+        foreach ($inputTag in [regex]::Matches($fieldMarkup, '(?is)<input\b[^>]*>')) {
             try {
                 $type = Get-EntraRegistrationHtmlAttribute -Tag $inputTag.Value -Name type
-                if ($type -ine 'hidden') { continue }
                 $name = Get-EntraRegistrationHtmlAttribute -Tag $inputTag.Value -Name name
                 $value = Get-EntraRegistrationHtmlAttribute -Tag $inputTag.Value -Name value
             } catch { Stop-EntraRegistrationAuthorization -Context $Context -Category InputAmbiguous -HttpStatus $status -Config $config }
+            if ($type -ine 'hidden') {
+                if (-not $config) { Stop-EntraRegistrationAuthorization -Context $Context -Category FormControls -HttpStatus $status -Config $config }
+                continue
+            }
             if ([string]::IsNullOrWhiteSpace($name)) { Stop-EntraRegistrationAuthorization -Context $Context -Category InputMissing -HttpStatus $status -Config $config -MissingField input.name }
             if ($null -eq $value) { Stop-EntraRegistrationAuthorization -Context $Context -Category InputMissing -HttpStatus $status -Config $config -MissingField input.value }
             if ($formFields.Contains($name)) { Stop-EntraRegistrationAuthorization -Context $Context -Category DuplicateField -HttpStatus $status -Config $config }

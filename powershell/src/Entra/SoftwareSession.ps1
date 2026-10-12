@@ -58,7 +58,26 @@ function Invoke-EntraRegistrationWebRequest {
     $request.Verbose = $false
     $request.Debug = $false
     # No automatic redirects: authentication data must stay on the checked origin.
-    Microsoft.PowerShell.Utility\Invoke-WebRequest @request
+    # PS 7.6 emits MaximumRedirectExceeded even after returning a 3xx with SkipHttpErrorCheck.
+    # Capture that exact expected record locally; every other transport error still fails.
+    $null = $request.Remove('ErrorAction'); $null = $request.Remove('ErrorVariable')
+    $transportErrors = @()
+    try {
+        $responses = @(Microsoft.PowerShell.Utility\Invoke-WebRequest @request -ErrorAction SilentlyContinue -ErrorVariable transportErrors)
+        if ($responses.Count -ne 1) { throw 'Registration transport did not return one response.' }
+        foreach ($record in $transportErrors) {
+            if ($record.FullyQualifiedErrorId -cne 'MaximumRedirectExceeded,Microsoft.PowerShell.Commands.InvokeWebRequestCommand' -or
+                [int]$responses[0].StatusCode -notin @(301,302,303,307,308)) { throw 'Registration transport returned an unexpected error.' }
+        }
+        return $responses[0]
+    } catch {
+        $Error.Remove($_)
+        throw 'Registration transport failed; sensitive details suppressed.'
+    } finally {
+        # Request error records can retain the form body. Remove only records from this request.
+        foreach ($record in $transportErrors) { $Error.Remove($record) }
+        $transportErrors = $null
+    }
 }
 
 function Invoke-EntraRegistrationRestMethod {

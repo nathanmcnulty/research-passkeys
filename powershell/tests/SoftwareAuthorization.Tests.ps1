@@ -21,6 +21,35 @@ Describe 'Known KMSI authorization continuation compatibility' {
         Invoke-EntraRegistrationAuthorization -Context $context -Uri 'https://login.microsoftonline.com/common/login' -Method POST -Body 'synthetic' | Should -BeExactly 'SYNTHETIC-CODE'
         Should -Invoke Invoke-EntraRegistrationWebRequest -Times 2 -Exactly
     }
+    It 'restores config-less fixed-target hidden forms without copying fields outside the form' {
+        $script:page = '<form action="/kmsi"><input type="hidden" name="ctx" value="SYNTHETIC-CONTEXT"><input type="hidden" name="flowToken" value="SYNTHETIC-FLOW"></form><input type="hidden" name="ctx" value="outside-form-secret">'
+        Mock Invoke-EntraRegistrationWebRequest {
+            $script:calls++
+            if ($script:calls -eq 1) { return @{ StatusCode=200; Content=$script:page; Headers=@{} } }
+            $Uri | Should -BeExactly 'https://login.microsoftonline.com/kmsi'
+            $form = [Web.HttpUtility]::ParseQueryString([string]$Body)
+            $form.AllKeys.Count | Should -Be 2
+            $form['ctx'] | Should -BeExactly 'SYNTHETIC-CONTEXT'
+            $form['flowToken'] | Should -BeExactly 'SYNTHETIC-FLOW'
+            return @{ StatusCode=302; Content=''; Headers=@{ Location="https://mysignins.microsoft.com/#code=SYNTHETIC-CODE&state=$($context.State)" } }
+        }
+        Invoke-EntraRegistrationAuthorization -Context $context -Uri 'https://login.microsoftonline.com/common/login' | Should -BeExactly 'SYNTHETIC-CODE'
+        Should -Invoke Invoke-EntraRegistrationWebRequest -Times 2 -Exactly
+    }
+    It 'preserves known KMSI form behavior with a submit control and existing trusted action' {
+        $script:page = '$Config={"pgid":"KmsiBroker"};<form action="/common/post?flow=kmsi"><input type="hidden" name="ctx" value="SYNTHETIC-CONTEXT"><input type="submit" name="choice" value="continue"><button>Continue</button></form>'
+        Mock Invoke-EntraRegistrationWebRequest {
+            $script:calls++
+            if ($script:calls -eq 1) { return @{ StatusCode=200; Content=$script:page; Headers=@{} } }
+            $Uri | Should -BeExactly 'https://login.microsoftonline.com/common/post?flow=kmsi'
+            $form = [Web.HttpUtility]::ParseQueryString([string]$Body)
+            $form.AllKeys.Count | Should -Be 1
+            $form['ctx'] | Should -BeExactly 'SYNTHETIC-CONTEXT'
+            return @{ StatusCode=302; Content=''; Headers=@{ Location="https://mysignins.microsoft.com/#code=SYNTHETIC-CODE&state=$($context.State)" } }
+        }
+        Invoke-EntraRegistrationAuthorization -Context $context -Uri 'https://login.microsoftonline.com/common/login' | Should -BeExactly 'SYNTHETIC-CODE'
+        Should -Invoke Invoke-EntraRegistrationWebRequest -Times 2 -Exactly
+    }
 }
 Describe 'Structured KMSI continuation and safe rejection reasons' {
     BeforeEach {
@@ -68,7 +97,11 @@ Describe 'Structured KMSI continuation and safe rejection reasons' {
         Should -Invoke Invoke-EntraRegistrationWebRequest -Times 1 -Exactly
     }
     It 'refuses <Reason> without automatic continuation' -ForEach @(
-        @{ Reason='config-less auto-submit'; Page='<form method="post" action="/kmsi"><input type="hidden" name="ctx" value="raw-secret"></form>'; Category='ConfigMissing' },
+        @{ Reason='config-less unknown target'; Page='<form method="post" action="/other"><input type="hidden" name="ctx" value="raw-secret"></form>'; Category='FormAction' },
+        @{ Reason='config-less query-bearing target'; Page='<form action="/kmsi?accept=yes"><input type="hidden" name="ctx" value="raw-secret"></form>'; Category='FormAction' },
+        @{ Reason='config-less interactive input'; Page='<form action="/kmsi"><input type="hidden" name="ctx" value="raw-secret"><input type="submit" name="accept" value="yes"></form>'; Category='FormControls' },
+        @{ Reason='config-less interactive button'; Page='<form action="/kmsi"><input type="hidden" name="ctx" value="raw-secret"><button>Accept</button></form>'; Category='FormControls' },
+        @{ Reason='config-less no form'; Page='raw-secret'; Category='ConfigMissing' },
         @{ Reason='invalid JSON config'; Page='$Config={invalid};'; Category='ConfigInvalid' },
         @{ Reason='consent'; Page='$Config={"pgid":"Consent"};<form action="/consent"><input type="hidden" name="accept" value="yes"></form>'; Category='UnsupportedContinuation' },
         @{ Reason='policy/proof-up'; Page='$Config={"pgid":"ConvergedProofUp"};'; Category='UnsupportedContinuation' },

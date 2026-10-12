@@ -51,6 +51,8 @@ Describe 'Complete TAP registration transcript through <Surface>' -ForEach @(@{ 
             } elseif ($Uri -match '/common/login$') {
                 if ($global:PasskeyOfflineFixture.Mode -eq 'kmsi-config') {
                     $content = '$Config={"pgid":"KmsiInterrupt","sCtx":"SYNTHETIC-CONTEXT","sFT":"SYNTHETIC-FLOW","canary":"SYNTHETIC-CANARY","correlationId":"SYNTHETIC-CORRELATION"};'
+                } elseif ($global:PasskeyOfflineFixture.Mode -eq 'kmsi-form') {
+                    $content = '<form method="post" action="/kmsi"><input type="hidden" name="ctx" value="SYNTHETIC-CONTEXT"><input type="hidden" name="flowToken" value="SYNTHETIC-FLOW"></form>'
                 } elseif ($global:PasskeyOfflineFixture.Mode -eq 'service-rejected') {
                     $content = '$Config={"pgid":"ConvergedSignIn","iErrorCode":50126,"strServiceExceptionMessage":"AADSTS50126: SYNTHETIC-TAP raw-secret"};'
                 } elseif ($global:PasskeyOfflineFixture.Mode -eq 'consent') {
@@ -61,11 +63,14 @@ Describe 'Complete TAP registration transcript through <Surface>' -ForEach @(@{ 
                 }
             } elseif ($Uri -match '/kmsi$') {
                 $form = [Web.HttpUtility]::ParseQueryString([string]$Body)
-                $form['LoginOptions'] | Should -Be '1'
-                $form['type'] | Should -Be '28'
                 $form['flowToken'] | Should -Be 'SYNTHETIC-FLOW'
                 $form['ctx'] | Should -Be 'SYNTHETIC-CONTEXT'
-                $form.AllKeys.Count | Should -Be 7
+                if ($global:PasskeyOfflineFixture.Mode -eq 'kmsi-form') { $form.AllKeys.Count | Should -Be 2 }
+                else {
+                    $form['LoginOptions'] | Should -Be '1'
+                    $form['type'] | Should -Be '28'
+                    $form.AllKeys.Count | Should -Be 7
+                }
                 $status = 302; $responseHeaders.Location = @("https://mysignins.microsoft.com/#code=SYNTHETIC-CODE&state=$($global:PasskeyOfflineFixture.State)")
             } elseif ($Uri -match '/token$') {
                 $global:PasskeyOfflineFixture.TokenRequests++
@@ -157,6 +162,14 @@ Describe 'Complete TAP registration transcript through <Surface>' -ForEach @(@{ 
     }
     It 'completes the existing config-driven KMSI branch before verified export' {
         $global:PasskeyOfflineFixture.Mode = 'kmsi-config'
+        $result = & $registrationCommand @params
+        $result.Success | Should -BeTrue
+        $result.EnrollmentStatus | Should -Be Verified
+        $result.ExportStatus | Should -Be Complete
+        @((Get-Content $ghCalls) | Where-Object { $_ -match '^secret set ' }).Count | Should -Be 4
+    }
+    It 'completes an original-compatible config-less authentication form before verified export' {
+        $global:PasskeyOfflineFixture.Mode = 'kmsi-form'
         $result = & $registrationCommand @params
         $result.Success | Should -BeTrue
         $result.EnrollmentStatus | Should -Be Verified

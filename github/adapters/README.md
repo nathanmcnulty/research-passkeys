@@ -49,8 +49,15 @@ enrollment automatically. Check My Sign-ins first. No TAP, cookie, token or priv
 
 Known KMSI continuation supports quoted or unquoted HTML attributes and the existing
 config-driven `KmsiInterrupt` payload only when no form starts exist and all required
-fields are scalar strings. Config-less auto-submit forms, consent/policy pages, malformed
-forms and mismatched callback state remain refused. A returned sign-in page alone does
+fields are scalar strings. A config-less page can continue a single, complete hidden-only
+form to the exact Microsoft login `/kmsi` authentication target, with no query or fragment.
+Other config-less targets, consent/policy pages, malformed forms and mismatched callback
+state remain refused. A returned sign-in page alone does
 not identify the cause. TAP expiration or prior one-time use can prevent authorization;
 the [Microsoft TAP guide](https://learn.microsoft.com/entra/identity/authentication/howto-authentication-temporary-access-pass)
 documents a default one-hour lifetime, but the tenant's configured lifetime may differ.
+
+The no-redirect transport captures PowerShell 7.6's expected `MaximumRedirectExceeded`
+record only alongside an actual redirect response. It follows no redirects automatically,
+preserves session cookies, still fails all other transport errors and does not retain the
+captured request error in the caller's error history.
