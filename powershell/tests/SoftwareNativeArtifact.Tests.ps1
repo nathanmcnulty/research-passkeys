@@ -80,14 +80,16 @@ Describe 'Complete native <Flow> software registration through <Surface>' -ForEa
                 $verification = ($Body | ConvertFrom-Json).VerificationData | ConvertFrom-Json
                 $id = $verification.CredentialId
                 $id | Should -BeExactly $global:SoftwareNativeFixture.CredentialId
-                if ($global:SoftwareNativeFixture.Mode -eq 'mismatch') { $id = 'wrong-credential' }
+                $probe = ($Body | ConvertFrom-Json).CredentialVerification
+                $verificationState = if ($probe -and $global:SoftwareNativeFixture.Mode -eq 'mismatch') { 1 } else { 2 }
                 $errorCode = if ($global:SoftwareNativeFixture.Mode -eq 'protocolerror') { 1 } else { 0 }
                 $status = if ($global:SoftwareNativeFixture.Mode -eq 'httperror') { 400 } else { 200 }
-                $content = @{ VerificationState = 2; ErrorCode = $errorCode; DataUpdates = @{ FidoDevices = @{ CredentialId = $id } } } | ConvertTo-Json -Depth 6 -Compress
+                $content = @{ VerificationState = $verificationState; ErrorCode = $errorCode; DataUpdates = @{ FidoDevices = @{ CredentialId = 'opaque-service-method-id' } } } | ConvertTo-Json -Depth 6 -Compress
             } else { throw "Unexpected mocked request path $(([uri]$Uri).AbsolutePath)." }
             return @{ StatusCode = $status; Content = $content; Headers = $responseHeaders }
         } @mockScope
         Mock Invoke-RestMethod { throw 'All native registration requests must use the bounded raw transport.' } @mockScope
+        Mock Start-Sleep {} @mockScope
         $outputPath = Join-Path $TestDrive "$Flow-$Surface-$([guid]::NewGuid().ToString('N')).json"
         $parameters = @{ TenantId = '11111111-1111-1111-1111-111111111111'; OutputPath = $outputPath; Confirm = $false }
         if ($Flow -eq 'Tap') {

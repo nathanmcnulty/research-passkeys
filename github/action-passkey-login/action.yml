@@ -148,16 +148,24 @@ runs:
           }
         }
 
+        function Add-ActionMask {
+          param([AllowNull()][string]$Value)
+          if (-not [string]::IsNullOrWhiteSpace($Value)) {
+            # Workflow commands occupy one line, including multiline PEM secrets.
+            $escaped = $Value.Replace('%', '%25').Replace("`r", '%0D').Replace("`n", '%0A')
+            Write-Output "::add-mask::$escaped"
+          }
+        }
+
         foreach ($sensitiveValue in @(
           $env:CREDENTIAL_ID,
           $env:USER_HANDLE,
+          $env:USER_PRINCIPAL_NAME,
           $env:PRIVATE_KEY,
           $env:KEY_VAULT_ACCESS_TOKEN,
           $env:KEY_VAULT_CLIENT_SECRET
         )) {
-          if (-not [string]::IsNullOrWhiteSpace($sensitiveValue)) {
-            Write-Output "::add-mask::$sensitiveValue"
-          }
+          Add-ActionMask -Value $sensitiveValue
         }
 
         $params = @{
@@ -196,7 +204,7 @@ runs:
         }
 
         if ($result.AuthenticationCookieValue) {
-          Write-Output "::add-mask::$($result.AuthenticationCookieValue)"
+          Add-ActionMask -Value $result.AuthenticationCookieValue
         }
 
         Set-ActionOutput -Name authenticated -Value ([string]$result.Success).ToLowerInvariant()

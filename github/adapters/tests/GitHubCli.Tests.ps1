@@ -32,9 +32,36 @@ Describe 'Bounded stdin-only subprocess transport (native platform fixture)' {
     It 'suppresses failed process output in errors' {
         $env:PASSKEY_TEST_CLI_MODE = 'failure'
         $errorText = $null
-        try { Invoke-GitHubPasskeyCli -Arguments @('fixture') -InputText 'SYNTHETIC-INPUT' } catch { $errorText = $_ | Out-String }
+        try { Invoke-GitHubPasskeyCli -Arguments @('fixture') -InputText 'SYNTHETIC-INPUT' } catch { $errorText = $_.Exception.Message + ($_.TargetObject | ConvertTo-Json -Compress) }
         $errorText | Should -Match 'failed or timed out'
         $errorText | Should -Not -Match 'SYNTHETIC'
+    }
+    It 'retains only safe HTTP diagnostics for repository access failures' -ForEach @(
+        @{Status=401;Category='AuthenticationFailed'}, @{Status=403;Category='AuthorizationDenied'},
+        @{Status=404;Category='RepositoryUnavailable'}, @{Status=500;Category='ApiFailure'}
+    ) {
+        $env:PASSKEY_TEST_CLI_MODE = "http-$Status"
+        $caught = $null
+        try { Test-GitHubPasskeyDestination 'fixture-owner/fixture-repo' } catch { $caught = $_ }
+        $caught.TargetObject.CliCheck | Should -Be RepositoryAccess
+        $caught.TargetObject.FailureCategory | Should -Be $Category
+        $caught.TargetObject.HttpStatus | Should -Be $Status
+        $caught.TargetObject.CliExitCode | Should -Be 1
+        ($caught | Out-String) | Should -Not -Match 'SYNTHETIC|do-not-leak'
+        $safe = New-PasskeyOperationError -Stage GitHubPreflight -CliFailure $caught.TargetObject
+        $safe.TargetObject.FailureCategory | Should -Be $Category
+        $safe.TargetObject.HttpStatus | Should -Be $Status
+        $safe.TargetObject.EnrollmentStatus | Should -Be NotStarted
+    }
+    It 'identifies command resolution and startup failures without exposing paths' {
+        Mock Get-Command { $null } -ParameterFilter { $Name -eq 'gh' }
+        $caught = $null
+        try { Test-GitHubPasskeyDestination 'fixture-owner/fixture-repo' } catch { $caught = $_ }
+        $caught.TargetObject.FailureCategory | Should -Be CommandMissing
+        Mock Get-Command { [pscustomobject]@{Source = "$TestDrive/DO-NOT-LEAK-missing.exe"} } -ParameterFilter { $Name -eq 'gh' }
+        try { Test-GitHubPasskeyDestination 'fixture-owner/fixture-repo' } catch { $caught = $_ }
+        $caught.TargetObject.FailureCategory | Should -Be StartFailed
+        ($caught | Out-String) | Should -Not -Match 'DO-NOT-LEAK'
     }
     It 'bounds process wait and stdin even if child never reads' {
         $env:PASSKEY_TEST_CLI_MODE = 'no-read'

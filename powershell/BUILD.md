@@ -70,7 +70,7 @@ network, enrollment, file or secret writes.
 - Software credential files are created without overwriting an existing file. Unix output is
   restricted to user read/write. On Windows, use a directory with a private inherited ACL.
   Credential write failure after enrollment is reported as partial completion, without silent rollback.
-- GitHub export requires paused consumers. The four secret writes are non-atomic, with the
+- GitHub export warns callers to pause consumers themselves. The four secret writes are non-atomic, with the
   private key written last. Do not resume consumers after a partial failure until you inspect it.
   Key Vault failure never falls back to a local signer. Metadata is informational and unverified.
 - TAP helper credentials no longer have embedded defaults. Its default result contains a

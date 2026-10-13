@@ -33,7 +33,7 @@ BeforeAll {
         if ($Uri -match '/api/post/newfido\?') { return @{StatusCode=200;Content='<div id="context" data-content="{&quot;Canary&quot;:&quot;updated-canary&quot;,&quot;PostInfo&quot;:&quot;offline-postinfo&quot;}">'} }
         if ($Uri -match '/api/authenticationmethods/verify$') {
             $verified = ($Body | ConvertFrom-Json).VerificationData | ConvertFrom-Json
-            $verified.Canary | Should -Be 'updated-canary'
+            if (-not ($Body | ConvertFrom-Json).CredentialVerification) { $verified.Canary | Should -Be 'updated-canary' }
             return @{StatusCode=200;Content=(@{ErrorCode=0;VerificationState=2;DataUpdates=@{FidoDevices=@{CredentialId=$verified.CredentialId}}}|ConvertTo-Json -Depth 6 -Compress)}
         }
         if ($Uri -match '/api/authenticationmethods') { return @{StatusCode=200;Content='{}'} }

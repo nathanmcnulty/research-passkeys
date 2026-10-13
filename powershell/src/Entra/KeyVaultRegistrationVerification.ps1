@@ -17,14 +17,38 @@ function Update-EntraKeyVaultVerificationSession {
     } catch { Write-Verbose 'Keeping the existing authorized registration session.' }
 }
 
-function Assert-EntraRegistrationVerified {
+function Assert-EntraRegistrationFinalized {
     [CmdletBinding()]
-    param([Parameter(Mandatory)][int]$StatusCode, [Parameter(Mandatory)]$Response, [Parameter(Mandatory)][string]$ExpectedCredentialId)
+    param([Parameter(Mandatory)][int]$StatusCode, [Parameter(Mandatory)]$Response)
     if ($StatusCode -lt 200 -or $StatusCode -ge 300 -or $Response.VerificationState -ne 2 -or
         ($Response.ErrorCode -and $Response.ErrorCode -ne 0)) { throw 'Registration was not confirmed successful.' }
-    $ids = @($Response.DataUpdates.FidoDevices | ForEach-Object { [string]$_.CredentialId })
-    if ($ids.Count -ne 1 -or $ids[0] -cne $ExpectedCredentialId) { throw 'Registration response did not confirm the expected credential ID.' }
+    # DataUpdates.FidoDevices.CredentialId is an opaque service method identifier.
+    # Finalization is not proof that the submitted WebAuthn credential has replicated.
     $Response
+}
+
+function Confirm-EntraRegistrationCredential {
+    [CmdletBinding()]
+    param([Parameter(Mandatory)]$Context, [Parameter(Mandatory)][string]$CredentialId,
+        [ValidateRange(1,10)][int]$AttemptCount = 5, [ValidateRange(0,60)][int]$RetryDelaySeconds = 2)
+    # Match the public My Sign-ins replication probe, without resubmitting attestation.
+    $body = @{ Type = 18; CredentialVerification = $true
+        VerificationData = (@{ CredentialId = $CredentialId } | ConvertTo-Json -Compress) } | ConvertTo-Json -Compress
+    $headers = Get-EntraRegistrationHeaders -Context $Context -IncludeToken -IncludeSession
+    for ($attempt = 1; $attempt -le $AttemptCount; $attempt++) {
+        $response = Invoke-EntraRegistrationWebRequest -Uri "$($Context.RedirectUri)/api/authenticationmethods/verify" `
+            -Method POST -Body $body -ContentType 'application/json' -Headers $headers -WebSession $Context.WebSession
+        try { $json = $response.Content | ConvertFrom-Json -ErrorAction Stop }
+        catch { throw 'Credential verification returned invalid JSON; details suppressed.' }
+        if ([int]$response.StatusCode -lt 200 -or [int]$response.StatusCode -ge 300 -or
+            ($json.ErrorCode -and $json.ErrorCode -ne 0)) { throw 'Credential verification failed.' }
+        if ($json.VerificationState -eq 2) {
+            return [pscustomobject]@{ CredentialId = $CredentialId; VerificationState = 2 }
+        }
+        if ($json.VerificationState -ne 1) { throw 'Credential verification was rejected.' }
+        if ($attempt -lt $AttemptCount) { Start-Sleep -Seconds $RetryDelaySeconds }
+    }
+    throw 'The submitted credential has not been confirmed; enrollment remains unconfirmed.'
 }
 
 function Invoke-EntraKeyVaultRegistrationVerification {
@@ -55,7 +79,9 @@ function Invoke-EntraKeyVaultRegistrationVerification {
             $json = $response.Content | ConvertFrom-Json -ErrorAction Stop
         } catch { Write-Verbose 'Registration verification did not return a valid response.' }
         if ($json.VerificationState -eq 2) {
-            return (Assert-EntraRegistrationVerified -StatusCode ([int]$response.StatusCode) -Response $json -ExpectedCredentialId $Attestation.CredentialId)
+            $null = Assert-EntraRegistrationFinalized -StatusCode ([int]$response.StatusCode) -Response $json
+            return (Confirm-EntraRegistrationCredential -Context $Context -CredentialId $Attestation.CredentialId `
+                -AttemptCount $AttemptCount -RetryDelaySeconds $RetryDelaySeconds)
         }
         if ($json.ErrorCode -eq 20 -and $json.VerificationState -eq 3 -and $mode -eq 'empty' -and $Request.PostInfo) {
             $mode = 'context'

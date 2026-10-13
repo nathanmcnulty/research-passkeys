@@ -13,6 +13,8 @@ function Invoke-EntraRegistrationTapAuthentication {
         $config = Get-EntraRegistrationPageConfig -Content $response.Content
         if ($config.pgid -ne 'ConvergedSignIn' -or -not $config.sFT -or -not $config.sCtx) { throw 'Unexpected registration sign-in page.' }
         $Context.Stage = 'CredentialType'
+        $flowToken = $config.sFT
+        try {
         $gct = Invoke-EntraRegistrationRestMethod -Uri 'https://login.microsoftonline.com/common/GetCredentialType?mkt=en-US' `
             -Method POST -Body (@{
                 username = $UserPrincipalName; isOtherIdpSupported = $false; checkPhones = $false
@@ -20,7 +22,8 @@ function Invoke-EntraRegistrationTapAuthentication {
                 originalRequest = $config.sCtx; flowToken = $config.sFT
             } | ConvertTo-Json -Compress) -ContentType 'application/json' `
             -Headers @{ canary = $config.apiCanary; hpgrequestid = $config.sessionId; hpgact = '1800'; hpgid = '1104' }
-        $flowToken = if ($gct.FlowToken) { $gct.FlowToken } else { $config.sFT }
+        if ($gct.FlowToken -is [string] -and -not [string]::IsNullOrWhiteSpace($gct.FlowToken)) { $flowToken = $gct.FlowToken }
+        } catch { Write-Verbose 'Credential-type discovery failed; continuing with the original sign-in flow token.' }
         $postUri = if ($config.urlPost) { [uri]::new([uri]'https://login.microsoftonline.com/', [string]$config.urlPost) } else { [uri]'https://login.microsoftonline.com/common/login' }
         $null = Assert-EntraRegistrationUri $postUri.AbsoluteUri
         if ($postUri.Host -ne 'login.microsoftonline.com') { throw 'Unexpected TAP sign-in destination.' }

@@ -15,7 +15,7 @@ Use `-WhatIf` for no-I/O validation. No real credential is used by the offline t
 
 ## TAP enrollment preflight and result
 
-Use a short display name such as `TokenForge 261011` (17 characters). The current public
+Use a short display name such as `TokenForge 261012` (17 characters), with today's date. The current public
 My Sign-ins passkey-name field limits names to 30 characters; these commands reject blank
 or longer names before authentication/enrollment. This does not establish why any earlier
 attempt failed. Source: [My Sign-ins](https://mysignins.microsoft.com/security-info), app
@@ -23,7 +23,7 @@ attempt failed. Source: [My Sign-ins](https://mysignins.microsoft.com/security-i
 
 ```powershell
 Register-GitHubPasskeyViaTAP -TAP $tap -UserPrincipalName 'user@example.com' `
-    -Repository 'owner/repo' -DisplayName 'TokenForge 261011'
+    -Repository 'owner/repo' -DisplayName ("TokenForge " + (Get-Date -Format yyMMdd))
 ```
 
 `TenantId` is optional for UPN-based TAP flows. Public Microsoft OIDC metadata resolves the
@@ -41,11 +41,23 @@ Failures expose a safe `TargetObject` with `Code`, `Stage`, `EnrollmentStatus`, 
 `ConfirmedWrites` and `FailedOrUnknownSecret`. Authorization-continuation failures also expose
 `FailureCategory`, `HttpStatus`, `ServiceErrorCode`, `AadstsCode`, `ContinuationPage` and
 `MissingField` when available. Print only these safe fields if a handoff catches errors;
+GitHub CLI failures additionally expose `CliCheck`, `FailureCategory`, `HttpStatus` and
+`CliExitCode`. Preflight tests the active credential's repository secrets API directly,
+without rejecting working access because of another saved account. Missing commands,
+startup/transport failures, timeouts, authentication (401), denied access (403), missing or
+inaccessible repositories (404), and other API/exit failures remain distinct. Read access
+does not guarantee write permission. CLI output and arbitrary server text are discarded.
 do not replace them with `NOT_CONFIRMED` or print raw exception/response bodies.
 `NotStarted` means this operation has not submitted a credential; `Unconfirmed` means a
 submission may have enrolled it; `Verified` means exact credential-ID verification succeeded.
 Preflight/authentication failures do not imply partial enrollment. Never retry an unconfirmed
 enrollment automatically. Check My Sign-ins first. No TAP, cookie, token or private key is included.
+
+After finalization, the adapter polls My Sign-ins with `CredentialVerification=true` and
+the submitted raw WebAuthn credential ID, without resubmitting attestation. The method ID
+in `DataUpdates.FidoDevices` is an opaque service identifier and is not used as the raw ID.
+Only a successful credential-specific probe permits export. Pending, rejected, malformed
+or unsuccessful responses leave enrollment unconfirmed and do not write secrets.
 
 Known KMSI continuation supports quoted or unquoted HTML attributes and the existing
 config-driven `KmsiInterrupt` payload only when no form starts exist and all required

@@ -130,13 +130,12 @@ Describe 'Native request state and completion validation' {
         $uri | Should -Match 'cid=offline'
         $uri | Should -Match 'mysignins-region=westus2'
     }
-    It 'requires a successful HTTP response, verification state and singleton expected credential' {
+    It 'requires successful HTTP and finalization state without treating the service ID as WebAuthn ID' {
         $response = @{ VerificationState = 2; ErrorCode = 0; DataUpdates = @{ FidoDevices = @(@{ CredentialId = 'expected' }) } }
-        Assert-EntraRegistrationVerified -StatusCode 200 -Response $response -ExpectedCredentialId 'expected' | Should -Not -BeNullOrEmpty
-        { Assert-EntraRegistrationVerified -StatusCode 400 -Response $response -ExpectedCredentialId 'expected' } | Should -Throw
-        { Assert-EntraRegistrationVerified -StatusCode 200 -Response $response -ExpectedCredentialId 'other' } | Should -Throw
-        $response.DataUpdates.FidoDevices += @{ CredentialId = 'expected' }
-        { Assert-EntraRegistrationVerified -StatusCode 200 -Response $response -ExpectedCredentialId 'expected' } | Should -Throw
+        Assert-EntraRegistrationFinalized -StatusCode 200 -Response $response | Should -Not -BeNullOrEmpty
+        { Assert-EntraRegistrationFinalized -StatusCode 400 -Response $response } | Should -Throw
+        $response.VerificationState = 1
+        { Assert-EntraRegistrationFinalized -StatusCode 200 -Response $response } | Should -Throw
     }
     It 'switches to context PostInfo after ErrorCode20 State3 and succeeds only for the same credential' {
         $context = New-EntraRegistrationContext
@@ -146,12 +145,16 @@ Describe 'Native request state and completion validation' {
         Mock Invoke-EntraRegistrationWebRequest {
             $script:verifyCalls++
             if ($script:verifyCalls -eq 1) { return @{ StatusCode=200;Content='{"ErrorCode":20,"VerificationState":3}' } }
+            if (($Body | ConvertFrom-Json).CredentialVerification) {
+                (($Body | ConvertFrom-Json).VerificationData | ConvertFrom-Json).CredentialId | Should -Be expected
+                return @{ StatusCode=200;Content='{"ErrorCode":0,"VerificationState":2}' }
+            }
             ($Body | ConvertFrom-Json).VerificationData | ConvertFrom-Json | ForEach-Object { $_.PostInfo | Should -Be 'post-info' }
             @{ StatusCode=200;Content='{"ErrorCode":0,"VerificationState":2,"DataUpdates":{"FidoDevices":{"CredentialId":"expected"}}}' }
         }
         $response = Invoke-EntraKeyVaultRegistrationVerification -Context $context -Request $request -Attestation $attestation -DisplayName 'offline' -RetryDelaySeconds 0
         $response.VerificationState | Should -Be 2
-        Should -Invoke Invoke-EntraRegistrationWebRequest -Times 2
+        Should -Invoke Invoke-EntraRegistrationWebRequest -Times 3
     }
 }
 
@@ -281,7 +284,7 @@ Describe 'Complete public Key Vault enrollment with synthetic transport response
             if ($Uri -match '/api/authenticationmethods/verify$') {
                 if ($failureStage -eq 'verify') { return @{StatusCode=200;Content='{"ErrorCode":21,"VerificationState":3}'} }
                 $verification = ($Body | ConvertFrom-Json).VerificationData | ConvertFrom-Json
-                $verification.Canary | Should -Be 'updated-canary'
+                if (-not ($Body | ConvertFrom-Json).CredentialVerification) { $verification.Canary | Should -Be 'updated-canary' }
                 return @{StatusCode=200;Content=(@{ErrorCode=0;VerificationState=2;DataUpdates=@{FidoDevices=@{CredentialId=$verification.CredentialId}}} | ConvertTo-Json -Depth 6 -Compress)}
             }
             if ($Uri -match '/api/authenticationmethods') { return @{StatusCode=200;Content='{}'} }

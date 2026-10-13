@@ -16,7 +16,7 @@ Describe 'GitHub secret validation and atomicity boundaries' {
         $result.Success | Should -BeTrue
         $result.Atomic | Should -BeFalse
         $result.SecretNames -join ',' | Should -Be 'PASSKEY_PRIVATE_CREDENTIAL_ID,PASSKEY_PRIVATE_USER_HANDLE,PASSKEY_PRIVATE_USER_PRINCIPAL_NAME,PASSKEY_PRIVATE_KEY'
-        Should -Invoke Invoke-GitHubPasskeyCli -Times 6 -Exactly
+        Should -Invoke Invoke-GitHubPasskeyCli -Times 5 -Exactly
         Should -Invoke Invoke-GitHubPasskeyCli -Times 1 -Exactly -ParameterFilter { $Arguments[0] -eq 'secret' -and $Arguments[2] -eq 'PASSKEY_PRIVATE_KEY' -and $InputText -ceq $fixture.privateKey -and $Arguments -notcontains $fixture.privateKey }
     }
     It 'accepts the registration PSCustomObject schema' {
@@ -117,16 +117,30 @@ Describe 'Registration dry-run and trust boundaries' {
     }
 }
 
-Describe 'Registration success must bind the new credential' {
+Describe 'Registration finalization is separate from credential replication' {
     BeforeAll {
         . $registration -TAP (ConvertTo-SecureString 'synthetic-test-only' -AsPlainText -Force) -UserPrincipalName 'fixture@example.invalid' -TenantId '11111111-1111-1111-1111-111111111111' -Repository 'owner/repo' -WhatIf
     }
     BeforeEach { $response = @{ VerificationState = 2; ErrorCode = 0; DataUpdates = @{ FidoDevices = @{ CredentialId = 'AQIDBA' } } } }
-    It 'accepts successful bound verification' { { Assert-EntraRegistrationVerified 200 $response 'AQIDBA' } | Should -Not -Throw }
-    It 'rejects HTTP errors even with success body' { { Assert-EntraRegistrationVerified 400 $response 'AQIDBA' } | Should -Throw }
-    It 'rejects nonzero protocol error even with success state' { $response.ErrorCode = 1; { Assert-EntraRegistrationVerified 200 $response 'AQIDBA' } | Should -Throw }
-    It 'rejects mismatched credential' { { Assert-EntraRegistrationVerified 200 $response 'BQYHCA' } | Should -Throw }
-    It 'rejects missing credential binding' { $response.DataUpdates = @{}; { Assert-EntraRegistrationVerified 200 $response 'AQIDBA' } | Should -Throw }
-    It 'rejects ambiguous multi-credential binding' { $response.DataUpdates.FidoDevices = @(@{CredentialId='AQIDBA'},@{CredentialId='BQYHCA'}); { Assert-EntraRegistrationVerified 200 $response 'AQIDBA' } | Should -Throw }
-    It 'rejects pending verification' { $response.VerificationState=1; { Assert-EntraRegistrationVerified 200 $response 'AQIDBA' } | Should -Throw }
+    It 'accepts finalization with an opaque service method ID' { { Assert-EntraRegistrationFinalized 200 $response } | Should -Not -Throw }
+    It 'rejects HTTP errors even with success body' { { Assert-EntraRegistrationFinalized 400 $response } | Should -Throw }
+    It 'rejects nonzero protocol error even with success state' { $response.ErrorCode = 1; { Assert-EntraRegistrationFinalized 200 $response } | Should -Throw }
+    It 'rejects pending finalization' { $response.VerificationState=1; { Assert-EntraRegistrationFinalized 200 $response } | Should -Throw }
+    It 'probes the raw credential ID without resubmitting attestation' {
+        Mock Invoke-EntraRegistrationWebRequest {
+            $outer=$Body | ConvertFrom-Json; $data=$outer.VerificationData | ConvertFrom-Json
+            $outer.CredentialVerification | Should -BeTrue
+            $outer.Type | Should -Be 18
+            @($data.PSObject.Properties.Name) -join ',' | Should -Be CredentialId
+            $data.CredentialId | Should -Be 'AQIDBA'
+            @{StatusCode=200;Content='{"VerificationState":2,"ErrorCode":0}'}
+        }
+        $ctx=New-EntraRegistrationContext
+        (Confirm-EntraRegistrationCredential -Context $ctx -CredentialId 'AQIDBA').CredentialId | Should -Be AQIDBA
+    }
+    It 'bounds polling for an unreplicated or wrong credential' {
+        Mock Invoke-EntraRegistrationWebRequest { @{StatusCode=200;Content='{"VerificationState":1,"ErrorCode":0}'} }
+        { Confirm-EntraRegistrationCredential -Context (New-EntraRegistrationContext) -CredentialId 'BQYHCA' -AttemptCount 2 -RetryDelaySeconds 0 } | Should -Throw '*unconfirmed*'
+        Should -Invoke Invoke-EntraRegistrationWebRequest -Times 2 -Exactly
+    }
 }

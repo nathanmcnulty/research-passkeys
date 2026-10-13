@@ -32,6 +32,13 @@ public static class FakeGitHubCli
         }
 
         string input = Console.In.ReadToEnd();
+        if (mode.StartsWith("http-"))
+        {
+            string status = mode.Substring(5);
+            Console.Out.Write("HTTP/2.0 " + status + " Fixture\r\nSYNTHETIC-HEADER: do-not-leak\r\n\r\n");
+            Console.Error.Write("SYNTHETIC-SECRET-ERROR");
+            return 1;
+        }
         if (mode == "success")
         {
             if (input != "SYNTHETIC-INPUT") return 7;
@@ -79,6 +86,7 @@ public static class FakeGitHubCli
         if (String.IsNullOrEmpty(log)) return 96;
         // Only the public command-line tail is recorded. Stdin is deliberately discarded.
         File.AppendAllText(log, String.Join(" ", args) + "\n");
+        if (args.Length > 0 && args[0] == "api") Console.Out.Write("HTTP/2.0 200 OK\r\n\r\n");
         return 0;
     }
 }

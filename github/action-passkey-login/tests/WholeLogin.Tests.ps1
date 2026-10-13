@@ -1,4 +1,21 @@
 # Synthetic transcripts only. Every HTTP/signing boundary is mocked.
+Describe 'Action workflow command masking' {
+    BeforeAll {
+        $yaml=Get-Content (Join-Path $PSScriptRoot '../action.yml') -Raw
+        $run=($yaml -split '      run: \|')[-1]
+        $code=($run -split "`n" | ForEach-Object {$_ -replace '^        ',''}) -join "`n"
+        $tokens=$null;$errors=$null
+        $ast=[Management.Automation.Language.Parser]::ParseInput($code,[ref]$tokens,[ref]$errors)
+        $maskFunction=$ast.FindAll({param($node) $node -is [Management.Automation.Language.FunctionDefinitionAst] -and $node.Name -eq 'Add-ActionMask'},$true)[0]
+        . ([scriptblock]::Create($maskFunction.Extent.Text))
+    }
+    It 'emits multiline secrets as one escaped workflow command without raw continuation lines' {
+        $output=@(Add-ActionMask -Value "SYNTHETIC`nPRIVATE%`rKEY")
+        $output.Count | Should -Be 1
+        $output[0] | Should -BeExactly '::add-mask::SYNTHETIC%0APRIVATE%25%0DKEY'
+        $output[0] | Should -Not -Match '[\r\n]'
+    }
+}
 BeforeDiscovery {
     $cases=@(@{Mode='standalone'})
     $canonicalRoot=[IO.Path]::GetFullPath((Join-Path $PSScriptRoot '../../..'))

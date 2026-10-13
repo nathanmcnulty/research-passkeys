@@ -2,7 +2,7 @@ function Start-EntraPasskeyLogin {
     [CmdletBinding()]
     param([Parameter(Mandatory)][hashtable]$Context)
     $response=Invoke-EntraLoginWebRequest -Context $Context -Uri $Context.AuthUrl
-    $state=Read-EntraLoginPage -Response $response -RequireConfig
+    $state=Read-EntraLoginPage -Response $response -RequireConfig -AllowNoSession
     if (-not $state.oGetCredTypeResult.Credentials.HasFido -or [string]::IsNullOrWhiteSpace($state.sFidoChallenge)) { throw 'FIDO2 authentication is unavailable.' }
     $Context.InitialState=$state
 }

@@ -6,7 +6,7 @@ function Export-PasskeyToGitHubSecret {
     if (-not $PSCmdlet.ShouldProcess("github.com/$Repository", 'Replace four Actions secrets (metadata first, private key last; no rollback)')) { return }
     Write-GitHubPasskeyExportWarning
     try { Test-GitHubPasskeyDestination $Repository }
-    catch { $PSCmdlet.ThrowTerminatingError((New-PasskeyOperationError -Stage GitHubPreflight)) }
+    catch { $PSCmdlet.ThrowTerminatingError((New-PasskeyOperationError -Stage GitHubPreflight -CliFailure $_.TargetObject)) }
     Invoke-GitHubPasskeySecretExport -Values $values -Repository $Repository
 }
 
@@ -25,7 +25,7 @@ function Invoke-GitHubPasskeySecretExport {
             $written.Add($name)
         } catch {
             $PSCmdlet.ThrowTerminatingError((New-PasskeyOperationError -Stage GitHubExport -EnrollmentStatus $EnrollmentStatus `
-                -ExportStatus Incomplete -ConfirmedWrites @($written) -FailedOrUnknownSecret $name))
+                -ExportStatus Incomplete -ConfirmedWrites @($written) -FailedOrUnknownSecret $name -CliFailure $_.TargetObject))
         }
     }
     [pscustomobject]@{ Repository = $Repository; Success = $true; SecretNames = @($written); Atomic = $false
