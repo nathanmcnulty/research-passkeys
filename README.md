@@ -35,6 +35,13 @@ This repo is meant to be the place where shared contracts, reusable helpers, tem
 - `samples/`: end-to-end scenarios and walkthroughs
 - `scripts/`: packaging, deployment, and validation automation
 
+## PowerShell source and distributions
+
+The Entra software/Key Vault commands and GitHub adapters are maintained in
+[`powershell/src`](powershell/src). One deterministic build produces readable,
+self-contained scripts at their public paths and the `Passkey` module.
+See the [usage, build and distribution guide](powershell/BUILD.md).
+
 ## Current starter assets
 
 - `powershell\samples\entra\device-code-bootstrap`: historical, unsupported authentication sample; do not run it for current testing
@@ -48,7 +55,7 @@ This repo is meant to be the place where shared contracts, reusable helpers, tem
 
 ## Source material being consolidated
 
-- `nathanmcnulty\Entra\passkeys\keyvault`: current PowerShell reference implementation
+- `nathanmcnulty\Entra\passkeys`: generated standalone distributions from the maintained source here
 - `key-vault-passkey-provider`: source for relevant browser-extension and Windows provider details that should be selectively absorbed into this repo
 
 ## First milestone
