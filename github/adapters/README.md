@@ -36,6 +36,10 @@ Pause or disable consumers yourself before confirming: the command does not paus
 Four writes are non-atomic, metadata first and private key last. No rollback is available.
 A failed export reports confirmed names and the failed or uncertain current name. Resume
 consumers only after a complete verified export. `Success` is returned only after all four writes.
+The combined TAP command clears its in-memory private key on failure and cannot resume that
+credential. Inspect the Entra method before starting a fresh registration, replace all four
+secrets together, and remove an unusable orphan only after confirming which method it is.
+The separate export command can retry a credential that the caller has retained securely.
 
 Failures expose a safe `TargetObject` with `Code`, `Stage`, `EnrollmentStatus`, `ExportStatus`,
 `ConfirmedWrites` and `FailedOrUnknownSecret`. Authorization-continuation failures also expose
