@@ -35,6 +35,12 @@ case "$PASSKEY_TEST_CLI_MODE" in
         printf 'SYNTHETIC-STDERR' >&2
         exit 0 ;;
     failure) cat >/dev/null; printf 'SYNTHETIC-STDERR' >&2; exit 9 ;;
+    http-[1-5][0-9][0-9])
+        cat >/dev/null
+        status=${PASSKEY_TEST_CLI_MODE#http-}
+        printf 'HTTP/2.0 %s Fixture\r\nSYNTHETIC-HEADER: do-not-leak\r\n\r\n' "$status"
+        printf 'SYNTHETIC-SECRET-ERROR' >&2
+        exit 1 ;;
     inherited-pipes)
         cat >/dev/null
         # A reset/per-stage timeout must take measurably longer than the original deadline.
@@ -49,7 +55,11 @@ case "$PASSKEY_TEST_CLI_MODE" in
         # Child identity and parent completion, immediately before normal parent exit.
         printf '%s\n\n%s\n' "$child" "$$" > "$PASSKEY_TEST_CHILD_PID" || { kill "$child"; wait "$child"; exit 94; }
         exit 0 ;;
-    record|'') cat >/dev/null; printf '%s\n' "$*" >> "$PASSKEY_TEST_CALLS"; exit 0 ;;
+    record|'')
+        cat >/dev/null
+        printf '%s\n' "$*" >> "$PASSKEY_TEST_CALLS"
+        [ "$1" != api ] || printf 'HTTP/2.0 200 OK\r\n\r\n'
+        exit 0 ;;
     *) exit 97 ;;
 esac
 '@
