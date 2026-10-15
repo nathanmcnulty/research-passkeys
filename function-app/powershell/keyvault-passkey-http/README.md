@@ -198,16 +198,11 @@ Captured registration JSON is AES-256-GCM encrypted in Blob Storage with a 24-ho
 
 ## Hosted runtime baseline
 
-This isolated Function experiment selects PowerShell 7.6 / .NET 10 LTS on its
-existing Flex Consumption (`FC1`) plan. It does not change hosting topology,
-identity, authorization gates or module sources. Microsoft documents
-[PowerShell 7.6 Functions support](https://learn.microsoft.com/en-us/azure/azure-functions/functions-reference-powershell#powershell-versions);
-Linux Consumption is not supported and is not selected by this template.
+The Function uses PowerShell 7.6 / .NET 10 LTS on a Flex Consumption (`FC1`)
+plan. Microsoft documents [PowerShell 7.6 Functions support](https://learn.microsoft.com/en-us/azure/azure-functions/functions-reference-powershell#powershell-versions).
 
 Offline template and synthetic tests do not establish a working deployed
-service, successful authentication, or credential safety in a live tenant. A
-runtime configuration update restarts the worker. Before any authorized live
-upgrade, inspect the exact environment and active jobs, preserve the private
-endpoint/code-push preflight, and verify worker startup, exact module imports
-and synthetic HTTP authorization behavior. Do not run live login, credential
-registration/export, Key Vault writes or deployment to validate this source PR.
+service, successful authentication, or credential safety in a live tenant.
+Authorized deployments must preserve the private endpoint/code-push preflight.
+Do not run live login, credential registration/export, Key Vault writes or
+deployment solely to validate source changes.
