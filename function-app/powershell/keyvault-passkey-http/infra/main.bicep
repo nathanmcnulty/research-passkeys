@@ -69,9 +69,9 @@ param functionAppRuntime string = 'powerShell'
 
 @description('PowerShell runtime version used by the Function App.')
 @allowed([
-  '7.4'
+  '7.6'
 ])
-param functionAppRuntimeVersion string = '7.4'
+param functionAppRuntimeVersion string = '7.6'
 
 @description('Maximum scale-out instance count for the Function App.')
 @minValue(40)

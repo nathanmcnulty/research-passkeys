@@ -195,3 +195,19 @@ For an infrastructure-only deployment from this repo, use:
 The deployment creates the storage account, `PasskeyCredentials` table, queues/blob container support, Key Vault, managed identity, audit diagnostics, and required data-plane RBAC assignments. The Function and an optional development principal receive a custom Key Vault role limited to key read/create/delete/sign/verify and secret read/write/delete. To grant the signed-in developer direct data-plane access in a development deployment, add `-GrantCurrentUserDevelopmentAccess`. Production deployments reject direct developer assignments and restrict Storage and Key Vault to the Function integration subnet; select them with `-DeploymentProfile production`.
 
 Captured registration JSON is AES-256-GCM encrypted in Blob Storage with a 24-hour CEK stored in Key Vault. Password and user agent are retained together in `pklogin-{recordId}` until explicitly replaced or deleted. Add `-EnableDevelopmentSecretExport` only to a development deployment to enable the no-store export routes; the deployment helper rejects this switch in production.
+
+## Hosted runtime baseline
+
+This isolated Function experiment selects PowerShell 7.6 / .NET 10 LTS on its
+existing Flex Consumption (`FC1`) plan. It does not change hosting topology,
+identity, authorization gates or module sources. Microsoft documents
+[PowerShell 7.6 Functions support](https://learn.microsoft.com/en-us/azure/azure-functions/functions-reference-powershell#powershell-versions);
+Linux Consumption is not supported and is not selected by this template.
+
+Offline template and synthetic tests do not establish a working deployed
+service, successful authentication, or credential safety in a live tenant. A
+runtime configuration update restarts the worker. Before any authorized live
+upgrade, inspect the exact environment and active jobs, preserve the private
+endpoint/code-push preflight, and verify worker startup, exact module imports
+and synthetic HTTP authorization behavior. Do not run live login, credential
+registration/export, Key Vault writes or deployment to validate this source PR.
