@@ -4,7 +4,9 @@ function Register-EntraSoftwarePasskeyViaTap {
     .DESCRIPTION
     Unattended software implementation, not a FIDO-certified authenticator. Packed uses
     a synthetic self-signed batch certificate; UP/UV claims do not prove authenticator
-    presence, verification or hardware assurance. WhatIf causes no I/O. Existing files are never overwritten.
+    presence, verification or hardware assurance. The private credential is durably written
+    before submission and retained for reconciliation after uncertain enrollment. WhatIf causes
+    no I/O. Existing files are never overwritten.
     #>
     [CmdletBinding(SupportsShouldProcess, ConfirmImpact = 'High')]
     param([Parameter(Mandatory)][object]$TAP,
@@ -24,19 +26,25 @@ function Register-EntraSoftwarePasskeyViaTap {
         $stream = Open-EntraSoftwareCredentialOutput $path
         $context = New-EntraRegistrationContext
         $context = Invoke-EntraRegistrationTapAuthentication -Context $context -TAP $TAP -UserPrincipalName $UserPrincipalName -TenantId $TenantId
-        $result = Invoke-EntraSoftwareNativeRegistration -Context $context -DisplayName $DisplayName
-        $stage = 'CredentialPersistence'
-        Write-EntraSoftwareCredentialOutput -Stream $stream -Credential $result.Credential
+        $result = Invoke-EntraSoftwareNativeRegistration -Context $context -DisplayName $DisplayName `
+            -CredentialOutputStream $stream -CredentialOutputPath $path
         $saved = $true
         [pscustomobject]@{ CredentialFilePath = $path; CredentialId = $result.Credential.credentialId; Success = $true }
     } catch {
         $enrollment = if ($null -ne $result) { 'Verified' } elseif ($context -and $context.EnrollmentStatus) { $context.EnrollmentStatus } else { 'NotStarted' }
         if ($stage -ne 'CredentialPersistence' -and $context -and $context.Stage -and $context.Stage -ne 'NotStarted') { $stage = $context.Stage }
-        $PSCmdlet.ThrowTerminatingError((New-PasskeyOperationError -Stage $stage -EnrollmentStatus $enrollment -AuthorizationFailure $(if ($context) { $context.AuthorizationFailure })))
+        $hasRecovery = $context -and $context.PSObject.Properties['RecoveryOutputState'] -and
+            $context.RecoveryOutputState -in @('WriteAttempted','Durable')
+        $recovery = if ($hasRecovery) { $context.RecoveryOutputPath } else { $null }
+        $credentialId = if ($hasRecovery) { $context.RecoveryCredentialId } else { $null }
+        $PSCmdlet.ThrowTerminatingError((New-PasskeyOperationError -Stage $stage -EnrollmentStatus $enrollment `
+            -RecoveryOutputPath $recovery -CredentialId $credentialId -AuthorizationFailure $(if ($context) { $context.AuthorizationFailure })))
     }
     finally {
         if ($null -ne $stream) { $stream.Dispose() }
-        if (-not $saved -and $null -ne $stream) { [IO.File]::Delete($path) }
+        $retain = $context -and $context.PSObject.Properties['RecoveryOutputState'] -and
+            $context.RecoveryOutputState -in @('WriteAttempted','Durable')
+        if (-not $saved -and $null -ne $stream -and -not $retain) { [IO.File]::Delete($path) }
         if ($null -ne $result) { $result.Credential.privateKey = $null }
         Clear-EntraRegistrationContext $context
     }

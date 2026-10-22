@@ -1,10 +1,10 @@
 ﻿# Changelog
 
-## Upcoming: shared source package 0.1.0
+## Upcoming: shared source package 0.2.0
 
 The login script is generated from the reviewed `research-passkeys` source units,
 which also build a module and standalone registration tools. Source package version
-0.1.0 is independent of the historical Action release versions below; no release tags
+0.2.0 is independent of the historical Action release versions below; no release tags
 are changed. Named Action inputs/output masking remain compatible. PowerShell 7.6
 is required. Offline CI uses the hosted runner's installed PowerShell, validates major
 7/minor 6 without a patch pin or runtime download, and installs Pester 6.2.0.
@@ -16,6 +16,12 @@ The canonical registration commands use that warning instead of attestation-acce
 packed/none formats and existing wire behavior remain unchanged. Software
 UP/UV claims are not trusted authenticator evidence. Pending consent/policy states
 cannot be mistaken for completed authentication merely because an ESTS cookie exists.
+
+Native software enrollment now durably saves its private recovery credential before
+credential submission and retains it for reconciliation after uncertain or partial failure.
+The separate `Register-GitHubPasskeyViaTAP` adapter has one breaking API change: callers
+must provide `RecoveryOutputPath`. This parameter does not change the GitHub Action's
+inputs or the login-only `PasskeyLogin.ps1` interface.
 
 ## v1.1.0 - 2026-03-21
 

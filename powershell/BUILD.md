@@ -32,7 +32,7 @@ The public commands are:
 - `Register-EntraSoftwarePasskeyViaTap` / `ViaEstsAuth`: native session registration
 - `Register-EntraKeyVaultPasskey`, `ViaTap` / `ViaEstsAuth`: Key Vault native registration
 - `Initialize-EntraPasskeyKeyVault`: explicit provisioning, including permission/secret creation
-- `Register-GitHubPasskeyViaTAP`: verified enrollment then in-memory secret export
+- `Register-GitHubPasskeyViaTAP`: durable private recovery record, verified enrollment, then secret export
 - `Export-PasskeyToGitHubSecret`: separate GitHub secret transport
 - `Get-EntraEstsCookieViaTap`: secure TAP session-cookie retrieval
 - `Get-EntraPasskeyMetadata`: informational, unverified metadata and connected Graph reads
@@ -69,9 +69,12 @@ network, enrollment, file or secret writes.
   Registration pipeline configuration retains SecureString secrets, not plaintext diagnostics.
 - Software credential files are created without overwriting an existing file. Unix output is
   restricted to user read/write. On Windows, use a directory with a private inherited ACL.
-  Credential write failure after enrollment is reported as partial completion, without silent rollback.
+  Native software credentials are flushed to stable storage before credential submission and
+  retained when enrollment is confirmed or uncertain. Persistence failure stops before submission.
 - GitHub export warns callers to pause consumers themselves. The four secret writes are non-atomic, with the
-  private key written last. Do not resume consumers after a partial failure until you inspect it.
+  private key written last. Combined enrollment requires `RecoveryOutputPath`; that private file is durably
+  written before enrollment and retained on success or partial failure. Reconcile the saved credential ID
+  with My Sign-ins before another enrollment and use the file to resume export.
   Key Vault failure never falls back to a local signer. Metadata is informational and unverified.
 - TAP helper credentials no longer have embedded defaults. Its default result contains a
   SecureString cookie; `-AsPlainText` explicitly restores the raw cookie-string output.
@@ -103,6 +106,14 @@ and generated artifacts in the same PR. Version `0.1.0` is the first dual-build 
 it is independent of the Broker module and historical Action release versions. No tags or releases are changed. Later public source/build changes
 require a strictly newer three-component version compared with the Git merge base.
 Builds never increment versions or insert timestamps. Repeated unchanged builds are byte-identical.
+If the package-introduction branch has not merged and the base has no `build/VERSION`, the gate
+accepts a later deliberate version only when committed branch history first introduced exactly
+`0.1.0`, every committed version is nondecreasing, and the working version does not regress.
+A branch with no committed `0.1.0` history cannot introduce the package at a later version.
+For that unmerged history, the most recent commit that strictly increased the parsed version
+becomes the comparison baseline. Formatting-only and same-semantic version edits do not move
+that baseline: behavior included in a real version-increase commit is covered, while later
+source, build, or generated-artifact changes require another version increase.
 
 `-Check` is read-only and rejects missing, stale and extra outputs, including untracked files,
 plus orphan source/entrypoint files. Generated headers identify version and source paths.

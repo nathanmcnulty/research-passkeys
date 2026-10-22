@@ -26,8 +26,13 @@ function Open-EntraSoftwareCredentialOutput {
 }
 
 function Write-EntraSoftwareCredentialOutput {
-    param([Parameter(Mandatory)][IO.Stream]$Stream, [Parameter(Mandatory)]$Credential)
+    param([Parameter(Mandatory)][IO.FileStream]$Stream, [Parameter(Mandatory)]$Credential)
     $bytes = [Text.UTF8Encoding]::new($false).GetBytes(($Credential | ConvertTo-Json -Depth 8))
-    try { $Stream.Write($bytes, 0, $bytes.Length); $Stream.Flush() }
+    try {
+        $Stream.Write($bytes, 0, $bytes.Length)
+        # Enrollment may outlive this process. Do not submit a credential until its private
+        # recovery record has reached stable storage rather than only the OS write cache.
+        $Stream.Flush($true)
+    }
     finally { [Array]::Clear($bytes, 0, $bytes.Length) }
 }

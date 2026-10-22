@@ -23,7 +23,8 @@ attempt failed. Source: [My Sign-ins](https://mysignins.microsoft.com/security-i
 
 ```powershell
 Register-GitHubPasskeyViaTAP -TAP $tap -UserPrincipalName 'user@example.com' `
-    -Repository 'owner/repo' -DisplayName ("TokenForge " + (Get-Date -Format yyMMdd))
+    -Repository 'owner/repo' -RecoveryOutputPath './tokenforge-recovery.json' `
+    -DisplayName ("TokenForge " + (Get-Date -Format yyMMdd))
 ```
 
 `TenantId` is optional for UPN-based TAP flows. Public Microsoft OIDC metadata resolves the
@@ -36,13 +37,14 @@ Pause or disable consumers yourself before confirming: the command does not paus
 Four writes are non-atomic, metadata first and private key last. No rollback is available.
 A failed export reports confirmed names and the failed or uncertain current name. Resume
 consumers only after a complete verified export. `Success` is returned only after all four writes.
-The combined TAP command clears its in-memory private key on failure and cannot resume that
-credential. Inspect the Entra method before starting a fresh registration, replace all four
-secrets together, and remove an unusable orphan only after confirming which method it is.
-The separate export command can retry a credential that the caller has retained securely.
+The combined TAP command requires a new private `RecoveryOutputPath`, writes and durably flushes
+the exact generated credential before submission, and retains it after success or any possibly
+mutating failure. Reconcile its reported credential ID with My Sign-ins before starting another
+enrollment. The separate export command can retry that retained credential.
 
 Failures expose a safe `TargetObject` with `Code`, `Stage`, `EnrollmentStatus`, `ExportStatus`,
-`ConfirmedWrites` and `FailedOrUnknownSecret`. Authorization-continuation failures also expose
+`ConfirmedWrites` and `FailedOrUnknownSecret`. After recovery persistence begins it also exposes
+`RecoveryOutputPath` and the generated `CredentialId`. Authorization-continuation failures also expose
 `FailureCategory`, `HttpStatus`, `ServiceErrorCode`, `AadstsCode`, `ContinuationPage` and
 `MissingField` when available. Print only these safe fields if a handoff catches errors;
 GitHub CLI failures additionally expose `CliCheck`, `FailureCategory`, `HttpStatus` and

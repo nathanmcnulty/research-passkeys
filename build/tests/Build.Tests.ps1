@@ -313,7 +313,7 @@ Describe 'Deliberate source version gate' {
         { & $versionGate -RepositoryRoot $fixture -BaseRef $base } | Should -Throw '*deliberate version bump*'
     }
 
-    It 'keeps initial 0.1.0 valid across successive feature pushes against the default branch' {
+    It 'requires a bump for behavior committed after the unmerged 0.1.0 introduction' {
         $initial = New-BuildFixture (Join-Path $TestDrive 'initial-feature-pushes')
         $defaultBase = Initialize-FixtureGit $initial -WithoutVersion
         & git -C $initial branch default-base $defaultBase
@@ -323,8 +323,76 @@ Describe 'Deliberate source version gate' {
         Add-Content (Join-Path $initial 'powershell/src/public/Get-PasskeyGreeting.ps1') '# same reviewed package correction'
         & git -C $initial add .
         & git -C $initial commit --quiet -m 'Correct prerelease package tooling'
-        { & $versionGate -RepositoryRoot $initial -BaseRef default-base } | Should -Not -Throw
+        { & $versionGate -RepositoryRoot $initial -BaseRef default-base } | Should -Throw '*deliberate version bump*'
         { & $versionGate -RepositoryRoot $initial -BaseRef $beforePush } | Should -Throw '*deliberate version bump*'
+    }
+
+    It 'does not treat a same-semantic version text commit as an unmerged version bump' {
+        $initial = New-BuildFixture (Join-Path $TestDrive 'unmerged-same-version-text')
+        $defaultBase = Initialize-FixtureGit $initial -WithoutVersion
+        & git -C $initial branch default-base $defaultBase
+        & git -C $initial add .
+        & git -C $initial commit --quiet -m 'Introduce package 0.1.0'
+        Add-Content (Join-Path $initial 'powershell/src/public/Get-PasskeyGreeting.ps1') '# behavior after introduction'
+        Write-FixtureFile $initial 'build/VERSION' " 0.1.0 `n"
+        & git -C $initial add .
+        & git -C $initial commit --quiet -m 'Change behavior with same semantic version text'
+        { & $versionGate -RepositoryRoot $initial -BaseRef default-base } | Should -Throw '*deliberate version bump*'
+    }
+
+    It 'accepts a deliberate later version when unmerged history committed the 0.1.0 introduction' {
+        $initial = New-BuildFixture (Join-Path $TestDrive 'unmerged-deliberate-bump')
+        $defaultBase = Initialize-FixtureGit $initial -WithoutVersion
+        & git -C $initial branch default-base $defaultBase
+        & git -C $initial add .
+        & git -C $initial commit --quiet -m 'Introduce package 0.1.0'
+        Add-Content (Join-Path $initial 'powershell/src/public/Get-PasskeyGreeting.ps1') '# breaking correction'
+        Write-FixtureFile $initial 'build/VERSION' "0.2.0`n"
+        { & $versionGate -RepositoryRoot $initial -BaseRef default-base } | Should -Not -Throw
+    }
+
+    It 'accepts an unchanged worktree after the unmerged branch commits its later version and behavior' {
+        $initial = New-BuildFixture (Join-Path $TestDrive 'unmerged-committed-bump')
+        $defaultBase = Initialize-FixtureGit $initial -WithoutVersion
+        & git -C $initial branch default-base $defaultBase
+        & git -C $initial add .
+        & git -C $initial commit --quiet -m 'Introduce package 0.1.0'
+        Add-Content (Join-Path $initial 'powershell/src/public/Get-PasskeyGreeting.ps1') '# breaking correction'
+        Write-FixtureFile $initial 'build/VERSION' "0.2.0`n"
+        & git -C $initial add .
+        & git -C $initial commit --quiet -m 'Bump package 0.2.0 with correction'
+        { & $versionGate -RepositoryRoot $initial -BaseRef default-base } | Should -Not -Throw
+    }
+
+    It 'rejects a committed initial version above 0.1.0 when the base has no package' {
+        $initial = New-BuildFixture (Join-Path $TestDrive 'invalid-initial-history')
+        $defaultBase = Initialize-FixtureGit $initial -WithoutVersion
+        & git -C $initial branch default-base $defaultBase
+        Write-FixtureFile $initial 'build/VERSION' "0.2.0`n"
+        & git -C $initial add .
+        & git -C $initial commit --quiet -m 'Incorrectly introduce package 0.2.0'
+        { & $versionGate -RepositoryRoot $initial -BaseRef default-base } | Should -Throw '*first committed source version*'
+    }
+
+    It 'rejects current and historical decreases on an unmerged introduction branch' -ForEach @('Current', 'History') {
+        $initial = New-BuildFixture (Join-Path $TestDrive ('unmerged-decrease-' + $_))
+        $defaultBase = Initialize-FixtureGit $initial -WithoutVersion
+        & git -C $initial branch default-base $defaultBase
+        & git -C $initial add .
+        & git -C $initial commit --quiet -m 'Introduce package 0.1.0'
+        Write-FixtureFile $initial 'build/VERSION' "0.2.0`n"
+        & git -C $initial add build/VERSION
+        & git -C $initial commit --quiet -m 'Bump package 0.2.0'
+        if ($_ -eq 'History') {
+            Write-FixtureFile $initial 'build/VERSION' "0.1.1`n"
+            & git -C $initial add build/VERSION
+            & git -C $initial commit --quiet -m 'Invalid historical decrease'
+            Write-FixtureFile $initial 'build/VERSION' "0.3.0`n"
+            { & $versionGate -RepositoryRoot $initial -BaseRef default-base } | Should -Throw '*history cannot decrease*'
+        } else {
+            Write-FixtureFile $initial 'build/VERSION' "0.1.1`n"
+            { & $versionGate -RepositoryRoot $initial -BaseRef default-base } | Should -Throw '*Source version cannot decrease*'
+        }
     }
 
     It 'keeps one future deliberate bump valid across successive feature corrections' {

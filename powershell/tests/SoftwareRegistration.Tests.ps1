@@ -12,6 +12,7 @@ BeforeAll {
     foreach ($source in $script:Sources) { . "$script:Repo/powershell/src/$source" }
     $script:EncodeImplementation = ${function:New-CBOREncoded}
     $script:OpenOutputImplementation = ${function:Open-EntraSoftwareCredentialOutput}
+    $script:NativeRegistrationImplementation = ${function:Invoke-EntraSoftwareNativeRegistration}
     $script:Tenant = '11111111-1111-4111-8111-111111111111'
     $script:Client = '19db86c3-b2b9-44cc-b339-36da233a3be2'
     $script:Tap = ConvertTo-SecureString 'synthetic-tap-only' -AsPlainText -Force
@@ -159,7 +160,7 @@ Describe 'Software public WhatIf and persistence' {
     It 'performs no I/O for TAP ESTS and GitHub WhatIf' {
         Register-EntraSoftwarePasskeyViaTap -TAP $script:Tap -UserPrincipalName 'test@example.test' -TenantId $script:Tenant -WhatIf
         Register-EntraSoftwarePasskeyViaEstsAuth -ESTSAuthCookie $script:Tap -WhatIf
-        Register-GitHubPasskeyViaTAP -TAP $script:Tap -UserPrincipalName 'test@example.test' -TenantId $script:Tenant -Repository 'owner/repo' -WhatIf
+        Register-GitHubPasskeyViaTAP -TAP $script:Tap -UserPrincipalName 'test@example.test' -TenantId $script:Tenant -Repository 'owner/repo' -RecoveryOutputPath (Join-Path $TestDrive 'preview.json') -WhatIf
         Should -Invoke New-EntraRegistrationContext -Times 0 -Exactly
         Should -Invoke Open-EntraSoftwareCredentialOutput -Times 0 -Exactly
         Should -Invoke Invoke-EntraSoftwareNativeRegistration -Times 0 -Exactly
@@ -171,10 +172,56 @@ Describe 'Software public WhatIf and persistence' {
         { & $script:OpenOutputImplementation $file } | Should -Throw
         [IO.File]::ReadAllText($file) | Should -Be retained
     }
+    It 'stops before enrollment and retains partial evidence when durable persistence fails' {
+        $file = Join-Path $TestDrive 'partial-recovery.json'
+        $stream = & $script:OpenOutputImplementation $file
+        $context = [pscustomobject]@{ Stage = 'NotStarted'; EnrollmentStatus = 'NotStarted'; UserPrincipalName = 'test@example.test'
+            RecoveryOutputPath = $null; RecoveryCredentialId = $null; RecoveryOutputState = 'NotStarted' }
+        Mock Initialize-EntraRegistrationSession { $Context }
+        Mock Initialize-EntraRegistrationRequest { [ordered]@{ ServerChallenge = 'AQIDBA'; UserHandle = 'BQYHCA' } }
+        Mock New-SoftwarePasskeyKey { [pscustomobject]@{ PrivateKeyPem = 'PRIVATE-RECOVERY-MATERIAL' } }
+        Mock New-EntraSoftwareAttestation { [pscustomobject]@{ CredentialId = 'AQIDBA'; RelyingParty = 'login.microsoft.com' } }
+        Mock New-EntraSoftwareCredentialRecord { [ordered]@{ credentialId = 'AQIDBA'; privateKey = 'PRIVATE-RECOVERY-MATERIAL' } }
+        Mock Write-EntraSoftwareCredentialOutput {
+            $partial = [Text.Encoding]::UTF8.GetBytes('{"credentialId":"AQIDBA"')
+            $Stream.Write($partial, 0, $partial.Length)
+            $Stream.Flush($true)
+            throw 'synthetic durable write failure'
+        }
+        Mock Submit-EntraRegistration { throw 'enrollment must not start' }
+        Mock Clear-SoftwarePasskeyKey {}
+        try {
+            { & $script:NativeRegistrationImplementation -Context $context -DisplayName 'Recovery boundary' `
+                -CredentialOutputStream $stream -CredentialOutputPath $file } | Should -Throw '*write failure*'
+        } finally { $stream.Dispose() }
+        Should -Invoke Submit-EntraRegistration -Times 0 -Exactly
+        $context.Stage | Should -Be CredentialPersistence
+        $context.EnrollmentStatus | Should -Be NotStarted
+        $context.RecoveryOutputState | Should -Be WriteAttempted
+        [IO.File]::ReadAllText($file) | Should -BeExactly '{"credentialId":"AQIDBA"'
+    }
 }
 
 Describe 'GitHub whole-record and partial-write safeguards' {
     BeforeEach { Mock Test-GitHubPasskeyDestination {} }
+    It 'never deletes or changes a preexisting recovery file and stops before authentication' {
+        $path = Join-Path $TestDrive 'preexisting-recovery.json'
+        $sentinel = [byte[]](0, 255, 19, 42, 10)
+        [IO.File]::WriteAllBytes($path, $sentinel)
+        Mock Invoke-EntraRegistrationTapAuthentication { throw 'authentication must not start' }
+        Mock Invoke-EntraSoftwareNativeRegistration { throw 'enrollment must not start' }
+        Mock Invoke-GitHubPasskeySecretExport { throw 'export must not start' }
+        $caught = $null
+        try {
+            Register-GitHubPasskeyViaTAP -TAP $script:Tap -UserPrincipalName 'test@example.test' -TenantId $script:Tenant `
+                -Repository owner/repo -RecoveryOutputPath $path -Confirm:$false
+        } catch { $caught = $_ }
+        $caught.TargetObject.Stage | Should -Be OutputReservation
+        [IO.File]::ReadAllBytes($path) | Should -Be $sentinel
+        Should -Invoke Invoke-EntraRegistrationTapAuthentication -Times 0 -Exactly
+        Should -Invoke Invoke-EntraSoftwareNativeRegistration -Times 0 -Exactly
+        Should -Invoke Invoke-GitHubPasskeySecretExport -Times 0 -Exactly
+    }
     It 'keeps the four exact secret names and private key last' {
         $values = Get-GitHubPasskeySecretValues $script:Credential
         ($values.Keys -join ',') | Should -Be 'PASSKEY_PRIVATE_CREDENTIAL_ID,PASSKEY_PRIVATE_USER_HANDLE,PASSKEY_PRIVATE_USER_PRINCIPAL_NAME,PASSKEY_PRIVATE_KEY'
@@ -220,7 +267,7 @@ Describe 'GitHub whole-record and partial-write safeguards' {
         Mock Invoke-EntraRegistrationTapAuthentication { $Context }
         Mock Invoke-EntraSoftwareNativeRegistration { $Context.Stage = 'EnrollmentVerification'; $Context.EnrollmentStatus = 'Unconfirmed'; throw 'verification did not bind expected ID' }
         Mock Invoke-GitHubPasskeySecretExport { throw 'must not export' }
-        { Register-GitHubPasskeyViaTAP -TAP $script:Tap -UserPrincipalName 'test@example.test' -TenantId $script:Tenant -Repository owner/repo -Confirm:$false } | Should -Throw '*Enrollment: Unconfirmed*'
+        { Register-GitHubPasskeyViaTAP -TAP $script:Tap -UserPrincipalName 'test@example.test' -TenantId $script:Tenant -Repository owner/repo -RecoveryOutputPath (Join-Path $TestDrive 'unconfirmed.json') -Confirm:$false } | Should -Throw '*Enrollment: Unconfirmed*'
         Should -Invoke Invoke-GitHubPasskeySecretExport -Times 0 -Exactly
     }
     It 'preserves export failure as post-enrollment failure' {
@@ -228,7 +275,38 @@ Describe 'GitHub whole-record and partial-write safeguards' {
         Mock Invoke-EntraRegistrationTapAuthentication { $Context }
         Mock Invoke-EntraSoftwareNativeRegistration { [pscustomobject]@{ Credential = [ordered]@{ privateKey = 'synthetic' } } }
         Mock Invoke-GitHubPasskeySecretExport { throw 'GitHub export incomplete. Keep consumers paused. No rollback was attempted.' }
-        { Register-GitHubPasskeyViaTAP -TAP $script:Tap -UserPrincipalName 'test@example.test' -TenantId $script:Tenant -Repository owner/repo -Confirm:$false } | Should -Throw '*Enrollment completed, but export did not finish*'
+        { Register-GitHubPasskeyViaTAP -TAP $script:Tap -UserPrincipalName 'test@example.test' -TenantId $script:Tenant -Repository owner/repo -RecoveryOutputPath (Join-Path $TestDrive 'export-failure.json') -Confirm:$false } | Should -Throw '*Enrollment completed, but export did not finish*'
+    }
+    It 'retains a usable recovery record after a failed or uncertain GitHub secret write' {
+        $path = Join-Path $TestDrive 'github-partial-recovery.json'
+        $script:SecretWrites = 0
+        Mock Invoke-EntraRegistrationTapAuthentication { $Context.UserPrincipalName = 'test@example.test'; $Context }
+        Mock Invoke-EntraSoftwareNativeRegistration {
+            $credential = [ordered]@{} + $script:Credential
+            $Context.RecoveryOutputPath = $CredentialOutputPath
+            $Context.RecoveryCredentialId = $credential.credentialId
+            $Context.RecoveryOutputState = 'WriteAttempted'
+            Write-EntraSoftwareCredentialOutput -Stream $CredentialOutputStream -Credential $credential
+            $Context.RecoveryOutputState = 'Durable'; $Context.EnrollmentStatus = 'Verified'
+            [pscustomobject]@{ Credential = $credential }
+        }
+        Mock Invoke-GitHubPasskeyCli {
+            $script:SecretWrites++
+            if ($script:SecretWrites -eq 2) { throw 'raw synthetic transport detail' }
+        }
+        $caught = $null
+        try {
+            Register-GitHubPasskeyViaTAP -TAP $script:Tap -UserPrincipalName 'test@example.test' -TenantId $script:Tenant `
+                -Repository owner/repo -RecoveryOutputPath $path -Confirm:$false
+        } catch { $caught = $_ }
+        $caught.TargetObject.Stage | Should -Be GitHubExport
+        $caught.TargetObject.RecoveryOutputPath | Should -BeExactly $path
+        $caught.TargetObject.CredentialId | Should -BeExactly $script:Credential.credentialId
+        @($caught.TargetObject.ConfirmedWrites) | Should -Be @('PASSKEY_PRIVATE_CREDENTIAL_ID')
+        ($caught.TargetObject | ConvertTo-Json -Depth 5) | Should -Not -Match 'BEGIN PRIVATE|fixture@|raw synthetic'
+        $saved = Get-Content $path -Raw | ConvertFrom-Json
+        $saved.credentialId | Should -BeExactly $script:Credential.credentialId
+        $saved.privateKey | Should -Match '^-----BEGIN PRIVATE KEY-----'
     }
 }
 

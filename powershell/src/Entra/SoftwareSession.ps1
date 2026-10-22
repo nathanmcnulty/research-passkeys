@@ -137,6 +137,7 @@ function New-EntraRegistrationContext {
         ClientSessionId = [guid]::NewGuid().ToString()
         TenantId = $null; UserPrincipalName = $null; Token = $null; RefreshToken = $null; SessionCtxV2 = $null
         Stage = 'NotStarted'; EnrollmentStatus = 'NotStarted'; AuthorizationFailure = $null
+        RecoveryOutputPath = $null; RecoveryCredentialId = $null; RecoveryOutputState = 'NotStarted'
     }
 }
 

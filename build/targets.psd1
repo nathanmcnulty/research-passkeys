@@ -220,6 +220,7 @@
                 'powershell/src/Local/RegistrationKey.ps1'
                 'powershell/src/Entra/SoftwareAttestation.ps1'
                 'powershell/src/Entra/SoftwareCredential.ps1'
+                'powershell/src/Entra/SoftwareOutput.ps1'
                 'powershell/src/Entra/SoftwareNativeRegistration.ps1'
                 'powershell/src/GitHub/SecretValues.ps1'
                 'powershell/src/GitHub/Transport.ps1'

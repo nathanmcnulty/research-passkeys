@@ -101,7 +101,7 @@ Describe 'Complete native <Flow> software registration through <Surface>' -ForEa
             $parameters.PasskeyDisplayName = 'Native fixture'
         }
     }
-    It 'verifies the expected credential before persisting its matching software key' {
+    It 'durably persists the matching software key before submission and verifies its credential ID' {
         (Get-Command $command).Parameters.Keys | Should -Not -Contain 'AllowLegacySoftwareAttestation'
         $warnings = @()
         $result = & $command @parameters -WarningVariable warnings
@@ -116,10 +116,21 @@ Describe 'Complete native <Flow> software registration through <Surface>' -ForEa
         $result | ConvertTo-Json -Depth 5 | Should -Not -Match 'BEGIN PRIVATE|SYNTHETIC'
         $global:SoftwareNativeFixture.TokenRequests | Should -Be 2
     }
-    It 'cleans the output reservation after state client consent create or verification failure' -ForEach @('badstate', 'badclient', 'consent', 'createfail', 'mismatch') {
+    It 'cleans an empty reservation when failure occurs before credential generation' -ForEach @('badstate', 'badclient', 'consent') {
         $global:SoftwareNativeFixture.Mode = $_
         { & $command @parameters } | Should -Throw
         Test-Path $outputPath | Should -BeFalse
+    }
+    It 'retains the exact durable credential when creation or verification is uncertain' -ForEach @('createfail', 'mismatch') {
+        $global:SoftwareNativeFixture.Mode = $_
+        $caught = $null
+        try { & $command @parameters } catch { $caught = $_ }
+        Test-Path $outputPath | Should -BeTrue
+        $saved = Get-Content $outputPath -Raw | ConvertFrom-Json
+        $saved.privateKey | Should -Match '^-----BEGIN PRIVATE KEY-----'
+        $saved.credentialId | Should -BeExactly $caught.TargetObject.CredentialId
+        $caught.TargetObject.RecoveryOutputPath | Should -BeExactly $outputPath
+        ($caught.TargetObject | ConvertTo-Json -Depth 5) | Should -Not -Match 'BEGIN PRIVATE|fixture@'
     }
     It 'performs no auth network key generation or output writes under WhatIf' {
         & $command @parameters -WhatIf

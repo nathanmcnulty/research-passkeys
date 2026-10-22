@@ -7,7 +7,9 @@
     Compares the working tree to the merge base of HEAD and BaseRef, including
     untracked source/build files. Documentation and tests do not require a bump.
     Versions must have exactly three numeric SemVer components. A first introduction
-    uses 0.1.0; rerunning an unchanged build never increments the version.
+    uses 0.1.0. When that introduction is still unmerged, later versions are accepted
+    only if committed branch history starts at 0.1.0 and never decreases. Rerunning an
+    unchanged build never increments the version.
 #>
 [CmdletBinding()]
 param(
@@ -39,9 +41,45 @@ $oldVersionPaths = @(& git -C $root ls-tree --name-only $base -- $versionFile 2>
 if ($LASTEXITCODE -ne 0) { throw 'Unable to inspect the base source version file.' }
 $oldExists = $oldVersionPaths -contains $versionFile
 if (-not $oldExists) {
-    if ($currentText -ne '0.1.0') { throw 'The initial source version must be 0.1.0.' }
-    Write-Host 'Initial source version 0.1.0 accepted.'
-    return
+    # A package can receive a deliberate later bump before its introducing branch merges.
+    # Prove that this is a progression from a committed 0.1.0 introduction; do not let a
+    # branch introduce an arbitrary initial version merely because the base lacks VERSION.
+    $historyCommits = @(& git -C $root rev-list --reverse --topo-order "$base..HEAD" -- $versionFile 2>$null)
+    if ($LASTEXITCODE -ne 0) { throw 'Unable to inspect unmerged source version history.' }
+    if ($historyCommits.Count -eq 0) {
+        if ($currentText -ne '0.1.0') { throw 'The initial source version must be 0.1.0.' }
+        Write-Host 'Initial source version 0.1.0 accepted.'
+        return
+    }
+    $previous = $null
+    $versionBaselineCommit = $null
+    foreach ($commit in $historyCommits) {
+        $committedPaths = @(& git -C $root ls-tree --name-only $commit -- $versionFile 2>$null)
+        if ($LASTEXITCODE -ne 0) { throw 'Unable to inspect an unmerged source version revision.' }
+        if ($committedPaths -notcontains $versionFile) {
+            throw 'Unmerged source version history cannot delete and reintroduce build/VERSION.'
+        }
+        $committedLines = @(& git -C $root show "${commit}:$versionFile" 2>$null)
+        if ($LASTEXITCODE -ne 0) { throw 'Unable to read an unmerged source version revision.' }
+        $committedText = ($committedLines -join "`n").Trim()
+        $committed = ConvertTo-SourceVersion $committedText "$commit`:$versionFile"
+        if ($null -eq $previous) {
+            if ($committedText -ne '0.1.0') { throw 'The first committed source version must be 0.1.0.' }
+            $versionBaselineCommit = [string]$commit
+        } elseif ($committed -lt $previous) {
+            throw "Unmerged source version history cannot decrease: $previous -> $committed."
+        } elseif ($committed -gt $previous) {
+            $versionBaselineCommit = [string]$commit
+        }
+        $previous = $committed
+    }
+    if ($current -lt $previous) { throw "Source version cannot decrease: $previous -> $current." }
+    # Compare behavior after the most recent commit that strictly increased the parsed
+    # version. Same-version text edits cannot move the baseline past behavior changes.
+    # A committed bump covers changes in that commit; later behavior needs the next bump
+    # even while the package-introduction branch remains unmerged.
+    $base = $versionBaselineCommit
+    $oldExists = $true
 }
 $oldLines = @(& git -C $root show "${base}:$versionFile" 2>$null)
 if ($LASTEXITCODE -ne 0) { throw 'Unable to read the base source version file.' }

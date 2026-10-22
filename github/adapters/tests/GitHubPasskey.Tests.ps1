@@ -93,7 +93,7 @@ Describe 'Registration dry-run and trust boundaries' {
     BeforeAll {
         $text = Get-Content $registration -Raw
         # Load the COMPLETE generated artifact through its public zero-I/O WhatIf boundary.
-        . $registration -TAP (ConvertTo-SecureString 'synthetic-test-only' -AsPlainText -Force) -UserPrincipalName 'fixture@example.invalid' -TenantId '11111111-1111-1111-1111-111111111111' -Repository 'owner/repo' -WhatIf
+        . $registration -TAP (ConvertTo-SecureString 'synthetic-test-only' -AsPlainText -Force) -UserPrincipalName 'fixture@example.invalid' -TenantId '11111111-1111-1111-1111-111111111111' -Repository 'owner/repo' -RecoveryOutputPath (Join-Path $TestDrive 'preview.json') -WhatIf
     }
     It 'rejects untrusted endpoint origins' -ForEach @('http://login.microsoftonline.com/x','https://login.microsoftonline.com.evil.invalid/x','https://login.microsoftonline.com:444/x','https://user@login.microsoftonline.com/x','https://evil.invalid/x') {
         { Assert-EntraRegistrationUri $_ } | Should -Throw
@@ -101,25 +101,27 @@ Describe 'Registration dry-run and trust boundaries' {
     It 'accepts the three pinned HTTPS origins' -ForEach @('https://login.microsoftonline.com/common/login','https://login.microsoft.com/tenant/fido/create','https://mysignins.microsoft.com/api/session/authorize') {
         { Assert-EntraRegistrationUri $_ } | Should -Not -Throw
     }
-    It 'has no plaintext credential-file write or inherited console dumps' {
-        $text | Should -Not -Match 'Set-Content|Out-File|Write-Host|OutputPath'
+    It 'uses the exclusive recovery writer without inherited console dumps' {
+        $text | Should -Not -Match 'Set-Content|Out-File|Write-Host'
+        $text | Should -Match 'FileMode\]::CreateNew'
+        $text | Should -Match 'Flush\(\$true\)'
     }
     It 'WhatIf returns before gh, HTTP and key generation' {
         # Executed in a child scope. Invalid gh PATH is intentionally irrelevant for preview.
-        $output = & $registration -TAP (ConvertTo-SecureString 'synthetic-test-only' -AsPlainText -Force) -UserPrincipalName 'fixture@example.invalid' -TenantId '11111111-1111-1111-1111-111111111111' -Repository 'owner/repo' -WhatIf
+        $output = & $registration -TAP (ConvertTo-SecureString 'synthetic-test-only' -AsPlainText -Force) -UserPrincipalName 'fixture@example.invalid' -TenantId '11111111-1111-1111-1111-111111111111' -Repository 'owner/repo' -RecoveryOutputPath (Join-Path $TestDrive 'preview2.json') -WhatIf
         $output | Should -BeNullOrEmpty
     }
     It 'previews without an acknowledgement-only parameter or warning' {
         (Get-Command $registration).Parameters.Keys | Should -Not -Contain 'AllowLegacySoftwareAttestation'
         $warnings = @()
-        { & $registration -TAP (ConvertTo-SecureString 'synthetic-test-only' -AsPlainText -Force) -UserPrincipalName 'fixture@example.invalid' -TenantId '11111111-1111-1111-1111-111111111111' -Repository 'owner/repo' -WhatIf -WarningVariable warnings } | Should -Not -Throw
+        { & $registration -TAP (ConvertTo-SecureString 'synthetic-test-only' -AsPlainText -Force) -UserPrincipalName 'fixture@example.invalid' -TenantId '11111111-1111-1111-1111-111111111111' -Repository 'owner/repo' -RecoveryOutputPath (Join-Path $TestDrive 'preview3.json') -WhatIf -WarningVariable warnings } | Should -Not -Throw
         @($warnings).Count | Should -Be 0
     }
 }
 
 Describe 'Registration finalization is separate from credential replication' {
     BeforeAll {
-        . $registration -TAP (ConvertTo-SecureString 'synthetic-test-only' -AsPlainText -Force) -UserPrincipalName 'fixture@example.invalid' -TenantId '11111111-1111-1111-1111-111111111111' -Repository 'owner/repo' -WhatIf
+        . $registration -TAP (ConvertTo-SecureString 'synthetic-test-only' -AsPlainText -Force) -UserPrincipalName 'fixture@example.invalid' -TenantId '11111111-1111-1111-1111-111111111111' -Repository 'owner/repo' -RecoveryOutputPath (Join-Path $TestDrive 'preview4.json') -WhatIf
     }
     BeforeEach { $response = @{ VerificationState = 2; ErrorCode = 0; DataUpdates = @{ FidoDevices = @{ CredentialId = 'AQIDBA' } } } }
     It 'accepts finalization with an opaque service method ID' { { Assert-EntraRegistrationFinalized 200 $response } | Should -Not -Throw }

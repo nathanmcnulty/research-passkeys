@@ -124,13 +124,16 @@ Describe 'Complete TAP registration transcript through <Surface>' -ForEach @(@{ 
         } @mockScope
         Mock Invoke-RestMethod { throw 'All native registration requests must use the bounded raw transport.' } @mockScope
         Mock Start-Sleep {} @mockScope
-        $params = @{ TAP = (ConvertTo-SecureString 'SYNTHETIC-TAP' -AsPlainText -Force); UserPrincipalName = 'fixture@example.invalid'; TenantId = '11111111-1111-1111-1111-111111111111'; Repository = 'fixture-owner/fixture-repo'; Confirm = $false }
+        $recoveryPath = Join-Path $TestDrive "github-$Surface-$([guid]::NewGuid().ToString('N')).json"
+        $params = @{ TAP = (ConvertTo-SecureString 'SYNTHETIC-TAP' -AsPlainText -Force); UserPrincipalName = 'fixture@example.invalid'; TenantId = '11111111-1111-1111-1111-111111111111'; Repository = 'fixture-owner/fixture-repo'; RecoveryOutputPath = $recoveryPath; Confirm = $false }
     }
     It 'completes the synthetic ceremony and writes exactly four names without credentials in outputs' {
         $warnings = @()
         $result = & $registrationCommand @params -WarningVariable warnings
         @($warnings).Count | Should -Be 2
         $result.Success | Should -BeTrue
+        $result.RecoveryOutputPath | Should -BeExactly $recoveryPath
+        (Get-Content $recoveryPath -Raw | ConvertFrom-Json).credentialId | Should -BeExactly $result.CredentialId
         $result | ConvertTo-Json -Depth 5 | Should -Not -Match 'SYNTHETIC|BEGIN PRIVATE|fixture@'
         $calls = Get-Content $ghCalls
         @($calls | Where-Object { $_ -match '^secret set ' }).Count | Should -Be 4
@@ -229,6 +232,12 @@ Describe 'Complete TAP registration transcript through <Surface>' -ForEach @(@{ 
         $calls.Count | Should -Be 1
         $calls[0] | Should -Be 'api --hostname github.com --include --silent repos/fixture-owner/fixture-repo/actions/secrets?per_page=1'
         @($calls | Where-Object { $_ -match '^secret set ' }).Count | Should -Be 0
+        if ($global:PasskeyOfflineFixture.Mode -in @('createfail','mismatch','protocolerror','httperror')) {
+            Test-Path $recoveryPath | Should -BeTrue
+            $saved = Get-Content $recoveryPath -Raw | ConvertFrom-Json
+            $saved.credentialId | Should -BeExactly $caught.TargetObject.CredentialId
+            $caught.TargetObject.RecoveryOutputPath | Should -BeExactly $recoveryPath
+        } else { Test-Path $recoveryPath | Should -BeFalse }
         if ($global:PasskeyOfflineFixture.Mode -in @('protocolerror','httperror')) { $global:PasskeyOfflineFixture.ProbeRequests | Should -Be 0 }
         if ($global:PasskeyOfflineFixture.Mode -eq 'mismatch') { $global:PasskeyOfflineFixture.ProbeRequests | Should -Be 5 }
         if ($_ -in @('badstate','consent')) { $global:PasskeyOfflineFixture.TokenRequests | Should -Be 0 }

@@ -65,6 +65,8 @@ function New-PasskeyOperationError {
         [ValidateSet('NotStarted','Incomplete','Complete')][string]$ExportStatus = 'NotStarted',
         [string[]]$ConfirmedWrites = @(),
         [ValidateSet('PASSKEY_PRIVATE_CREDENTIAL_ID','PASSKEY_PRIVATE_USER_HANDLE','PASSKEY_PRIVATE_USER_PRINCIPAL_NAME','PASSKEY_PRIVATE_KEY')][string]$FailedOrUnknownSecret,
+        [AllowNull()][string]$RecoveryOutputPath,
+        [AllowNull()][string]$CredentialId,
         [AllowNull()][object]$AuthorizationFailure,
         [AllowNull()][object]$CliFailure
     )
@@ -73,6 +75,12 @@ function New-PasskeyOperationError {
     $code = "Passkey$($Stage)Failed"
     $status = [pscustomobject]@{ Code = $code; Stage = $Stage; EnrollmentStatus = $EnrollmentStatus; ExportStatus = $ExportStatus
         ConfirmedWrites = $confirmed; FailedOrUnknownSecret = $FailedOrUnknownSecret }
+    if (-not [string]::IsNullOrWhiteSpace($RecoveryOutputPath)) {
+        $status | Add-Member -NotePropertyName RecoveryOutputPath -NotePropertyValue ([IO.Path]::GetFullPath($RecoveryOutputPath))
+    }
+    if ($CredentialId -cmatch '^[A-Za-z0-9_-]{2,1024}$') {
+        $status | Add-Member -NotePropertyName CredentialId -NotePropertyValue $CredentialId
+    }
     # Only locally allowlisted categories and numeric service identifiers leave the operation.
     if ($AuthorizationFailure) {
         $categories = @('TransportFailure','HttpFailure','RedirectShape','UntrustedRedirect','OAuthRejected','CallbackBinding','ConfigMissing','ConfigInvalid','ServiceRejected','SignInReturned','UnsupportedContinuation','FormMissing','FormAmbiguous','FormMethod','FormAction','FormControls','InputMissing','InputAmbiguous','DuplicateField','HiddenFieldsMissing','KmsiFieldsMissing','RedirectLimit')
