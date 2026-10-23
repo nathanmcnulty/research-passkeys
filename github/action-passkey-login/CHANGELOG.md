@@ -1,5 +1,12 @@
 ﻿# Changelog
 
+## Source package 0.3.1
+
+- Refuse ambiguous application display-name matches before selecting or modifying Entra trust.
+- Report XDR portal bootstrap separately from authentication; require one successful form-exchange response, and never infer authenticated access from arbitrary cookies.
+- Add credential-free regression coverage and document a proposed, unimplemented protected live-validation path.
+
+
 ## Upcoming: shared source package 0.2.0
 
 The login script is generated from the reviewed `research-passkeys` source units,
