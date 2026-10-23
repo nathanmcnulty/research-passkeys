@@ -1,0 +1,101 @@
+name: Passkey CI
+
+on:
+  pull_request:
+  push:
+  merge_group:
+    types: [checks_requested]
+
+permissions:
+  contents: read
+
+# Opt out before the hosted runner starts any PowerShell process.
+env:
+  POWERSHELL_TELEMETRY_OPTOUT: '1'
+  DOTNET_CLI_TELEMETRY_OPTOUT: '1'
+
+jobs:
+  build-and-test:
+    name: Build and offline tests
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    defaults:
+      run:
+        shell: pwsh
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+      - name: Verify installed PowerShell 7.6
+        run: |
+          Write-Host "Installed PowerShell: $($PSVersionTable.PSVersion) ($([Environment]::ProcessPath))"
+          if ($PSVersionTable.PSVersion.Major -ne 7 -or $PSVersionTable.PSVersion.Minor -ne 6) {
+            throw "Expected installed PowerShell 7.6, got $($PSVersionTable.PSVersion)."
+          }
+          if ([Microsoft.PowerShell.Telemetry.ApplicationInsightsTelemetry]::CanSendTelemetry) {
+            throw 'Telemetry must be disabled before PowerShell starts.'
+          }
+      - name: Check deterministic artifacts
+        run: ./build/build.ps1 -Check
+      - name: Check deliberate source version
+        env:
+          BASE_SHA: ${{ github.event.pull_request.base.sha || github.event.merge_group.base_sha || github.event.before }}
+          DEFAULT_BRANCH: ${{ github.event.repository.default_branch }}
+          EVENT_NAME: ${{ github.event_name }}
+          REF_NAME: ${{ github.ref_name }}
+        run: |
+          $baseRef = $env:BASE_SHA
+          # Feature pushes belong to one reviewed package change, as do its PR commits.
+          if ($env:EVENT_NAME -eq 'push' -and $env:REF_NAME -ne $env:DEFAULT_BRANCH) {
+            $baseRef = $null
+          }
+          if ([string]::IsNullOrWhiteSpace($baseRef) -or $baseRef -match '^0+$') {
+            $defaultRef = "refs/remotes/origin/$env:DEFAULT_BRANCH"
+            $defaultCommit = @(git rev-parse --verify "$defaultRef^{commit}" 2>$null)
+            if ($LASTEXITCODE -eq 0 -and $defaultCommit.Count -eq 1) {
+              $baseRef = $defaultRef
+            } else {
+              # A brand-new repository may not have a default branch ref yet.
+              $baseRef = @(git rev-list --max-parents=0 HEAD)[0]
+              if ($LASTEXITCODE -ne 0) { throw 'Unable to resolve initial Git history.' }
+            }
+          }
+          ./build/check-version.ps1 -BaseRef $baseRef
+      - name: Install pinned offline test dependency
+        run: |
+          Install-PSResource -Name Pester -Version 6.2.0 -Repository PSGallery -Scope CurrentUser -TrustRepository -Quiet
+          Import-Module Pester -RequiredVersion 6.2.0 -Force
+          if ((Get-Module Pester).Version -ne [version]'6.2.0') { throw 'Unexpected Pester version.' }
+      - name: Run credential-free tests
+        run: |
+          Import-Module Pester -RequiredVersion 6.2.0 -Force
+          $configuration = New-PesterConfiguration
+          $configuration.Run.Path = @('.')
+          $configuration.Run.PassThru = $true
+          $configuration.Output.Verbosity = 'Detailed'
+          $result = Invoke-Pester -Configuration $configuration
+          if ($result.Result -ne 'Passed' -or $result.FailedCount -gt 0 -or $result.SkippedCount -gt 0 -or $result.NotRunCount -gt 0 -or $result.TotalCount -eq 0) {
+            throw "Offline tests failed or did not run: $($result.FailedCount) failed, $($result.SkippedCount) skipped, $($result.NotRunCount) not run."
+          }
+
+  passkey-ci:
+    name: passkey-ci
+    needs: [build-and-test]
+    if: ${{ always() }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Require every dependency to succeed
+        shell: pwsh
+        env:
+          JOB_RESULTS: ${{ toJSON(needs) }}
+        run: |
+          $jobs = $env:JOB_RESULTS | ConvertFrom-Json -AsHashtable
+          if ($jobs.Count -eq 0) { throw 'No dependency results were reported.' }
+          foreach ($entry in $jobs.GetEnumerator()) {
+            if ($entry.Value.result -ne 'success') {
+              throw "Required job '$($entry.Key)' was $($entry.Value.result)."
+            }
+          }

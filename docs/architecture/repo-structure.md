@@ -36,6 +36,7 @@ Track folders exist so experiments can stay explicit without flattening everythi
 - `windows-passkey-provider/`
 - `function-app/`
 - `python/`
+- `github/`: maintained GitHub adapters and complete action source
 
 Track-specific code should stay in its track folder unless it becomes broadly reusable enough to promote into `shared/` and `contracts/`.
 
@@ -45,6 +46,13 @@ Track-specific code should stay in its track folder unless it becomes broadly re
 - `samples/` contains focused end-to-end scenarios
 
 Templates should be minimal and stable. Samples can be more opinionated and scenario-specific.
+
+## PowerShell distributions
+
+Maintained functions in `powershell/src` and explicit ordered targets in
+`build/targets.psd1` produce self-contained public scripts and one module.
+See the [usage/build guide](../../powershell/BUILD.md). Downstream repositories
+receive exact reviewed built files; there is no runtime downloader or second implementation.
 
 ## Intake rules
 
