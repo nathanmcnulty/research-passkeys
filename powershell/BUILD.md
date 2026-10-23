@@ -69,8 +69,9 @@ network, enrollment, file or secret writes.
   Registration pipeline configuration retains SecureString secrets, not plaintext diagnostics.
 - Software credential files are created without overwriting an existing file. Unix output is
   restricted to user read/write. On Windows, use a directory with a private inherited ACL.
-  Native software credentials are flushed to stable storage before credential submission and
-  retained when enrollment is confirmed or uncertain. Persistence failure stops before submission.
+  Graph and native software credentials are flushed to stable storage before credential submission and
+  retained after any write attempt, including a partial write or uncertain enrollment. Persistence failure stops before submission.
+  Relative output paths follow the caller’s PowerShell filesystem location, not the process working directory.
 - GitHub export warns callers to pause consumers themselves. The four secret writes are non-atomic, with the
   private key written last. Combined enrollment requires `RecoveryOutputPath`; that private file is durably
   written before enrollment and retained on success or partial failure. Reconcile the saved credential ID
@@ -110,6 +111,9 @@ If the package-introduction branch has not merged and the base has no `build/VER
 accepts a later deliberate version only when committed branch history first introduced exactly
 `0.1.0`, every committed version is nondecreasing, and the working version does not regress.
 A branch with no committed `0.1.0` history cannot introduce the package at a later version.
+Merge the initial package branch with a history-preserving merge, not squash, so this
+introduction remains reachable. Version `0.3.0` removes the implicit consuming repository
+from the OIDC setup helper: callers must explicitly select their repository and subject context.
 For that unmerged history, the most recent commit that strictly increased the parsed version
 becomes the comparison baseline. Formatting-only and same-semantic version edits do not move
 that baseline: behavior included in a real version-increase commit is covered, while later

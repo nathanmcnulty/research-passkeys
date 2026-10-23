@@ -35,20 +35,36 @@ function Submit-EntraSoftwareGraphRegistration {
 
 function Invoke-EntraSoftwareGraphRegistration {
     param([Parameter(Mandatory)][string]$UserUpn, [Parameter(Mandatory)][string]$DisplayName,
-        [Parameter(Mandatory)][hashtable]$Authentication, [switch]$UseKeyVault, [string]$KeyVaultName)
+        [Parameter(Mandatory)][hashtable]$Authentication, [switch]$UseKeyVault, [string]$KeyVaultName,
+        [Parameter(Mandatory)]$Context, [Parameter(Mandatory)][IO.FileStream]$CredentialOutputStream,
+        [Parameter(Mandatory)][string]$CredentialOutputPath)
     $provider = $null; $graphToken = $null; $vaultToken = $null
     try {
+        $Context.Stage = 'SessionAuthorization'
         $tenant = Resolve-EntraSoftwareGraphTenant -TenantId $Authentication.TenantId -UserUpn $UserUpn -UseManagedIdentity:$Authentication.UseManagedIdentity
         $Authentication.TenantId = $tenant
         $graphToken = Get-EntraSoftwareApplicationToken -Scope 'https://graph.microsoft.com/.default' @Authentication
+        $Context.Stage = 'RegistrationOptions'
         $options = Get-EntraSoftwareGraphCreationOptions -UserUpn $UserUpn -AccessToken $graphToken
+        $Context.Stage = 'Attestation'
         if ($UseKeyVault) {
             $vaultToken = Get-EntraSoftwareApplicationToken -Scope 'https://vault.azure.net/.default' @Authentication
             $provider = New-EntraKeyVaultRegistrationKey -VaultName $KeyVaultName -UserPrincipalName $UserUpn -AccessToken $vaultToken
         } else { $provider = New-SoftwarePasskeyKey }
         $attestation = New-EntraSoftwareAttestation -Provider $provider -Challenge $options.challenge -Format None
-        $method = Submit-EntraSoftwareGraphRegistration -UserUpn $UserUpn -AccessToken $graphToken -DisplayName $DisplayName -Attestation $attestation
+        $Context.Stage = 'CredentialPersistence'
         $record = New-EntraSoftwareCredentialRecord -Provider $provider -Attestation $attestation -UserHandle $options.user.id -UserPrincipalName $options.user.name -DisplayName $DisplayName
+        $Context.RecoveryOutputPath = $CredentialOutputPath
+        $Context.RecoveryCredentialId = $attestation.CredentialId
+        # A partial record is evidence worth retaining. Never submit enrollment until
+        # the exact private credential (or versioned vault reference) is durable.
+        $Context.RecoveryOutputState = 'WriteAttempted'
+        Write-EntraSoftwareCredentialOutput -Stream $CredentialOutputStream -Credential $record
+        $Context.RecoveryOutputState = 'Durable'
+        $Context.Stage = 'CredentialSubmission'
+        $Context.EnrollmentStatus = 'Unconfirmed'
+        $method = Submit-EntraSoftwareGraphRegistration -UserUpn $UserUpn -AccessToken $graphToken -DisplayName $DisplayName -Attestation $attestation
+        $Context.EnrollmentStatus = 'Verified'
         return [pscustomobject]@{ Credential = $record; Method = $method; TenantId = $tenant; UserPrincipalName = $UserUpn }
     } finally {
         if ($null -ne $provider -and $provider.PSObject.Properties['Key']) { Clear-SoftwarePasskeyKey $provider }

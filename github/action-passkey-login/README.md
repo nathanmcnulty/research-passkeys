@@ -105,7 +105,7 @@ Optional behavior:
 
 ## Recommended workflow
 
-This is the default model the action is designed for.
+This is the default model the action is designed for. Configure the OIDC trust for the consuming repository and the `entra-prod` environment using [Minimal OIDC setup](#minimal-oidc-setup). Protect that environment with appropriate reviewers and deployment branch restrictions; do not remove it to make a branch-only trust work.
 
 ```yaml
 name: Passkey Login
@@ -296,30 +296,64 @@ The script no longer writes token previews to the console. It only includes the 
 - `azure/login` should run before this action when using Key Vault-backed signing.
 - If you grant Key Vault data-plane access, use a role or permission set that allows signing but no broader secret access than necessary.
 
-## Minimal OIDC Setup
+## Minimal OIDC setup
 
-The repository includes [scripts/Setup-GitHubActionServicePrincipal.ps1](scripts/Setup-GitHubActionServicePrincipal.ps1), a minimal helper that:
+The repository includes [scripts/Setup-GitHubActionServicePrincipal.ps1](scripts/Setup-GitHubActionServicePrincipal.ps1), a helper that:
 
-- creates or reuses an Entra app registration
-- creates or reuses its service principal
-- creates one GitHub Actions federated credential for a branch
+- creates or reuses an Entra app registration and its service principal
+- creates or reuses one GitHub Actions federated credential with matching subject, issuer, and audience
 - optionally grants `Key Vault Crypto User` on a specified Key Vault
 
-It does not assign API permissions or create secrets. That keeps the setup small and aligned with this action's use of `azure/login` plus Key Vault signing.
+It does not assign API permissions or create secrets. Run it with PowerShell 7.6 and an Azure CLI session in the intended tenant. Running it can create Azure resources and grant Key Vault access, so verify the target tenant, application, repository, and subject first.
 
-Example:
+`-GitHubRepo` is required and must identify **your consuming workflow repository**, not this sample or the action's publisher. Omitting it fails before any Azure CLI call. `-AppName` defaults to `action-passkey-login`; choose a distinct name if workflows should not share an application and its permissions.
+
+### Match the job's actual subject
+
+For the recommended workflow above, use `-Environment 'entra-prod'`, not a branch subject. A job that references a GitHub environment has an environment subject even when it runs from `main`. Entra requires an exact, case-sensitive match. Environment protection rules, not a branch suffix in the subject, control which branches can use that environment.
+
+Check the consuming repository's Actions OIDC settings and the expected job `sub` before provisioning. GitHub supports both name-only subjects and [immutable subjects containing owner and repository IDs](https://docs.github.com/en/actions/reference/security/oidc#immutable-subject-claims). Newly created, renamed, or transferred repositories may use the immutable format. The helper does not query GitHub or infer the format from a repository name.
+
+For a repository verified to use the name-only format, replace `<your-owner>/<your-workflow-repo>` and run:
 
 ```powershell
-./scripts/Setup-GitHubActionServicePrincipal.ps1
+./scripts/Setup-GitHubActionServicePrincipal.ps1 -GitHubRepo '<your-owner>/<your-workflow-repo>' -Environment 'entra-prod'
 ```
 
-To create the OIDC objects and grant the Key Vault role in one step:
+To also grant the Key Vault role:
 
 ```powershell
-./scripts/Setup-GitHubActionServicePrincipal.ps1 -KeyVaultName '<your-key-vault-name>'
+./scripts/Setup-GitHubActionServicePrincipal.ps1 -GitHubRepo '<your-owner>/<your-workflow-repo>' -Environment 'entra-prod' -KeyVaultName '<your-key-vault-name>'
 ```
 
-After running it, store the emitted values as GitHub secrets or variables to match your workflow style. If you did not pass `-KeyVaultName`, grant the service principal `Key Vault Crypto User` on the target Key Vault or key separately.
+For the immutable format, supply both verified numeric IDs. These illustrative IDs must be replaced with your repository's actual values:
+
+```powershell
+./scripts/Setup-GitHubActionServicePrincipal.ps1 -GitHubRepo 'contoso/automation' -GitHubOwnerId '123456' -GitHubRepositoryId '456789' -Environment 'entra-prod'
+# Expected subject: repo:contoso@123456/automation@456789:environment:entra-prod
+```
+
+Alternatively, pass the exact verified subject, including any customized job context. The helper accepts a subject beginning with the specified repository's `repo:` segment, with both immutable IDs or neither; it rejects subjects for another repository. It preserves the supplied subject exactly and does not independently attest its IDs or GitHub configuration:
+
+```powershell
+./scripts/Setup-GitHubActionServicePrincipal.ps1 -GitHubRepo 'contoso/automation' -OidcSubject 'repo:contoso@123456/automation@456789:environment:entra-prod'
+```
+
+`-Branch`, `-Environment`, and `-OidcSubject` are mutually exclusive. The default `-Branch 'main'` is only for a non-pull-request job that has no environment, with a verified name-only subject unless both immutable IDs are supplied. For example:
+
+```powershell
+./scripts/Setup-GitHubActionServicePrincipal.ps1 -GitHubRepo '<your-owner>/<your-workflow-repo>' -Branch 'main'
+```
+
+When constructing an environment or branch subject, the helper encodes metadata colons as `%3A`, as specified by [GitHub's subject-claim reference](https://docs.github.com/en/actions/reference/security/oidc#example-subject-claims). An explicit `-OidcSubject` must already contain the exact encoding. Subjects customized without a leading repository segment require separate, carefully scoped provisioning rather than this helper.
+
+### Safe reruns
+
+The credential name is a fixed-length SHA-256 digest of the exact subject, issuer, and audience, so different repositories and contexts do not collide through shortened names or slash replacement. Existing credentials are reused only when all three trust properties match exactly. An incompatible credential with the same generated name or subject stops setup before a Key Vault role grant. The helper never deletes or replaces credentials; review conflicts manually. It also leaves unrelated and older name-based credentials unchanged, so review obsolete trust separately when migrating.
+
+The fixed issuer is `https://token.actions.githubusercontent.com` and the sole audience is `api://AzureADTokenExchange`, matching this workflow's Azure login. See [Entra's federated credential requirements](https://learn.microsoft.com/en-us/entra/workload-id/workload-identity-federation-create-trust) for exact matching and service limits.
+
+After running the helper, store the emitted client and tenant IDs as GitHub secrets or variables to match your workflow. If you did not pass `-KeyVaultName`, grant the service principal `Key Vault Crypto User` on the target Key Vault or key separately. A successful setup does not verify a live token exchange or passkey login.
 
 ## Publishing
 

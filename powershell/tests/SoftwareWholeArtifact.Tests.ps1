@@ -83,13 +83,24 @@ Describe 'Complete Graph software registration through <Surface>' -ForEach @(@{ 
         $result.PSObject.Properties.Name | Should -Not -Contain ClientSecret
         $result | ConvertTo-Json -Depth 5 | Should -Not -Match 'BEGIN PRIVATE|SYNTHETIC-APPLICATION-SECRET'
     }
-    It 'rejects user-binding and submission failure without keeping an empty output reservation' -ForEach @('mismatch', 'submitfail') {
-        $global:SoftwareGraphFixture.Mode = $_
+    It 'rejects user-binding failure without keeping an empty output reservation' {
+        $global:SoftwareGraphFixture.Mode = 'mismatch'
         $caught = $null
         try { & $command @parameters } catch { $caught = $_ }
         $caught | Should -Not -BeNullOrEmpty
         $caught.Exception.Message | Should -Not -Match SYNTHETIC
         Test-Path $outputPath | Should -BeFalse
+    }
+    It 'retains the complete recovery credential after uncertain submission' {
+        $global:SoftwareGraphFixture.Mode = 'submitfail'
+        $caught = $null
+        try { & $command @parameters } catch { $caught = $_ }
+        $caught.TargetObject.EnrollmentStatus | Should -BeExactly 'Unconfirmed'
+        $caught.TargetObject.RecoveryOutputPath | Should -BeExactly $outputPath
+        $caught.Exception.Message | Should -Not -Match SYNTHETIC
+        $saved = Get-Content $outputPath -Raw | ConvertFrom-Json
+        $saved.privateKey | Should -Match '^-----BEGIN PRIVATE KEY-----'
+        $saved.credentialId | Should -BeExactly $caught.TargetObject.CredentialId
     }
     It 'returns before all network and filesystem work under WhatIf' {
         & $command @parameters -WhatIf

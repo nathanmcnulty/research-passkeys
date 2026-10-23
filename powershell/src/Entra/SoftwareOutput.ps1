@@ -2,9 +2,15 @@ function Resolve-EntraSoftwareOutputPath {
     param([AllowNull()][string]$OutputPath, [Parameter(Mandatory)][string]$UserPrincipalName,
         [Parameter(Mandatory)][string]$DisplayName)
     $name = ($UserPrincipalName.Split('@')[0] + '_' + $DisplayName + '_credential.json') -replace '[^A-Za-z0-9_.-]', '_'
-    if (-not $OutputPath) { return [IO.Path]::GetFullPath($name) }
-    if ([IO.Directory]::Exists($OutputPath)) { $OutputPath = [IO.Path]::Combine($OutputPath, $name) }
-    return [IO.Path]::GetFullPath($OutputPath)
+    if (-not $OutputPath) { $OutputPath = $name }
+    # PowerShell's current location is independent of the process working directory.
+    # Resolve through its provider before testing directories or opening private files.
+    $provider = $null; $drive = $null
+    $resolved = $ExecutionContext.SessionState.Path.GetUnresolvedProviderPathFromPSPath(
+        $OutputPath, [ref]$provider, [ref]$drive)
+    if ($provider.Name -ne 'FileSystem') { throw 'Credential output must use a filesystem path.' }
+    if ([IO.Directory]::Exists($resolved)) { $resolved = [IO.Path]::Combine($resolved, $name) }
+    return $resolved
 }
 
 function Open-EntraSoftwareCredentialOutput {

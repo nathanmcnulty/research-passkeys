@@ -5,7 +5,8 @@ function Register-EntraSoftwarePasskey {
     Supports local P-256 keys or a Key Vault reference. Unattended software implementation,
     not a FIDO-certified authenticator. Synthetic UP/UV claims do not establish authenticator
     presence, verification or hardware assurance. Graph uses none attestation.
-    The private-key output is reserved before registration and never silently overwritten.
+    The credential record is durably saved before enrollment and retained after a write attempt
+    or uncertain submission. Existing files are never silently overwritten.
     WhatIf performs local parameter validation only. Explicit PassThru forwards application configuration
     with ClientSecret kept as SecureString, never plaintext.
     Unix output is created mode 0600; Windows inherits directory ACLs and requires a private output directory.
@@ -27,15 +28,16 @@ function Register-EntraSoftwarePasskey {
         Assert-EntraPasskeyDisplayName $DisplayName
         if (-not $PSCmdlet.ShouldProcess($UserUpn, "Register software passkey '$DisplayName' and save its credential record")) { return }
         Write-PasskeySoftwareWarning
-        $path = Resolve-EntraSoftwareOutputPath -OutputPath $OutputPath -UserPrincipalName $UserUpn -DisplayName $DisplayName
-        $stream = $null; $result = $null; $saved = $false
+        $path = $null; $stream = $null; $result = $null
+        $context = [pscustomobject]@{ Stage = 'OutputReservation'; EnrollmentStatus = 'NotStarted'
+            RecoveryOutputPath = $null; RecoveryCredentialId = $null; RecoveryOutputState = 'NotStarted' }
         try {
+            $path = Resolve-EntraSoftwareOutputPath -OutputPath $OutputPath -UserPrincipalName $UserUpn -DisplayName $DisplayName
             $stream = Open-EntraSoftwareCredentialOutput -OutputPath $path
             $result = Invoke-EntraSoftwareGraphRegistration -UserUpn $UserUpn -DisplayName $DisplayName `
                 -Authentication (Get-EntraSoftwareAuthenticationParameters $configuration) `
-                -UseKeyVault:$configuration.UseKeyVault -KeyVaultName $configuration.KeyVaultName
-            Write-EntraSoftwareCredentialOutput -Stream $stream -Credential $result.Credential
-            $saved = $true
+                -UseKeyVault:$configuration.UseKeyVault -KeyVaultName $configuration.KeyVaultName `
+                -Context $context -CredentialOutputStream $stream -CredentialOutputPath $path
             if ($PassThru) {
                 $output = [pscustomobject]@{ CredentialFilePath = $path; UserUpn = $UserUpn; DisplayName = $DisplayName
                     TenantId = $result.TenantId; UsesKeyVault = [bool]$configuration.UseKeyVault
@@ -48,11 +50,16 @@ function Register-EntraSoftwarePasskey {
                 $output
             } else { [pscustomobject]@{ CredentialFilePath = $path; MethodId = $result.Method.id; Success = $true } }
         } catch {
-            if ($null -ne $result) { throw 'Registration completed but credential persistence failed. Inspect the newly created method; no rollback was attempted.' }
-            throw 'Software registration failed; sensitive response details suppressed. Inspect Entra for a partially created method or Key Vault key before retrying.'
+            $retain = $context.RecoveryOutputState -in @('WriteAttempted','Durable')
+            $PSCmdlet.ThrowTerminatingError((New-PasskeyOperationError -Stage $context.Stage `
+                -EnrollmentStatus $context.EnrollmentStatus `
+                -RecoveryOutputPath $(if ($retain) { $context.RecoveryOutputPath }) `
+                -CredentialId $(if ($retain) { $context.RecoveryCredentialId })))
         } finally {
             if ($null -ne $stream) { $stream.Dispose() }
-            if (-not $saved -and $null -ne $stream) { [IO.File]::Delete($path) }
+            $retain = $context.RecoveryOutputState -in @('WriteAttempted','Durable')
+            # Only delete this invocation's empty reservation before any write attempt.
+            if ($null -ne $stream -and -not $retain) { [IO.File]::Delete($path) }
             if ($null -ne $result -and $result.Credential.Contains('privateKey')) { $result.Credential.privateKey = $null }
             $configuration.ClientSecret = $null
         }
