@@ -195,3 +195,14 @@ For an infrastructure-only deployment from this repo, use:
 The deployment creates the storage account, `PasskeyCredentials` table, queues/blob container support, Key Vault, managed identity, audit diagnostics, and required data-plane RBAC assignments. The Function and an optional development principal receive a custom Key Vault role limited to key read/create/delete/sign/verify and secret read/write/delete. To grant the signed-in developer direct data-plane access in a development deployment, add `-GrantCurrentUserDevelopmentAccess`. Production deployments reject direct developer assignments and restrict Storage and Key Vault to the Function integration subnet; select them with `-DeploymentProfile production`.
 
 Captured registration JSON is AES-256-GCM encrypted in Blob Storage with a 24-hour CEK stored in Key Vault. Password and user agent are retained together in `pklogin-{recordId}` until explicitly replaced or deleted. Add `-EnableDevelopmentSecretExport` only to a development deployment to enable the no-store export routes; the deployment helper rejects this switch in production.
+
+## Hosted runtime baseline
+
+The Function uses PowerShell 7.6 / .NET 10 LTS on a Flex Consumption (`FC1`)
+plan. Microsoft documents [PowerShell 7.6 Functions support](https://learn.microsoft.com/en-us/azure/azure-functions/functions-reference-powershell#powershell-versions).
+
+Offline template and synthetic tests do not establish a working deployed
+service, successful authentication, or credential safety in a live tenant.
+Authorized deployments must preserve the private endpoint/code-push preflight.
+Do not run live login, credential registration/export, Key Vault writes or
+deployment solely to validate source changes.
