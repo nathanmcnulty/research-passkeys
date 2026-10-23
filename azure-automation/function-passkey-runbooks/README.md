@@ -16,7 +16,7 @@ These runbooks are thin PowerShell adapters over the HTTP Function surfaces in t
 
 - store the Function key in an **encrypted Automation variable** or retrieve it from Key Vault
 - keep the Function App URL in a normal Automation variable
-- use a **PowerShell 7.4** runbook runtime when possible
+- use a **PowerShell 7.6** runbook runtime
 
 ## Runtime model
 
