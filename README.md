@@ -1,67 +1,64 @@
-# research-passkeys
+# Passkey research and code samples
 
-See [repository reconciliation](RECONCILIATION.md) for the preserved 2026-09-12 roadmap work, current provider-source ownership, and open promotion decisions.
+Explore passkey registration, authentication, and Azure Key Vault-backed signing with PowerShell, Python, GitHub Actions, and Azure Functions. This repository collects reusable code, shared credential schemas, and focused examples for Microsoft Entra ID and Okta.
 
-Project-authored source and documentation are released under the [Unlicense](UNLICENSE). Dependencies retain their own license terms. Report vulnerabilities privately through [SECURITY.md](SECURITY.md).
+These are experimental research tools, not production-ready or FIDO-certified authenticators. Start with the guide for your scenario and review its security limitations before running code against an account or tenant.
 
-Canonical passkey research and shared-code repo for consolidating passkey-related work across PowerShell, browser extensions, Windows provider experiments, Function App samples, and future languages such as Python.
+## Find an example
 
-This repo is meant to be the place where shared contracts, reusable helpers, templates, and reference guidance live. Other repos can stay where they are and consume changes from here through source sync, submodules, subtree pulls, or published packages/artifacts.
+| What you want to explore | Start here |
+| --- | --- |
+| Entra registration and login with PowerShell | [PowerShell guide](powershell/README.md) · [Standalone scripts](powershell/scripts/entra/reference) |
+| Reusable Entra PowerShell commands | [Passkey module and build guide](powershell/BUILD.md) |
+| Entra and Okta flows in Python | [Python guide](python/README.md) · [Entra samples](python/samples/entra) · [Okta samples](python/samples/okta) |
+| Okta MyAccount and IDX flows in PowerShell | [Okta scripts](powershell/scripts/okta) |
+| Passkey authentication in GitHub Actions | [Action guide](github/action-passkey-login/README.md) · [Enrollment and export adapters](github/adapters/README.md) |
+| Hosted passkey experiments | [Azure Functions samples](function-app/README.md) |
+| Automation and webhook integrations | [Azure Automation runbooks](azure-automation/function-passkey-runbooks) · [Logic App template](templates/logic-app/passkey-function-http) |
+| Browser and Windows provider research | [Browser extension research](browser-extensions/README.md) · [Windows provider experiments](windows-passkey-provider/README.md) |
 
-## Principles
+See the [examples matrix](docs/examples-matrix.md) for provider and language coverage. Some directories contain design notes or historical experiments rather than a maintained runnable implementation; their own guides explain the status.
 
-- **Contract first**: shared data models and envelope formats belong here before host-specific implementations do.
-- **Shared before host-specific**: reusable auth, Key Vault, WebAuthn, and metadata logic should converge here.
-- **Explicit tracks**: browser-extension and Windows provider work live in named folders instead of defining the whole repo shape.
-- **Conditional Access aware**: the standard auth path should handle claims challenges and KMSI consistently.
-- **Downstream-friendly**: this repo should be easy for private and organization-owned repos to consume without moving into it.
-- **Surface parity by default**: promote new flows as shared core plus local CLI/sample and add a Function adapter only when hosted execution materially helps.
+## Before you run anything
 
-## Repository layout
-
-- `docs/architecture/`: repo shape, intake rules, and long-term structure
-- `docs/auth/`: Conditional Access, KMSI, and auth-flow guidance
-- `docs/security/`: security baselines and guardrails
-- `docs/migration/`: downstream consumption and sync guidance
-- `docs/examples-matrix.md`: PowerShell/Python × Entra/Okta parity matrix and rename map
-- `contracts/`: canonical JSON schemas and cross-language contracts
-- `shared/`: host-agnostic helpers and design notes that multiple tracks should consume
-- `powershell/`: PowerShell modules and thin command/script wrappers
-- `browser-extensions/`: browser-extension-specific code and samples
-- `windows-passkey-provider/`: Windows provider experiments, packaging, and host-specific code
-- `function-app/`: Function App-specific samples and templates
-- `python/`: future Python libraries and samples
-- `templates/`: publishable starters
-- `samples/`: end-to-end scenarios and walkthroughs
-- `scripts/`: packaging, deployment, and validation automation
+- Use a dedicated test account and tenant. Registration, provisioning, and export commands can create authentication methods, persistent access, keys, or secrets. Read the command help and required permissions first.
+- Protect credential files, private keys, TAPs, tokens, and session cookies. Never commit them or include them in logs. Use a private output directory, especially on Windows where files inherit its ACLs.
+- Software-generated user-presence and user-verification flags do not prove a person was present or verified by an authenticator. Key Vault signing does not change that limitation. Tenant policy may reject these flows.
+- Offline tests validate implementation contracts, not live service acceptance, deployed authentication, or hardware assurance. Historical device-code and imported browser-extension spikes are not supported starting points for current testing.
+- Follow the [security baseline](docs/security/baseline.md) and the sample-specific guidance. Report vulnerabilities privately through [SECURITY.md](SECURITY.md).
 
 ## PowerShell source and distributions
 
-The Entra software/Key Vault commands and GitHub adapters are maintained in
-[`powershell/src`](powershell/src). One deterministic build produces readable,
-self-contained scripts at their public paths and the `Passkey` module.
-See the [usage, build and distribution guide](powershell/BUILD.md).
+The maintained Entra commands live in [`powershell/src`](powershell/src), with standalone entrypoints in [`powershell/entrypoints`](powershell/entrypoints). A deterministic build produces self-contained scripts and the [`Passkey` module](powershell/modules/Passkey) from the same source.
 
-## Current starter assets
+Use the checked-in distributions directly, or follow [BUILD.md](powershell/BUILD.md) to develop and validate changes. These commands require PowerShell 7.6; the offline test baseline is Pester 6.2.0. Importing the module declares commands without authenticating or contacting a service.
 
-- `powershell\samples\entra\device-code-bootstrap`: historical, unsupported authentication sample; do not run it for current testing
-- `python\samples\entra`: local Python Entra registration and login examples over the canonical library; its device-code example is historical and unsupported
-- `python\samples\okta`: Python Okta examples (IDX and MyAccount flows)
-- `azure-automation\function-passkey-runbooks`: Azure Automation runbook samples that call the passkey Function endpoints
-- `templates\logic-app\passkey-function-http`: Logic App templates that proxy webhook requests into the passkey Function endpoints
-- `scripts\deployment\Deploy-FunctionSample.ps1`: guarded infrastructure deployment helper for the PowerShell and Python Function starters; code push requires a private-endpoint-connected host
-- `scripts\validation\Invoke-EntraPasskeySmokeTest.ps1`: repeatable Entra registration + login smoke-test harness for direct and Function-hosted flows
-- `contracts\passkey-login-credential.schema.json`: canonical login credential contract shared by PowerShell and Python login consumers
+```powershell
+Import-Module ./powershell/modules/Passkey/Passkey.psd1
+Get-Command -Module Passkey
+Get-Help Register-EntraSoftwarePasskey -Full
+```
 
-## Source material being consolidated
+The example above only loads the module and displays command information. Commands that register credentials, provision resources, or export secrets require their own explicit inputs and review.
 
-- `nathanmcnulty\Entra\passkeys`: generated standalone distributions from the maintained source here
-- `key-vault-passkey-provider`: source for relevant browser-extension and Windows provider details that should be selectively absorbed into this repo
+## Repository guide
 
-## First milestone
+- [`contracts`](contracts): shared JSON schemas, including the [login credential contract](contracts/passkey-login-credential.schema.json).
+- [`shared`](shared): cross-language helpers and design notes.
+- [`powershell`](powershell) and [`python`](python): libraries, commands, and provider-specific samples.
+- [`github`](github): Action distribution and enrollment/export adapters.
+- [`function-app`](function-app), [`azure-automation`](azure-automation), and [`templates`](templates): hosted samples and integration starters.
+- [`browser-extensions`](browser-extensions) and [`windows-passkey-provider`](windows-passkey-provider): provider-specific experiments and research.
+- [`samples`](samples): scenario assets, including notification examples.
+- [`scripts`](scripts): deployment, packaging, and validation helpers. Read their prerequisites before execution; some perform live operations.
+- [`docs`](docs): [architecture](docs/architecture/repo-structure.md), [authentication contracts](docs/auth/passkey-login-contract.md), [Conditional Access](docs/auth/conditional-access.md), and [downstream consumption](docs/migration/downstream-consumption.md).
 
-1. Establish the repo skeleton and guidance docs.
-2. Define canonical credential contracts.
-3. Extract PowerShell helpers into reusable modules.
-4. Add a Function App sample/template.
-5. Start pulling in browser-extension and Windows provider details under their own track folders.
+## Contributing and validation
+
+Keep reusable behavior in maintained source and host-specific integration in its own sample. For Entra PowerShell changes, deliberately update the source version and commit regenerated distributions alongside the source. See [BUILD.md](powershell/BUILD.md) for the full workflow and credential-free test commands.
+
+Describe what changed, which checks you ran, and which live scenarios remain unverified. Do not treat a passing offline suite as permission to deploy or enroll credentials.
+
+## License
+
+Project-authored source and documentation are released under the [Unlicense](UNLICENSE). Dependencies retain their own license terms.
