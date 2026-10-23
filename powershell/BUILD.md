@@ -148,8 +148,8 @@ Personal repository paths under `Entra/passkeys/` map to these generated researc
 `github/action-passkey-login` maps directly to the Action repository with that prefix removed.
 Its `PasskeyLogin.ps1` is byte-identical to the generated research login. Action inputs/output
 masking and runner delivery stay in `action.yml`; GitHub is transport/CI, not a signer.
-The exact-copy distribution inventory is 29 files: the 10 personal scripts above and all
-19 Action package files. Unit tests stay in research; the Action retains its three offline
+The exact-copy distribution inventory is 30 files: the 10 personal scripts above and all
+20 Action package files. Unit tests stay in research; the Action retains its four offline
 distribution suites. Do not copy any test files to the personal samples repository. The
 personal login named-parameter, alias and pipeline checks are maintained in
 `powershell/tests/EntraScriptCompatibility.Tests.ps1`.
