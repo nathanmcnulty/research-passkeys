@@ -368,8 +368,11 @@ Microsoft describes this app confirmation in its [AADSTS50199 documentation](htt
 ## Proposed live validation
 
 The [protected lab controller](docs/LAB-COOKIE-CONTROLLER.md) prepares a manual,
-exact-revision cookie-output-contract lane. Setup and dispatch require separate
-approval. Its end-to-end gate deliberately fails because independent identity and
-session readback are not implemented. It is not a live-acceptance or merge-ready signal.
+exact-revision cookie-output and server-backed session-reuse integration test.
+It requires a separately reviewed public-client compatibility configuration with identity-only
+permissions. Source and offline tests are not evidence of a passing live run.
+Setup, controller bootstrap, hosted CI, merges and one bounded dispatch require
+appropriate approval. Same-runner results are not hostile-candidate attestation.
 
-The [live validation plan](docs/LIVE-VALIDATION-PLAN.md) describes the remaining independent-readback milestone. Neither the plan nor controller source is evidence of a passing live run; credentials, environments, trust configuration and execution require separate approval.
+The [live validation plan](docs/LIVE-VALIDATION-PLAN.md) describes the remaining
+publication/setup/run sequence. No XDR access is established by this lane.

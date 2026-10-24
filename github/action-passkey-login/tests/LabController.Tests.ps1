@@ -97,10 +97,15 @@ Describe 'Manual workflow trust boundary' {
         $workflow | Should -Not -Match 'PASSKEY_PRIVATE_'
         foreach ($name in @('CREDENTIAL_ID', 'USER_HANDLE', 'USER_PRINCIPAL_NAME', 'PRIVATE_KEY')) { $workflow | Should -Match "PASSKEY_LAB_$name" }
     }
-    It 'rechecks admission before candidate checkout and cannot produce an overall live pass' {
+    It 'rechecks admission and requires complete server-backed validation for a pass' {
         ([regex]::Matches($workflow, 'Invoke-LabAdmission')).Count | Should -Be 2
         $workflow.IndexOf('Recheck admission after environment approval') | Should -BeLessThan $workflow.IndexOf('Check out admitted candidate')
-        $workflow | Should -Match 'independent-readback-not-implemented:'
+        $workflow | Should -Match 'reviewed-session-verdict:'
+        $workflow | Should -Match 'Invoke-LabSessionProbe'
+        $workflow | Should -Not -Match 'continue-on-error'
+        $workflow | Should -Match 'SESSION_RESULT.*!= success'
+        $workflow | Should -Match 'PASSKEY_LAB_CLIENT_ID'
+        $workflow | Should -Match 'PASSKEY_LAB_TENANT_ID'
         $workflow | Should -Match 'exit 1'
     }
     It 'does not interpolate expressions into shell source' {
@@ -158,7 +163,7 @@ Describe 'Admission uses only mocked API evidence' {
     It 'produces only an allowlisted admission receipt from exact source and CI' {
         $receipt = Invoke-LabAdmission ('a' * 40) ('b' * 40) '6' ('c' * 40)
         $receipt.CandidateSha | Should -BeExactly ('a' * 40)
-        $receipt.IndependentReadback | Should -BeExactly 'NotImplemented'
+        $receipt.IndependentReadback | Should -BeExactly 'RequiredNotYetRun'
         $receipt.ActionCi.RunId | Should -Be 123
         Should -Invoke Invoke-RestMethod -Times 0 -Exactly
     }
