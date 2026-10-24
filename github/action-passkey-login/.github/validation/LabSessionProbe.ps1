@@ -85,17 +85,26 @@ function Invoke-LabSessionProbe {
     param([string]$Cookie, [string]$CookieName, [string]$TenantId, [string]$ClientId, [string]$ExpectedUpn)
     # The caller supplies only a cookie. All token material is acquired in this
     # function, in the current nonce/state/PKCE transaction, and never returned.
+    # Phase identifies the entered operation, not proof a request reached a service.
+    # Diagnostic labels are local literals only; never copy response/exception data.
+    $phase = 'Configuration'; $failureCode = 'InvalidConfiguration'
     try {
         Assert-LabProbeConfiguration $TenantId $ClientId $ExpectedUpn
+        $phase = 'Cookie'; $failureCode = 'UnexpectedFailure'
         if ($CookieName -cnotin @('ESTSAUTH','ESTSAUTHPERSISTENT') -or $Cookie.Length -gt 32768 -or
-            $Cookie -cnotmatch '\A[\x21\x23-\x2B\x2D-\x3A\x3C-\x5B\x5D-\x7E]+\z') { throw 'Invalid cookie.' }
+            $Cookie -cnotmatch '\A[\x21\x23-\x2B\x2D-\x3A\x3C-\x5B\x5D-\x7E]+\z') { $failureCode = 'InvalidCookie'; throw 'Invalid cookie.' }
         $authority = "https://login.microsoftonline.com/$TenantId"
         $redirect = 'https://login.microsoftonline.com/common/oauth2/nativeclient'
-        $metadata = Read-LabProbeResponse (Send-LabProbeRequest "$authority/v2.0/.well-known/openid-configuration")
+        $phase = 'DiscoveryRequest'
+        $metadata = Send-LabProbeRequest "$authority/v2.0/.well-known/openid-configuration"
+        $phase = 'DiscoveryResponse'; $failureCode = 'InvalidResponse'
+        $metadata = Read-LabProbeResponse $metadata
+        $phase = 'DiscoveryMetadata'; $failureCode = 'UnexpectedFailure'
         foreach ($pair in @(@('issuer', "$authority/v2.0"), @('authorization_endpoint', "$authority/oauth2/v2.0/authorize"),
             @('token_endpoint', "$authority/oauth2/v2.0/token"), @('userinfo_endpoint', 'https://graph.microsoft.com/oidc/userinfo'))) {
-            if ($metadata[$pair[0]] -isnot [string] -or $metadata[$pair[0]] -cne $pair[1]) { throw 'Unexpected discovery metadata.' }
+            if ($metadata[$pair[0]] -isnot [string] -or $metadata[$pair[0]] -cne $pair[1]) { $failureCode = 'InvalidMetadata'; throw 'Unexpected discovery metadata.' }
         }
+        $phase = 'AuthorizationRequest'
         $state = ConvertTo-LabProbeBase64Url ([Security.Cryptography.RandomNumberGenerator]::GetBytes(32))
         $nonce = ConvertTo-LabProbeBase64Url ([Security.Cryptography.RandomNumberGenerator]::GetBytes(32))
         $verifier = ConvertTo-LabProbeBase64Url ([Security.Cryptography.RandomNumberGenerator]::GetBytes(32))
@@ -104,21 +113,29 @@ function Invoke-LabSessionProbe {
             prompt='none'; state=$state; nonce=$nonce; code_challenge=$challenge; code_challenge_method='S256' })
         $current = "$($metadata.authorization_endpoint)?$query"; $code = $null
         $response = Send-LabProbeRequest $current -Headers @{ Cookie = "$CookieName=$Cookie" }
-        if ($response.Status -notin @(302,303) -or @($response.Locations).Count -ne 1) { throw 'Silent session reuse failed; no interaction or consent is attempted.' }
+        $phase = 'AuthorizationResponse'
+        if ($response.Status -notin @(302,303) -or @($response.Locations).Count -ne 1) { $failureCode = 'InvalidAuthorizationResponse'; throw 'Silent session reuse failed; no interaction or consent is attempted.' }
+        $phase = 'Callback'; $failureCode = 'InvalidCallback'
         $next = [uri]::new([uri]$current, [string]$response.Locations[0])
         if ($next.Scheme -cne 'https' -or $next.Host -cne 'login.microsoftonline.com' -or $next.Port -ne 443 -or $next.UserInfo -or $next.Fragment -or
             $next.GetLeftPart([UriPartial]::Path) -cne $redirect) { throw 'Unexpected authorization redirect; cookie is never forwarded.' }
         $fields = [Web.HttpUtility]::ParseQueryString($next.Query)
         foreach ($name in $fields.AllKeys) { if (-not $name -or @($fields.GetValues($name)).Count -ne 1) { throw 'Ambiguous callback.' } }
         if ($fields['error'] -or $fields['state'] -cne $state -or [string]::IsNullOrWhiteSpace($fields['code']) -or $fields['code'].Length -gt 16384) { throw 'Callback binding failed.' }
+        $failureCode = 'UnexpectedFailure'
         $code = $fields['code']
+        $phase = 'TokenRequest'
         $body = ConvertTo-LabProbeForm @{ grant_type='authorization_code'; client_id=$ClientId; redirect_uri=$redirect; code=$code; code_verifier=$verifier; scope='openid profile' }
-        $tokens = Read-LabProbeResponse (Send-LabProbeRequest $metadata.token_endpoint -Method POST -Body $body)
+        $tokens = Send-LabProbeRequest $metadata.token_endpoint -Method POST -Body $body
+        $phase = 'TokenResponse'; $failureCode = 'InvalidResponse'
+        $tokens = Read-LabProbeResponse $tokens
+        $failureCode = 'UnexpectedFailure'
         if ($tokens.token_type -isnot [string] -or $tokens.token_type -ine 'Bearer' -or $tokens.access_token -isnot [string] -or
-            [string]::IsNullOrWhiteSpace($tokens.access_token) -or $tokens.access_token -match '[\r\n]' -or $tokens.id_token -isnot [string] -or $tokens.refresh_token) { throw 'Unexpected token response.' }
+            [string]::IsNullOrWhiteSpace($tokens.access_token) -or $tokens.access_token -match '[\r\n]' -or $tokens.id_token -isnot [string] -or $tokens.refresh_token) { $failureCode = 'InvalidTokenResponse'; throw 'Unexpected token response.' }
         if ($tokens.Contains('scope')) {
-            if ($tokens.scope -isnot [string] -or $tokens.scope -cnotmatch '\A(?:openid|profile)(?: (?:openid|profile))*\z') { throw 'Unexpected granted scopes.' }
+            if ($tokens.scope -isnot [string] -or $tokens.scope -cnotmatch '\A(?:openid|profile)(?: (?:openid|profile))*\z') { $failureCode = 'InvalidTokenResponse'; throw 'Unexpected granted scopes.' }
         }
+        $phase = 'TokenEncoding'; $failureCode = 'InvalidTokenEncoding'
         $parts = $tokens.id_token.Split('.')
         if ($parts.Count -ne 3) { throw 'Malformed ID token.' }
         $jsonParts = @()
@@ -129,20 +146,35 @@ function Invoke-LabSessionProbe {
         }
         $header = $jsonParts[0]; $claims = $jsonParts[1]
         if ($header.alg -isnot [string] -or $header.alg -cne 'RS256' -or $header.Contains('crit') -or $parts[2] -cnotmatch '\A[A-Za-z0-9_-]+\z') { throw 'Unexpected ID token format.' }
+        $phase = 'TokenBinding'; $failureCode = 'UnexpectedFailure'
         foreach ($pair in @(@('iss', $metadata.issuer), @('aud', $ClientId), @('tid', $TenantId), @('nonce', $nonce))) {
-            if ($claims[$pair[0]] -isnot [string] -or $claims[$pair[0]] -cne $pair[1]) { throw 'ID token binding failed.' }
+            if ($claims[$pair[0]] -isnot [string] -or $claims[$pair[0]] -cne $pair[1]) { $failureCode = 'InvalidTokenBinding'; throw 'ID token binding failed.' }
         }
-        if ($claims.Contains('azp') -and ($claims.azp -isnot [string] -or $claims.azp -cne $ClientId)) { throw 'Unexpected authorized party.' }
-        if ($claims.oid -isnot [string] -or $claims.oid -cnotmatch '\A[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}\z' -or [guid]$claims.oid -eq [guid]::Empty) { throw 'Invalid object identity.' }
+        if ($claims.Contains('azp') -and ($claims.azp -isnot [string] -or $claims.azp -cne $ClientId)) { $failureCode = 'InvalidTokenBinding'; throw 'Unexpected authorized party.' }
+        if ($claims.oid -isnot [string] -or $claims.oid -cnotmatch '\A[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}\z' -or [guid]$claims.oid -eq [guid]::Empty) { $failureCode = 'InvalidTokenBinding'; throw 'Invalid object identity.' }
         if ($claims.preferred_username -isnot [string] -or $claims.preferred_username -ine $ExpectedUpn -or
-            $claims.sub -isnot [string] -or [string]::IsNullOrWhiteSpace($claims.sub)) { throw 'User binding failed.' }
+            $claims.sub -isnot [string] -or [string]::IsNullOrWhiteSpace($claims.sub)) { $failureCode = 'InvalidTokenBinding'; throw 'User binding failed.' }
+        $phase = 'TokenTimes'
         $now = [DateTimeOffset]::UtcNow.ToUnixTimeSeconds()
-        foreach ($name in @('iat','exp')) { if ($claims[$name] -isnot [long] -and $claims[$name] -isnot [int]) { throw 'Invalid token time.' } }
-        if ($claims.exp -le $now -or $claims.iat -gt $now + 60 -or $claims.iat -lt $now - 300 -or $claims.exp -le $claims.iat) { throw 'Token is not fresh.' }
-        if ($claims.Contains('nbf') -and (($claims.nbf -isnot [long] -and $claims.nbf -isnot [int]) -or $claims.nbf -gt $now + 60)) { throw 'Token not yet valid.' }
-        $user = Read-LabProbeResponse (Send-LabProbeRequest $metadata.userinfo_endpoint -Headers @{ Authorization = "Bearer $($tokens.access_token)" })
-        if ($user.sub -isnot [string] -or $user.sub -cne $claims.sub) { throw 'UserInfo subject mismatch.' }
+        foreach ($name in @('iat','exp')) { if ($claims[$name] -isnot [long] -and $claims[$name] -isnot [int]) { $failureCode = 'InvalidTokenTimes'; throw 'Invalid token time.' } }
+        if ($claims.exp -le $now -or $claims.iat -gt $now + 60 -or $claims.iat -lt $now - 300 -or $claims.exp -le $claims.iat) { $failureCode = 'InvalidTokenTimes'; throw 'Token is not fresh.' }
+        if ($claims.Contains('nbf') -and (($claims.nbf -isnot [long] -and $claims.nbf -isnot [int]) -or $claims.nbf -gt $now + 60)) { $failureCode = 'InvalidTokenTimes'; throw 'Token not yet valid.' }
+        $phase = 'UserInfoRequest'
+        $user = Send-LabProbeRequest $metadata.userinfo_endpoint -Headers @{ Authorization = "Bearer $($tokens.access_token)" }
+        $phase = 'UserInfoResponse'; $failureCode = 'InvalidResponse'
+        $user = Read-LabProbeResponse $user
+        $phase = 'UserInfoSubject'; $failureCode = 'UnexpectedFailure'
+        if ($user.sub -isnot [string] -or $user.sub -cne $claims.sub) { $failureCode = 'InvalidUserInfoSubject'; throw 'UserInfo subject mismatch.' }
         return [ordered]@{ ServerBackedSessionReuse = $true; ExpectedTenantAndCurrentName = $true; UserInfoSubjectMatched = $true; TamperProofAgainstCandidate = $false }
-    } catch { throw 'Server-backed session probe failed; no live acceptance. Sensitive details suppressed.' }
+    } catch {
+        # Validate at the public emission boundary. Unknown labels never reach output.
+        if ($phase -isnot [string] -or $phase -cnotin @('Configuration', 'Cookie', 'DiscoveryRequest', 'DiscoveryResponse', 'DiscoveryMetadata',
+            'AuthorizationRequest', 'AuthorizationResponse', 'Callback', 'TokenRequest', 'TokenResponse',
+            'TokenEncoding', 'TokenBinding', 'TokenTimes', 'UserInfoRequest', 'UserInfoResponse', 'UserInfoSubject')) { $phase = 'Unknown' }
+        if ($failureCode -isnot [string] -or $failureCode -cnotin @('InvalidConfiguration', 'InvalidCookie', 'InvalidResponse', 'InvalidMetadata',
+            'InvalidAuthorizationResponse', 'InvalidCallback', 'InvalidTokenResponse', 'InvalidTokenEncoding',
+            'InvalidTokenBinding', 'InvalidTokenTimes', 'InvalidUserInfoSubject', 'UnexpectedFailure')) { $failureCode = 'UnexpectedFailure' }
+        throw "Server-backed session probe failed; no live acceptance. Sensitive details suppressed. Phase=$phase; Code=$failureCode."
+    }
     finally { $Cookie = $null; $code = $null; $verifier = $null; $body = $null; $tokens = $null; $claims = $null; $user = $null }
 }

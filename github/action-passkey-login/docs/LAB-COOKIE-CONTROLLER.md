@@ -99,6 +99,20 @@ needs separate authorization when previously excluded. No automatic live trigger
 GitHub federation, Key Vault or `id-token: write` is introduced. Cleanup removes
 checkouts; it does not revoke remote sessions or the passkey. Revocation is separate.
 
+## Sanitized failure diagnostics
+
+A failed session probe remains a failed validation. Its public error includes only
+fixed, locally assigned and allowlisted phase/failure codes, never the original
+exception text, URLs, response headers/bodies, identity claims or credential values.
+Unexpected failures use a fixed fallback rather than reflecting external data.
+
+The phase identifies the operation or guard entered, not proof that a network
+request reached Microsoft. A rejection code identifies a local acceptance boundary;
+it is not by itself evidence of a service defect, an invalid credential or a consent
+requirement. Diagnostics do not relax protocol checks or authorize a retry. Older
+runs that emitted only the generic failure cannot be retroactively diagnosed from
+these new codes. Successful receipts and request sequencing are unchanged.
+
 ## Sources
 
 - [Microsoft UserInfo and identity-only permissions](https://learn.microsoft.com/en-us/entra/identity-platform/userinfo)
