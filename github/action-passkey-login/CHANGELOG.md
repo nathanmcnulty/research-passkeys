@@ -1,4 +1,10 @@
-﻿# Changelog
+# Changelog
+
+## Unreleased controller follow-up
+
+- Add a fail-closed identity-only server-backed session-reuse probe for an explicitly configured public-client compatibility scenario. Synthetic/offline checks are not live acceptance.
+- Require fresh code/PKCE, state/nonce and direct TLS token-response checks, followed by matching UserInfo subject. Do not silently select a client or request resource/refresh-token scopes for the test.
+- Keep same-runner limitations explicit; allow the final result only when admission, cookie contract and server probe all succeed. Setup, bootstrap, hosted CI and live dispatch remain separately authorized.
 
 ## Source package 0.3.2 (unreleased)
 

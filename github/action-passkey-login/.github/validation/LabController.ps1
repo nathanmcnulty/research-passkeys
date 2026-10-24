@@ -118,7 +118,7 @@ function Invoke-LabAdmission {
     return [ordered]@{
         CandidateSha = $Candidate; SourceSha = $Source; ControllerSha = $Controller
         ActionCi = $actionEvidence; CanonicalCi = $sourceEvidence
-        Scenario = 'CookieOutputContractOnly'; IndependentReadback = 'NotImplemented'
+        Scenario = 'ReviewedSourceSessionReuse'; IndependentReadback = 'RequiredNotYetRun'
     }
 }
 

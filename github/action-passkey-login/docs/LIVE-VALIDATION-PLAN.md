@@ -1,6 +1,6 @@
 # Fork-safe live validation plan
 
-Status: the bounded [cookie-contract controller](LAB-COOKIE-CONTROLLER.md) is prepared in source; independent live readback remains unimplemented. No Azure federation, role assignment, environment protection, enrollment, live login or workflow enablement is established by these files. Source-only/offline checks are not live validation. Use only the new environment-only `PASSKEY_LAB_*` names for this protected lane; never provision legacy repository-secret names for it.
+Status: the bounded [cookie-contract controller](LAB-COOKIE-CONTROLLER.md) is prepared in source; a mandatory-config server-backed session probe is prepared but has not run live. No Azure federation, role assignment, environment protection, enrollment, live login or workflow enablement is established by these files. Source-only/offline checks are not live validation. Use only the new environment-only `PASSKEY_LAB_*` names for this protected lane; never provision legacy repository-secret names for it.
 
 ## Preferred first lane: approved lab passkey secrets
 
@@ -11,7 +11,7 @@ The selected first live test uses a dedicated generic lab user and passkey value
 - `PASSKEY_LAB_USER_PRINCIPAL_NAME` -> `user-principal-name`
 - `PASSKEY_LAB_PRIVATE_KEY` -> `private-key` (PEM or supported encoded form)
 
-Use a dedicated minimally privileged lab account and passkey, not a personal administrator credential. This lane does not need Azure Login, a federated workload identity, Key Vault access, or `id-token: write`. The old manual private-key example is disabled at this revision. The new controller supplies protected-environment admission, exact-SHA review and safe output transport, but independent readback remains unimplemented.
+Use a dedicated minimally privileged lab account and passkey, not a personal administrator credential. This lane does not need Azure Login, a federated workload identity, Key Vault access, or `id-token: write`. The old manual private-key example is disabled at this revision. The new controller supplies protected-environment admission, exact-SHA review and safe output transport, with a required server-backed session probe.
 
 A workflow that receives the private key can exfiltrate or reuse it. GitHub encryption at rest and log masking do not protect against malicious admitted code. Fork PRs must remain offline-only. Approve the exact candidate revision before releasing the environment secrets; do not enable automatic live runs.
 
@@ -19,7 +19,7 @@ The user enters values directly through GitHub encrypted environment-secret cont
 
 ## Outcome and trust boundaries
 
-The selected first implementation is local signing with encrypted GitHub environment secrets for a generic, dedicated, minimally privileged test user. No Azure workload identity, federation, Key Vault, Azure role assignment or OIDC permission is required for this lane.
+The selected first implementation is local signing with encrypted GitHub environment secrets for a generic, dedicated, minimally privileged test user. No Azure workload identity, federation, Key Vault, Azure role assignment or GitHub OIDC federation is required for this lane. The test-only session verifier does require an explicitly reviewed public-client scenario and approved openid/profile access, as described in the controller document.
 
 The account is intended to have no useful access. Verify its actual memberships, licenses, assignments, application consent and tenant-default capabilities; do not claim a basic account can have literally no access. Do not add broad roles, weaken tenant policy or grant broad consent to make a test pass. A required interaction or policy refusal is a reported validation blocker.
 
@@ -48,7 +48,8 @@ Required approvals and setup before execution:
 1. Confirm the test account, passkey enrollment and any narrowly necessary consent. No broad consent, tenant-policy bypass or role grants.
 2. Configure the protected `passkey-validation` environment and its reviewer/branch controls.
 3. Obtain explicit approval for transmitting/storing `PASSKEY_LAB_PRIVATE_KEY` and the three other named values in that encrypted environment-secret destination. The user enters the key directly in GitHub, never chat or Git source.
-4. Approve the first bounded live login/readback for the exact reviewed revision and test account. The present preference does not perform any of these actions.
+4. Review the exact selected public-client scenario with the exact nativeclient callback and existing openid/profile authorization; set the two environment-only lab configuration variables. New registration/consent is a separately approved setup action.
+5. Approve the first bounded live login/readback for the exact reviewed revision and test account. The present preference does not perform any of these actions.
 
 Exit: verified four-secret/environment configuration and test-account scope, without a claim of successful login yet.
 
@@ -62,7 +63,7 @@ Use `workflow_dispatch` on trusted main initially. Do not execute untrusted cand
 4. Check out the exact candidate into a separate directory and verify its SHA. Disable persisted checkout credentials. Do not restore untrusted caches or candidate-built artifacts into the privileged job.
 5. Use a disposable hosted runner, job-scoped `contents: read`, no `id-token: write`, pinned actions, a timeout, and serial test-account concurrency.
 6. Run the reviewed candidate and validate its output contract from trusted controller code.
-7. Independently exercise a reviewed, read-only authenticated endpoint with an explicit expected account/tenant and response schema. Select and review that endpoint before implementation; do not substitute arbitrary portal cookies for authentication evidence.
+7. Independently exercise a reviewed, read-only authenticated endpoint with an explicit expected account/tenant and response schema. The selected endpoint is Microsoft UserInfo, reached with a fresh silent code/PKCE token transaction; see the controller document for the direct-TLS validation constraint and reviewed-client prerequisite. Do not substitute arbitrary portal cookies for authentication evidence.
 8. Emit an allowlisted receipt containing candidate SHA, source revision, controller SHA, run URL/time, runtime, scenario, and individual assertion outcomes. Do not trust candidate-generated summary content as independent validation.
 
 The reviewed candidate can read or exfiltrate the private key released to its job, even when logs are masked. Environment approval is admission to that trust boundary, not a sandbox.

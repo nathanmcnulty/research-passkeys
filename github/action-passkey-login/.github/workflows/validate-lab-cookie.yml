@@ -1,5 +1,5 @@
-name: Lab cookie contract only (not end-to-end validation)
-run-name: Lab cookie contract ${{ inputs.candidate_sha }} from ${{ inputs.source_sha }}
+name: Reviewed lab session reuse validation
+run-name: Reviewed lab session reuse ${{ inputs.candidate_sha }} from ${{ inputs.source_sha }}
 
 on:
   workflow_dispatch:
@@ -62,7 +62,7 @@ jobs:
           "@ | Add-Content $env:GITHUB_STEP_SUMMARY
 
   cookie-contract:
-    name: Cookie output contract (not identity proof)
+    name: Cookie output and server-backed session reuse
     needs: preflight
     runs-on: windows-latest
     timeout-minutes: 10
@@ -116,6 +116,27 @@ jobs:
           foreach ($name in @('LAB_ID', 'LAB_HANDLE', 'LAB_UPN', 'LAB_KEY')) {
             if ([string]::IsNullOrWhiteSpace([Environment]::GetEnvironmentVariable($name))) { throw 'Lab configuration incomplete; not run.' }
           }
+      - name: Require explicit reviewed-client lab configuration
+        id: lab-config
+        shell: pwsh
+        env:
+          LAB_TENANT: ${{ vars.PASSKEY_LAB_TENANT_ID }}
+          LAB_CLIENT: ${{ vars.PASSKEY_LAB_CLIENT_ID }}
+          LAB_UPN: ${{ secrets.PASSKEY_LAB_USER_PRINCIPAL_NAME }}
+        run: |
+          . ./controller/.github/validation/LabSessionProbe.ps1
+          Assert-LabProbeConfiguration $env:LAB_TENANT $env:LAB_CLIENT $env:LAB_UPN
+          # Bootstrap only obtains the cookie. Discard its verifier; any issued
+          # code is not redeemed. The probe creates a separate fresh transaction.
+          $verifier = ConvertTo-LabProbeBase64Url ([Security.Cryptography.RandomNumberGenerator]::GetBytes(32))
+          $challenge = ConvertTo-LabProbeBase64Url ([Security.Cryptography.SHA256]::HashData([Text.Encoding]::ASCII.GetBytes($verifier)))
+          $state = ConvertTo-LabProbeBase64Url ([Security.Cryptography.RandomNumberGenerator]::GetBytes(32))
+          $nonce = ConvertTo-LabProbeBase64Url ([Security.Cryptography.RandomNumberGenerator]::GetBytes(32))
+          $query = ConvertTo-LabProbeForm @{ client_id=$env:LAB_CLIENT; redirect_uri='https://login.microsoftonline.com/common/oauth2/nativeclient'; scope='openid profile'; response_type='code'; response_mode='query'; code_challenge=$challenge; code_challenge_method='S256'; state=$state; nonce=$nonce }
+          $verifier = $null
+          $url = "https://login.microsoftonline.com/$($env:LAB_TENANT)/oauth2/v2.0/authorize?$query"
+          Write-Output "::add-mask::$url"
+          "auth-url=$url" | Add-Content $env:GITHUB_OUTPUT
       - name: Run admitted candidate with lab credential
         id: passkey
         uses: ./candidate
@@ -124,6 +145,8 @@ jobs:
           user-handle: ${{ secrets.PASSKEY_LAB_USER_HANDLE }}
           user-principal-name: ${{ secrets.PASSKEY_LAB_USER_PRINCIPAL_NAME }}
           private-key: ${{ secrets.PASSKEY_LAB_PRIVATE_KEY }}
+          auth-url: ${{ steps.lab-config.outputs.auth-url }}
+          expected-client-id: ${{ vars.PASSKEY_LAB_CLIENT_ID }}
           confirm-application: 'false'
           export-auth-cookie: 'true'
       - name: Observe cookie output contract without exposing values
@@ -140,6 +163,19 @@ jobs:
           Assert-LabCookieContract $env:AUTHENTICATED $env:COOKIE $env:COOKIE_NAME $env:METHOD $env:REQUESTED_UPN $env:RETURNED_UPN
           [ordered]@{ runtime = [string]$PSVersionTable.PSVersion; cookie_contract_observed = $true; independent_readback = $false } | ConvertTo-Json | Add-Content $env:GITHUB_STEP_SUMMARY
           'Cookie output contract observed. This runner executed the candidate: its observations are not tamper-proof independent evidence. Account identity, session reuse and XDR access NOT VERIFIED.' | Add-Content $env:GITHUB_STEP_SUMMARY
+      - name: Verify fresh server-backed session reuse
+        shell: pwsh
+        env:
+          COOKIE: ${{ steps.passkey.outputs.auth-cookie }}
+          COOKIE_NAME: ${{ steps.passkey.outputs.cookie-name }}
+          LAB_TENANT: ${{ vars.PASSKEY_LAB_TENANT_ID }}
+          LAB_CLIENT: ${{ vars.PASSKEY_LAB_CLIENT_ID }}
+          LAB_UPN: ${{ secrets.PASSKEY_LAB_USER_PRINCIPAL_NAME }}
+        run: |
+          . ./controller/.github/validation/LabSessionProbe.ps1
+          $receipt = Invoke-LabSessionProbe $env:COOKIE $env:COOKIE_NAME $env:LAB_TENANT $env:LAB_CLIENT $env:LAB_UPN
+          $receipt | ConvertTo-Json | Add-Content $env:GITHUB_STEP_SUMMARY
+          'Server-backed session reuse verified for this reviewed candidate. Same-runner integration evidence, not tamper-proof candidate attestation. Current UPN checked, not an immutable account pin across renames. No XDR/resource access tested.' | Add-Content $env:GITHUB_STEP_SUMMARY
       - name: Discard checkout files (does not revoke remote sessions)
         if: ${{ always() }}
         shell: pwsh
@@ -148,16 +184,22 @@ jobs:
             if (Test-Path -LiteralPath $path) { Remove-Item -LiteralPath $path -Recurse -Force -ErrorAction SilentlyContinue }
           }
 
-  independent-readback-not-implemented:
-    name: End-to-end gate deliberately incomplete
+  reviewed-session-verdict:
+    name: Reviewed session reuse result
     needs: [preflight, cookie-contract]
     if: ${{ always() }}
     runs-on: ubuntu-latest
     timeout-minutes: 2
     permissions: {}
     steps:
-      - name: Do not publish an end-to-end live pass
+      - name: Require both complete jobs, never accept skipped validation
         shell: bash
+        env:
+          PREFLIGHT_RESULT: ${{ needs.preflight.result }}
+          SESSION_RESULT: ${{ needs.cookie-contract.result }}
         run: |
-          echo 'Independent authenticated readback is NOT IMPLEMENTED / NOT RUN. Cookie-contract observations alone do not establish live acceptance or merge readiness.'
-          exit 1
+          if [[ "$PREFLIGHT_RESULT" != success || "$SESSION_RESULT" != success ]]; then
+            echo 'Required admission, cookie contract or server-backed probe did not succeed.'
+            exit 1
+          fi
+          echo 'Reviewed-source session reuse integration passed. This is not hostile-candidate attestation or XDR validation.'
