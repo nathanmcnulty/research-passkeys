@@ -154,7 +154,11 @@ function Get-OrCreateApplication {
 
     Write-Host "Checking application '$DisplayName'..." -ForegroundColor Cyan
     $appList = Invoke-AzCliJson -Arguments @('ad', 'app', 'list', '--display-name', $DisplayName, '--output', 'json')
-    $app = Get-FirstOrNull (@($appList | Where-Object { $_.displayName -eq $DisplayName }))
+    $matchingApps = @($appList | Where-Object { $_.displayName -eq $DisplayName })
+    if ($matchingApps.Count -gt 1) {
+        throw 'Multiple application registrations match AppName. Choose a unique application display name before continuing; no application was selected.'
+    }
+    $app = Get-FirstOrNull $matchingApps
 
     if ($app) {
         Write-Host 'Reusing existing application registration.' -ForegroundColor Yellow

@@ -14,7 +14,7 @@ BeforeAll {
             '^account show --output none$' { return }
             '^account show --output json$' { return '{"tenantId":"fixture-tenant"}' }
             '^ad app list --display-name .+ --output json$' {
-                return '[{"id":"fixture-application","appId":"fixture-client","displayName":"action-passkey-login"}]'
+                return ConvertTo-Json -InputObject @($global:PasskeySetupFixture.Applications) -Depth 5
             }
             '^ad sp show --id fixture-client --output json$' {
                 return '{"id":"fixture-service-principal","appId":"fixture-client"}'
@@ -60,7 +60,7 @@ BeforeAll {
 
 Describe 'OIDC setup trust boundary' {
     BeforeEach {
-        $global:PasskeySetupFixture = @{ Calls = @(); Credentials = @() }
+        $global:PasskeySetupFixture = @{ Calls = @(); Credentials = @(); Applications = @([pscustomobject]@{id='fixture-application';appId='fixture-client';displayName='action-passkey-login'}) }
         Mock Invoke-RestMethod { throw 'Unexpected HTTP in offline OIDC setup fixture.' }
         Mock Invoke-WebRequest { throw 'Unexpected HTTP in offline OIDC setup fixture.' }
     }
@@ -253,5 +253,26 @@ Describe 'OIDC setup trust boundary' {
         { Invoke-SetupFixture @{ GitHubRepo = 'contoso/automation'; Environment = 'entra-prod' } } | Should -Throw '*incompatible subject, issuer, or audiences*'
         $global:PasskeySetupFixture.Credentials[0].subject | Should -BeExactly 'repo:contoso/another-repo:environment:entra-prod'
         @($global:PasskeySetupFixture.Calls | Where-Object { $_ -match '^ad app federated-credential create ' }).Count | Should -Be 0
+    }
+}
+
+Describe 'Ambiguous application selection' {
+    BeforeEach {
+        $global:PasskeySetupFixture = @{ Calls = @(); Credentials = @(); Applications = @() }
+        Mock Invoke-RestMethod { throw 'Unexpected HTTP in offline fixture.' }
+        Mock Invoke-WebRequest { throw 'Unexpected HTTP in offline fixture.' }
+    }
+    AfterAll { Remove-Variable PasskeySetupFixture -Scope Global -ErrorAction SilentlyContinue }
+    It 'rejects duplicate matching display names before any dependent read or write: <SecondName>' -ForEach @(
+        @{SecondName='action-passkey-login'}, @{SecondName='ACTION-PASSKEY-LOGIN'}
+    ) {
+        $global:PasskeySetupFixture.Applications = @(
+            [pscustomobject]@{id='first-object';appId='first-client';displayName='action-passkey-login'},
+            [pscustomobject]@{id='second-object';appId='second-client';displayName=$SecondName}
+        )
+        { Invoke-SetupFixture @{GitHubRepo='contoso/automation';Environment='entra-prod';KeyVaultName='fixture-vault'} } | Should -Throw '*Multiple application registrations*'
+        @($global:PasskeySetupFixture.Calls | Where-Object { $_ -match '^(ad sp|ad app federated-credential|keyvault|role assignment)|\b(create|delete|update)\b' }).Count | Should -Be 0
+        Should -Invoke Invoke-WebRequest -Times 0
+        Should -Invoke Invoke-RestMethod -Times 0
     }
 }
