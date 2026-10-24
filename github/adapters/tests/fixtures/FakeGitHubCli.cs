@@ -32,6 +32,20 @@ public static class FakeGitHubCli
         }
 
         string input = Console.In.ReadToEnd();
+        if (mode.StartsWith("sentinel-"))
+        {
+            switch (mode)
+            {
+                case "sentinel-ok": Console.Out.Write("PASSKEY_PROTECTION_OK\n"); return 0;
+                case "sentinel-crlf": Console.Out.Write("PASSKEY_PROTECTION_OK\r\n"); return 0;
+                case "sentinel-empty": return 0;
+                case "sentinel-extra": Console.Out.Write("PASSKEY_PROTECTION_OK\nSYNTHETIC-PRIVATE"); return 0;
+                case "sentinel-prefix": Console.Out.Write("PASSKEY_PROTECTION_OK"); return 0;
+                case "sentinel-huge": Console.Out.Write(new string('x', 100000)); return 0;
+                case "sentinel-failed": Console.Out.Write("PASSKEY_PROTECTION_OK\n"); return 1;
+                default: return 97;
+            }
+        }
         if (mode.StartsWith("http-"))
         {
             string status = mode.Substring(5);

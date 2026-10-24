@@ -79,3 +79,47 @@ The no-redirect transport captures PowerShell 7.6's expected `MaximumRedirectExc
 record only alongside an actual redirect response. It follows no redirects automatically,
 preserves session cookies, still fails all other transport errors and does not retain the
 captured request error in the caller's error history.
+
+## Protected live-validation environment
+
+The default remains the four legacy `PASSKEY_PRIVATE_*` repository secrets. Opt in with
+both `-ProtectedLab -Environment 'passkey-validation'` to target only an existing GitHub
+Environment, with exactly `PASSKEY_LAB_CREDENTIAL_ID`, `PASSKEY_LAB_USER_HANDLE`,
+`PASSKEY_LAB_USER_PRINCIPAL_NAME`, and `PASSKEY_LAB_PRIVATE_KEY` (private key last).
+The environment name is restricted to 1-100 letters, digits, dots, underscores or hyphens,
+starting with a letter or digit. Missing/invalid environment input fails locally. A read-only
+GET checks that exact environment and its branch policies before any TAP authentication,
+recovery-file reservation, or enrollment, and rechecks immediately before export. Required
+reviewers must be nonempty valid users/teams, selected branches must admit only the exact
+main branch (no tags or patterns), and visible enabled administrator bypass is refused.
+Missing, malformed, denied, or unconfirmed policy responses fail closed. It neither creates
+nor configures an environment and never falls back to repository secrets on failure.
+Read visibility does not prove write permission; protection checks are point-in-time, not
+a lock against later configuration changes. If GitHub omits the bypass setting, verify it
+manually during setup. A failed post-enrollment guard retains the verified recovery file
+and reports export NotStarted; fix protections and retry export, not enrollment.
+Keep these lab names environment-only: do not create same-name repository or organization
+secrets, which could otherwise serve as fallback when an environment value is absent.
+
+From the reviewed checkout, with PowerShell 7.6 and GitHub CLI already authenticated for
+the intended repository, pause consumers and run this once. Use an existing private output
+directory, a new recovery filename, and a dedicated disposable test account. The TAP prompt
+keeps the TAP out of command history; the confirmation describes persistent enrollment and
+four non-atomic secret replacements.
+
+```powershell
+./github/adapters/Register-GitHubPasskeyViaTAP.ps1 -TAP (Read-Host 'Temporary Access Pass' -AsSecureString) -UserPrincipalName '<test-user-upn>' -Repository '<owner/repo>' -ProtectedLab -Environment 'passkey-validation' -RecoveryOutputPath '<new-private-recovery-file.json>' -DisplayName ("GitHub Lab " + (Get-Date -Format yyMMdd))
+```
+
+Use an explicit `-TenantId '<tenant-guid>'` only if the intended tenant differs from UPN
+discovery. Failures/results identify `SecretProfile`; partial writes contain only names for
+that profile. On export failure, keep consumers paused and retry the saved credential with
+`Export-PasskeyToGitHubSecret -Credential (Get-Content '<private-recovery-file.json>' -Raw | ConvertFrom-Json) -Repository '<owner/repo>' -ProtectedLab -Environment 'passkey-validation'` after loading the module or dot-sourcing the exporter.
+This repeats the same four values, not enrollment. For unconfirmed enrollment, reconcile the
+saved credential ID in My Sign-ins first; do not register a second credential automatically.
+Offline tests do not establish live enrollment or GitHub write success.
+
+The offline protection-predicate tests require an existing `jq` executable in
+addition to PowerShell 7.6 and Pester 6.2.0; tests fail clearly if it is absent and
+never install it. The actual registration/export helper uses GitHub CLI's built-in
+`--jq` support and does not require a separate jq installation.

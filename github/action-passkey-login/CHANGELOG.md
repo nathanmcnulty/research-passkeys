@@ -1,4 +1,17 @@
-﻿# Changelog
+# Changelog
+
+## Unreleased controller follow-up
+
+- Add a fail-closed identity-only server-backed session-reuse probe for an explicitly configured public-client compatibility scenario. Synthetic/offline checks are not live acceptance.
+- Require fresh code/PKCE, state/nonce and direct TLS token-response checks, followed by matching UserInfo subject. Do not silently select a client or request resource/refresh-token scopes for the test.
+- Keep same-runner limitations explicit; allow the final result only when admission, cookie contract and server probe all succeed. Setup, bootstrap, hosted CI and live dispatch remain separately authorized.
+
+## Source package 0.3.2 (unreleased)
+
+- Prepare a protected, exact-revision manual lab cookie-output-contract controller and offline boundary tests. Independent authenticated readback remains unimplemented; the end-to-end workflow gate deliberately cannot pass.
+- Retire the old manual private-key example at this revision and use separate environment-only lab secret names. Old workflow revisions are not revoked.
+- The canonical registration/export helper gains an explicit protected-lab destination without changing its legacy default. Account enrollment, secret storage, controller publication and live dispatch remain separate authorized actions.
+- Regenerate shared artifacts for source package 0.3.2; no release tags change.
 
 ## Source package 0.3.1
 

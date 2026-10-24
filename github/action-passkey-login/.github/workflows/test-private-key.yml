@@ -12,6 +12,9 @@ env:
 
 jobs:
   test-private-key:
+    # Retired example. Historical refs/reruns are not revoked by this change.
+    # Never populate its legacy repository-secret names for the protected lab.
+    if: ${{ false }}
     runs-on: windows-latest
 
     steps:

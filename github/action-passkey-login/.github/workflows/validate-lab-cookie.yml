@@ -1,0 +1,205 @@
+name: Reviewed lab session reuse validation
+run-name: Reviewed lab session reuse ${{ inputs.candidate_sha }} from ${{ inputs.source_sha }}
+
+on:
+  workflow_dispatch:
+    inputs:
+      candidate_sha:
+        description: Exact reviewed Action PR head (40 lowercase hex characters)
+        required: true
+        type: string
+      source_sha:
+        description: Exact reviewed canonical source commit already merged to main
+        required: true
+        type: string
+      pull_request:
+        description: Open same-repository Action pull request number
+        required: true
+        type: string
+
+permissions: {}
+concurrency:
+  group: passkey-validation-lab-account
+  cancel-in-progress: false
+env:
+  POWERSHELL_TELEMETRY_OPTOUT: '1'
+  DOTNET_CLI_TELEMETRY_OPTOUT: '1'
+
+jobs:
+  preflight:
+    if: github.repository == 'nathanmcnulty/action-passkey-login' && github.ref == 'refs/heads/main' && github.event_name == 'workflow_dispatch'
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    permissions:
+      contents: read
+      actions: read
+      pull-requests: read
+    steps:
+      - name: Check out trusted controller
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ github.workflow_sha }}
+          persist-credentials: false
+          path: controller
+      - name: Admit immutable candidate without credentials
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ github.token }}
+          CANDIDATE_SHA: ${{ inputs.candidate_sha }}
+          SOURCE_SHA: ${{ inputs.source_sha }}
+          PR_NUMBER: ${{ inputs.pull_request }}
+          CONTROLLER_SHA: ${{ github.workflow_sha }}
+        run: |
+          . ./controller/.github/validation/LabController.ps1
+          $receipt = Invoke-LabAdmission $env:CANDIDATE_SHA $env:SOURCE_SHA $env:PR_NUMBER $env:CONTROLLER_SHA
+          $receipt | ConvertTo-Json -Depth 4 | Add-Content $env:GITHUB_STEP_SUMMARY
+          @"
+          Candidate: $env:CANDIDATE_SHA
+          Canonical source: $env:SOURCE_SHA
+          Controller: $env:CONTROLLER_SHA
+          Reviewer: approve these exact revisions to receive the disposable lab key.
+          This is not a sandbox or independent authentication proof.
+          "@ | Add-Content $env:GITHUB_STEP_SUMMARY
+
+  cookie-contract:
+    name: Cookie output and server-backed session reuse
+    needs: preflight
+    runs-on: windows-latest
+    timeout-minutes: 10
+    environment: passkey-validation
+    permissions:
+      contents: read
+      actions: read
+      pull-requests: read
+    steps:
+      - name: Check out trusted controller
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ github.workflow_sha }}
+          persist-credentials: false
+          path: controller
+      - name: Recheck admission after environment approval
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ github.token }}
+          CANDIDATE_SHA: ${{ inputs.candidate_sha }}
+          SOURCE_SHA: ${{ inputs.source_sha }}
+          PR_NUMBER: ${{ inputs.pull_request }}
+          CONTROLLER_SHA: ${{ github.workflow_sha }}
+        run: |
+          . ./controller/.github/validation/LabController.ps1
+          $receipt = Invoke-LabAdmission $env:CANDIDATE_SHA $env:SOURCE_SHA $env:PR_NUMBER $env:CONTROLLER_SHA
+          $receipt | ConvertTo-Json -Depth 4 | Add-Content $env:GITHUB_STEP_SUMMARY
+      - name: Check out admitted candidate
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ inputs.candidate_sha }}
+          persist-credentials: false
+          path: candidate
+      - name: Verify exact checkout and runtime
+        shell: pwsh
+        env:
+          CANDIDATE_SHA: ${{ inputs.candidate_sha }}
+        run: |
+          $actual = git -C candidate rev-parse HEAD
+          if ($LASTEXITCODE -ne 0 -or $actual -cne $env:CANDIDATE_SHA) { throw 'Candidate checkout mismatch.' }
+          if ($PSVersionTable.PSVersion.Major -ne 7 -or $PSVersionTable.PSVersion.Minor -ne 6) { throw 'Installed PowerShell 7.6 required.' }
+          if ([Microsoft.PowerShell.Telemetry.ApplicationInsightsTelemetry]::CanSendTelemetry) { throw 'Telemetry must be disabled.' }
+      - name: Require all four environment-only lab values
+        shell: pwsh
+        env:
+          LAB_ID: ${{ secrets.PASSKEY_LAB_CREDENTIAL_ID }}
+          LAB_HANDLE: ${{ secrets.PASSKEY_LAB_USER_HANDLE }}
+          LAB_UPN: ${{ secrets.PASSKEY_LAB_USER_PRINCIPAL_NAME }}
+          LAB_KEY: ${{ secrets.PASSKEY_LAB_PRIVATE_KEY }}
+        run: |
+          foreach ($name in @('LAB_ID', 'LAB_HANDLE', 'LAB_UPN', 'LAB_KEY')) {
+            if ([string]::IsNullOrWhiteSpace([Environment]::GetEnvironmentVariable($name))) { throw 'Lab configuration incomplete; not run.' }
+          }
+      - name: Require explicit reviewed-client lab configuration
+        id: lab-config
+        shell: pwsh
+        env:
+          LAB_TENANT: ${{ vars.PASSKEY_LAB_TENANT_ID }}
+          LAB_CLIENT: ${{ vars.PASSKEY_LAB_CLIENT_ID }}
+          LAB_UPN: ${{ secrets.PASSKEY_LAB_USER_PRINCIPAL_NAME }}
+        run: |
+          . ./controller/.github/validation/LabSessionProbe.ps1
+          Assert-LabProbeConfiguration $env:LAB_TENANT $env:LAB_CLIENT $env:LAB_UPN
+          # Bootstrap only obtains the cookie. Discard its verifier; any issued
+          # code is not redeemed. The probe creates a separate fresh transaction.
+          $verifier = ConvertTo-LabProbeBase64Url ([Security.Cryptography.RandomNumberGenerator]::GetBytes(32))
+          $challenge = ConvertTo-LabProbeBase64Url ([Security.Cryptography.SHA256]::HashData([Text.Encoding]::ASCII.GetBytes($verifier)))
+          $state = ConvertTo-LabProbeBase64Url ([Security.Cryptography.RandomNumberGenerator]::GetBytes(32))
+          $nonce = ConvertTo-LabProbeBase64Url ([Security.Cryptography.RandomNumberGenerator]::GetBytes(32))
+          $query = ConvertTo-LabProbeForm @{ client_id=$env:LAB_CLIENT; redirect_uri='https://login.microsoftonline.com/common/oauth2/nativeclient'; scope='openid profile'; response_type='code'; response_mode='query'; code_challenge=$challenge; code_challenge_method='S256'; state=$state; nonce=$nonce }
+          $verifier = $null
+          $url = "https://login.microsoftonline.com/$($env:LAB_TENANT)/oauth2/v2.0/authorize?$query"
+          Write-Output "::add-mask::$url"
+          "auth-url=$url" | Add-Content $env:GITHUB_OUTPUT
+      - name: Run admitted candidate with lab credential
+        id: passkey
+        uses: ./candidate
+        with:
+          credential-id: ${{ secrets.PASSKEY_LAB_CREDENTIAL_ID }}
+          user-handle: ${{ secrets.PASSKEY_LAB_USER_HANDLE }}
+          user-principal-name: ${{ secrets.PASSKEY_LAB_USER_PRINCIPAL_NAME }}
+          private-key: ${{ secrets.PASSKEY_LAB_PRIVATE_KEY }}
+          auth-url: ${{ steps.lab-config.outputs.auth-url }}
+          expected-client-id: ${{ vars.PASSKEY_LAB_CLIENT_ID }}
+          confirm-application: 'false'
+          export-auth-cookie: 'true'
+      - name: Observe cookie output contract without exposing values
+        shell: pwsh
+        env:
+          AUTHENTICATED: ${{ steps.passkey.outputs.authenticated }}
+          COOKIE: ${{ steps.passkey.outputs.auth-cookie }}
+          COOKIE_NAME: ${{ steps.passkey.outputs.cookie-name }}
+          METHOD: ${{ steps.passkey.outputs.signature-method }}
+          RETURNED_UPN: ${{ steps.passkey.outputs.user-principal-name }}
+          REQUESTED_UPN: ${{ secrets.PASSKEY_LAB_USER_PRINCIPAL_NAME }}
+        run: |
+          . ./controller/.github/validation/LabController.ps1
+          Assert-LabCookieContract $env:AUTHENTICATED $env:COOKIE $env:COOKIE_NAME $env:METHOD $env:REQUESTED_UPN $env:RETURNED_UPN
+          [ordered]@{ runtime = [string]$PSVersionTable.PSVersion; cookie_contract_observed = $true; independent_readback = $false } | ConvertTo-Json | Add-Content $env:GITHUB_STEP_SUMMARY
+          'Cookie output contract observed. This runner executed the candidate: its observations are not tamper-proof independent evidence. Account identity, session reuse and XDR access NOT VERIFIED.' | Add-Content $env:GITHUB_STEP_SUMMARY
+      - name: Verify fresh server-backed session reuse
+        shell: pwsh
+        env:
+          COOKIE: ${{ steps.passkey.outputs.auth-cookie }}
+          COOKIE_NAME: ${{ steps.passkey.outputs.cookie-name }}
+          LAB_TENANT: ${{ vars.PASSKEY_LAB_TENANT_ID }}
+          LAB_CLIENT: ${{ vars.PASSKEY_LAB_CLIENT_ID }}
+          LAB_UPN: ${{ secrets.PASSKEY_LAB_USER_PRINCIPAL_NAME }}
+        run: |
+          . ./controller/.github/validation/LabSessionProbe.ps1
+          $receipt = Invoke-LabSessionProbe $env:COOKIE $env:COOKIE_NAME $env:LAB_TENANT $env:LAB_CLIENT $env:LAB_UPN
+          $receipt | ConvertTo-Json | Add-Content $env:GITHUB_STEP_SUMMARY
+          'Server-backed session reuse verified for this reviewed candidate. Same-runner integration evidence, not tamper-proof candidate attestation. Current UPN checked, not an immutable account pin across renames. No XDR/resource access tested.' | Add-Content $env:GITHUB_STEP_SUMMARY
+      - name: Discard checkout files (does not revoke remote sessions)
+        if: ${{ always() }}
+        shell: pwsh
+        run: |
+          foreach ($path in @('candidate', 'controller')) {
+            if (Test-Path -LiteralPath $path) { Remove-Item -LiteralPath $path -Recurse -Force -ErrorAction SilentlyContinue }
+          }
+
+  reviewed-session-verdict:
+    name: Reviewed session reuse result
+    needs: [preflight, cookie-contract]
+    if: ${{ always() }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 2
+    permissions: {}
+    steps:
+      - name: Require both complete jobs, never accept skipped validation
+        shell: bash
+        env:
+          PREFLIGHT_RESULT: ${{ needs.preflight.result }}
+          SESSION_RESULT: ${{ needs.cookie-contract.result }}
+        run: |
+          if [[ "$PREFLIGHT_RESULT" != success || "$SESSION_RESULT" != success ]]; then
+            echo 'Required admission, cookie contract or server-backed probe did not succeed.'
+            exit 1
+          fi
+          echo 'Reviewed-source session reuse integration passed. This is not hostile-candidate attestation or XDR validation.'

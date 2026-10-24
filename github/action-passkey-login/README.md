@@ -367,4 +367,12 @@ Microsoft describes this app confirmation in its [AADSTS50199 documentation](htt
 
 ## Proposed live validation
 
-The [live validation plan](docs/LIVE-VALIDATION-PLAN.md) describes a future protected, repository-bound lab check. It is not implemented or evidence of a passing live run; credentials, environments, trust configuration and execution require separate approval.
+The [protected lab controller](docs/LAB-COOKIE-CONTROLLER.md) prepares a manual,
+exact-revision cookie-output and server-backed session-reuse integration test.
+It requires a separately reviewed public-client compatibility configuration with identity-only
+permissions. Source and offline tests are not evidence of a passing live run.
+Setup, controller bootstrap, hosted CI, merges and one bounded dispatch require
+appropriate approval. Same-runner results are not hostile-candidate attestation.
+
+The [live validation plan](docs/LIVE-VALIDATION-PLAN.md) describes the remaining
+publication/setup/run sequence. No XDR access is established by this lane.
