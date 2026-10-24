@@ -91,14 +91,24 @@ foreach ($field in $requiredFields) {
     $body[$field] = $securityPortal.InputFields | Where-Object { $_.name -eq $field } | Select-Object -ExpandProperty value
 }
 
-$null = Invoke-WebRequest `
-    -UseBasicParsing `
-    -ErrorAction SilentlyContinue `
-    -WebSession $session `
-    -Method Post `
-    -Uri $securityPortalUri `
-    -Body $body `
-    -Verbose:$false
+try {
+    $portalResponses = @(Invoke-WebRequest `
+        -UseBasicParsing `
+        -ErrorAction Stop `
+        -WebSession $session `
+        -Method Post `
+        -Uri $securityPortalUri `
+        -Body $body `
+        -Verbose:$false)
+    if ($portalResponses.Count -ne 1) { throw 'Ambiguous portal response.' }
+    $portalResponse = $portalResponses[0]
+    if (-not $portalResponse -or [int]$portalResponse.StatusCode -lt 200 -or [int]$portalResponse.StatusCode -ge 300) {
+        throw 'Unsuccessful portal response.'
+    }
+} catch {
+    # Do not expose exception details or server content containing authentication material.
+    throw 'XDR portal bootstrap form exchange failed; authenticated access remains unverified.'
+}
 
 $xdrCookies = $session.Cookies.GetCookies('https://security.microsoft.com')
 if (-not $xdrCookies -or $xdrCookies.Count -eq 0) {
@@ -106,7 +116,11 @@ if (-not $xdrCookies -or $xdrCookies.Count -eq 0) {
 }
 
 [PSCustomObject]@{
-    Success = $true
+    # Compatibility field deliberately stays false: portal cookies are not proof of authentication.
+    Success = $false
+    BootstrapCompleted = $true
+    AuthenticationVerified = $false
+    ValidationScope = 'PortalBootstrapOnly'
     EstsCookieName = $EstsCookieName
     SecurityPortalUri = $securityPortalUri
     XdrCookieNames = @($xdrCookies | Select-Object -ExpandProperty Name | Sort-Object -Unique)

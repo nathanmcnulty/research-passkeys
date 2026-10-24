@@ -216,7 +216,7 @@ Example using the cookie with a downstream PowerShell flow. This action is desig
 
 Do not print the cookie. Do not promote it to an artifact. Keep its use scoped to the smallest possible set of steps.
 
-For a full repository-hosted validation flow, use [test-xdr-key-vault.yml](.github/workflows/test-xdr-key-vault.yml). It signs in with the action, asserts that the returned cookie is `ESTSAUTH`, and then validates that the cookie can bootstrap a session to `security.microsoft.com`.
+For a repository-hosted login and portal-bootstrap exercise, use [test-xdr-key-vault.yml](.github/workflows/test-xdr-key-vault.yml). It signs in with the action, asserts that the returned cookie is `ESTSAUTH`, and exercises the portal form exchange at `security.microsoft.com`. Portal cookies, including anonymous tracking cookies, do not prove authenticated XDR access. The helper returns `BootstrapCompleted = true`, `ValidationScope = PortalBootstrapOnly`, and `AuthenticationVerified = false`; its legacy `Success` field remains false. A green run proves only these bounded checks, not an authenticated XDR readback or a specific tenant identity. Do not use it as an XDR authentication-validation badge.
 
 ## Local key mode
 
@@ -355,6 +355,8 @@ The fixed issuer is `https://token.actions.githubusercontent.com` and the sole a
 
 After running the helper, store the emitted client and tenant IDs as GitHub secrets or variables to match your workflow. If you did not pass `-KeyVaultName`, grant the service principal `Key Vault Crypto User` on the target Key Vault or key separately. A successful setup does not verify a live token exchange or passkey login.
 
+The OIDC setup helper refuses ambiguous application display-name matches before selecting a service principal or changing trust. Choose a unique `AppName`; it never selects the first of several matching registrations.
+
 ## Publishing
 
 Tag a release such as `v1.0.0` and publish through the GitHub Marketplace flow in repository settings.
@@ -362,3 +364,7 @@ Tag a release such as `v1.0.0` and publish through the GitHub Marketplace flow i
 Application-intent confirmation (`CmsiInterrupt`/AADSTS50199) is separate from OAuth permission consent. The action stops at this confirmation by default. For an operator-authorized automation, set `confirm-application: 'true'` and `expected-client-id` to the intended authorization client; the initial URL must contain that client exactly once. This does not approve OAuth scope consent. The default Azure CLI authorization uses its HTTPS native callback. Assertions, identity response bodies, and credential prefixes are omitted from diagnostics.
 
 Microsoft describes this app confirmation in its [AADSTS50199 documentation](https://learn.microsoft.com/en-us/entra/identity-platform/reference-error-codes).
+
+## Proposed live validation
+
+The [live validation plan](docs/LIVE-VALIDATION-PLAN.md) describes a future protected, repository-bound lab check. It is not implemented or evidence of a passing live run; credentials, environments, trust configuration and execution require separate approval.

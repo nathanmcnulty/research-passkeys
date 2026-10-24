@@ -1,4 +1,4 @@
-﻿name: Test Passkey Login (Key Vault to XDR)
+﻿name: Test Passkey Login (Key Vault and XDR bootstrap only)
 
 on:
   workflow_dispatch:
@@ -16,7 +16,7 @@ jobs:
     runs-on: windows-latest
 
     steps:
-      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
       - name: Verify installed PowerShell 7.6
         shell: pwsh
@@ -30,7 +30,7 @@ jobs:
           }
 
       - name: Azure login via OIDC
-        uses: azure/login@2dd0bbf4064d5a1812889dc200bb8eed2597f82a # v3
+        uses: azure/login@a641126d1b8aa4d1fa005f4f92df94a3a4c4c906 # v3.1.0
         with:
           client-id: ${{ secrets.AZURE_CLIENT_ID }}
           tenant-id: ${{ secrets.AZURE_TENANT_ID }}
@@ -52,12 +52,14 @@ jobs:
         env:
           ESTS_COOKIE: ${{ steps.passkey.outputs.auth-cookie }}
           ESTS_COOKIE_NAME: ${{ steps.passkey.outputs.cookie-name }}
+          PASSKEY_AUTHENTICATED: ${{ steps.passkey.outputs.authenticated }}
+          PASSKEY_SIGNATURE_METHOD: ${{ steps.passkey.outputs.signature-method }}
         run: |
-          if ('${{ steps.passkey.outputs.authenticated }}' -ne 'true') {
+          if ($env:PASSKEY_AUTHENTICATED -ne 'true') {
             throw 'Passkey authentication did not complete successfully.'
           }
 
-          if ('${{ steps.passkey.outputs.signature-method }}' -ne 'Azure Key Vault') {
+          if ($env:PASSKEY_SIGNATURE_METHOD -ne 'Azure Key Vault') {
             throw 'Expected the Key Vault validation workflow to use Azure Key Vault signing.'
           }
 
@@ -69,7 +71,7 @@ jobs:
             throw "Expected cookie-name output to be ESTSAUTH but received '$($env:ESTS_COOKIE_NAME)'."
           }
 
-      - name: Validate XDR connection using ESTSAUTH
+      - name: Exercise XDR portal bootstrap (not authenticated validation)
         shell: pwsh
         env:
           ESTS_COOKIE: ${{ steps.passkey.outputs.auth-cookie }}
@@ -81,9 +83,12 @@ jobs:
             -EstsCookieName $env:ESTS_COOKIE_NAME `
             -TenantId $env:TENANT_ID
 
-          if (-not $result.Success) {
-            throw 'Expected the XDR validation script to return Success = true.'
+          if (-not $result.BootstrapCompleted -or $result.ValidationScope -ne 'PortalBootstrapOnly') {
+            throw 'Expected portal-bootstrap evidence.'
+          }
+          if ($result.Success -or $result.AuthenticationVerified) {
+            throw 'Portal bootstrap must not claim authenticated XDR validation.'
           }
 
-          Write-Host "XDR validation succeeded with $($result.EstsCookieName)."
+          Write-Host 'XDR portal bootstrap completed. Authenticated XDR readback remains unverified.'
           Write-Host "XDR cookies established: $($result.XdrCookieNames -join ', ')"
