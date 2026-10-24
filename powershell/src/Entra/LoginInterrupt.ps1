@@ -6,6 +6,7 @@ function Resolve-EntraLoginInterrupts {
     $LastPageId = $null
     $CurrentPageId = $Debug.pgid
     $LoopCount=0
+    $ApplicationConfirmationSubmitted=$false
     while ($Debug.pgid -in @('KmsiInterrupt','ConvergedSignIn') -or $Debug.pgid -eq 'CmsiInterrupt') {
         if ($Debug.pgid -eq 'CmsiInterrupt' -and -not $ConfirmApplication) {
             throw 'Application confirmation is required. The unattended passkey action will not submit approval.'
@@ -17,6 +18,17 @@ function Resolve-EntraLoginInterrupts {
         $LastPageId=$CurrentPageId
         switch ($CurrentPageId) {
             'CmsiInterrupt' {
+                if ($ApplicationConfirmationSubmitted) {
+                    throw 'Application confirmation was already submitted; repeated approval is not permitted.'
+                }
+                foreach ($field in @('canary','sFT','correlationId','sCtx')) {
+                    if ($Debug[$field] -isnot [string] -or [string]::IsNullOrWhiteSpace($Debug[$field])) {
+                        throw 'Application confirmation state is missing or malformed; approval was not submitted.'
+                    }
+                }
+                # These opaque values bind the continuation to the received page state.
+                # They do not independently prove the app displayed by Microsoft.
+                $ApplicationConfirmationSubmitted=$true
                 $uri='https://login.microsoftonline.com/appverify';$method='Post'
                 $body=@{ContinueAuth='true';i19=(Get-Random -Minimum 1000 -Maximum 9999);canary=$Debug.canary;iscsrfspeedbump='false';flowToken=$Debug.sFT;hpgrequestid=$Debug.correlationId;ctx=$Debug.sCtx}
             }

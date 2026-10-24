@@ -36,7 +36,7 @@ inputs:
     description: 'Optional override for the Entra authorize URL.'
     required: false
   confirm-application:
-    description: 'Explicitly confirm the intended application at CmsiInterrupt; this is not OAuth permission consent.'
+    description: 'Explicitly continue the intended application confirmation; permission-consent pages remain unsupported.'
     required: false
     default: 'false'
   expected-client-id:
