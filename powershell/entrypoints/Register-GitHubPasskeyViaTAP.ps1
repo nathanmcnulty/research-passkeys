@@ -6,11 +6,16 @@ Experimentally enroll a legacy software passkey through native My Sign-ins endpo
 Unattended software implementation, not a FIDO-certified authenticator. Native packed attestation uses a synthetic self-signed batch certificate; any UP/UV claims are synthetic and provide no authenticator presence, verification or hardware assurance. Tenant policy may reject this flow. TenantId is optional: omitted values use validated UPN-suffix OIDC discovery; use an explicit GUID for a guest/resource tenant. Names must be nonblank and at most 30 characters. RecoveryOutputPath must name a new private credential file. The exact generated credential is durably saved before enrollment and retained after success, uncertain enrollment, verification failure, or partial GitHub export. WhatIf performs no I/O. GitHub export performs four non-atomic secret writes; pause or disable consumers yourself before continuing.
 .PARAMETER RecoveryOutputPath
 New caller-controlled path for the private recovery credential. Existing files are refused. Protect this file like the GitHub private-key secret; it remains after successful export so the same enrolled credential can be reconciled or exported again without another enrollment.
+.PARAMETER ProtectedLab
+Opt in to the fixed PASSKEY_LAB_* secret profile in an existing GitHub Environment. Requires Environment. Never falls back to repository secrets.
+.PARAMETER Environment
+Explicit existing environment name for ProtectedLab. Preflight requires nonempty valid reviewers and an exclusive selected-main branch policy. Read access does not guarantee write permission.
 #>
 [CmdletBinding(SupportsShouldProcess, ConfirmImpact = 'High')]
 param([Parameter(Mandatory)][securestring]$TAP,
         [Parameter(Mandatory)][ValidatePattern('^[^\s@]+@[^\s@]+$')][string]$UserPrincipalName,
         [string]$TenantId, [Parameter(Mandatory)][string]$Repository,
+        [switch]$ProtectedLab, [string]$Environment,
         [Parameter(Mandatory)][string]$RecoveryOutputPath,
         [ValidateLength(1,30)][string]$DisplayName = 'Software Passkey')
 # Invoke public command

@@ -28,6 +28,13 @@ function New-FakeGitHubCli {
 [ "$POWERSHELL_TELEMETRY_OPTOUT" = 1 ] && [ "$DOTNET_CLI_TELEMETRY_OPTOUT" = 1 ] || exit 98
 case "$PASSKEY_TEST_CLI_MODE" in
     no-read) sleep 6; exit 0 ;;
+    sentinel-ok) cat >/dev/null; printf 'PASSKEY_PROTECTION_OK\n'; exit 0 ;;
+    sentinel-crlf) cat >/dev/null; printf 'PASSKEY_PROTECTION_OK\r\n'; exit 0 ;;
+    sentinel-empty) cat >/dev/null; exit 0 ;;
+    sentinel-extra) cat >/dev/null; printf 'PASSKEY_PROTECTION_OK\nSYNTHETIC-PRIVATE'; exit 0 ;;
+    sentinel-prefix) cat >/dev/null; printf 'PASSKEY_PROTECTION_OK'; exit 0 ;;
+    sentinel-huge) cat >/dev/null; head -c 100000 /dev/zero; exit 0 ;;
+    sentinel-failed) cat >/dev/null; printf 'PASSKEY_PROTECTION_OK\n'; exit 1 ;;
     success)
         v=$(cat)
         [ "$v" = 'SYNTHETIC-INPUT' ] || exit 7

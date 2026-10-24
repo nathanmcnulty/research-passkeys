@@ -1,17 +1,17 @@
 # Fork-safe live validation plan
 
-Status: proposed, unimplemented. No Azure federation, role assignment, environment protection, enrollment, live login or workflow enablement is established by this document. Source-only/offline checks are not live validation.
+Status: the bounded [cookie-contract controller](LAB-COOKIE-CONTROLLER.md) is prepared in source; independent live readback remains unimplemented. No Azure federation, role assignment, environment protection, enrollment, live login or workflow enablement is established by these files. Source-only/offline checks are not live validation. Use only the new environment-only `PASSKEY_LAB_*` names for this protected lane; never provision legacy repository-secret names for it.
 
 ## Preferred first lane: approved lab passkey secrets
 
 The selected first live test uses a dedicated generic lab user and passkey values in GitHub secrets. Use four encrypted secrets in the protected `passkey-validation` environment, matching the existing private-key workflow inputs:
 
-- `PASSKEY_PRIVATE_CREDENTIAL_ID` -> `credential-id`
-- `PASSKEY_PRIVATE_USER_HANDLE` -> `user-handle`
-- `PASSKEY_PRIVATE_USER_PRINCIPAL_NAME` -> `user-principal-name`
-- `PASSKEY_PRIVATE_KEY` -> `private-key` (PEM or supported encoded form)
+- `PASSKEY_LAB_CREDENTIAL_ID` -> `credential-id`
+- `PASSKEY_LAB_USER_HANDLE` -> `user-handle`
+- `PASSKEY_LAB_USER_PRINCIPAL_NAME` -> `user-principal-name`
+- `PASSKEY_LAB_PRIVATE_KEY` -> `private-key` (PEM or supported encoded form)
 
-Use a dedicated minimally privileged lab account and passkey, not a personal administrator credential. This lane does not need Azure Login, a federated workload identity, Key Vault access, or `id-token: write`. The existing manual private-key workflow is only a starting point: it still needs protected-environment admission, exact-SHA review and safe output transport before use.
+Use a dedicated minimally privileged lab account and passkey, not a personal administrator credential. This lane does not need Azure Login, a federated workload identity, Key Vault access, or `id-token: write`. The old manual private-key example is disabled at this revision. The new controller supplies protected-environment admission, exact-SHA review and safe output transport, but independent readback remains unimplemented.
 
 A workflow that receives the private key can exfiltrate or reuse it. GitHub encryption at rest and log masking do not protect against malicious admitted code. Fork PRs must remain offline-only. Approve the exact candidate revision before releasing the environment secrets; do not enable automatic live runs.
 
@@ -47,7 +47,7 @@ Required approvals and setup before execution:
 
 1. Confirm the test account, passkey enrollment and any narrowly necessary consent. No broad consent, tenant-policy bypass or role grants.
 2. Configure the protected `passkey-validation` environment and its reviewer/branch controls.
-3. Obtain explicit approval for transmitting/storing `PASSKEY_PRIVATE_KEY` and the three other named values in that encrypted environment-secret destination. The user enters the key directly in GitHub, never chat or Git source.
+3. Obtain explicit approval for transmitting/storing `PASSKEY_LAB_PRIVATE_KEY` and the three other named values in that encrypted environment-secret destination. The user enters the key directly in GitHub, never chat or Git source.
 4. Approve the first bounded live login/readback for the exact reviewed revision and test account. The present preference does not perform any of these actions.
 
 Exit: verified four-secret/environment configuration and test-account scope, without a claim of successful login yet.
