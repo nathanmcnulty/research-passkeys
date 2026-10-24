@@ -179,7 +179,7 @@ Describe 'Published Action runtime examples' {
     }
     It 'checks the installed composite runtime and sets opt-outs before both embedded-script processes' {
         $action = [IO.File]::ReadAllText((Join-Path $root 'github/action-passkey-login/action.yml')).Replace("`r`n","`n")
-        $action | Should -Match 'PSVersion.Major -ne 7 -or \$PSVersionTable.PSVersion.Minor -ne 6'
+        $action | Should -Match ([regex]::Escape("PSVersion -lt [version]'7.6'"))
         $action | Should -Match 'ApplicationInsightsTelemetry\]::CanSendTelemetry'
         ([regex]::Matches($action,"POWERSHELL_TELEMETRY_OPTOUT: '1'")).Count | Should -Be 2
         ([regex]::Matches($action,"DOTNET_CLI_TELEMETRY_OPTOUT: '1'")).Count | Should -Be 2

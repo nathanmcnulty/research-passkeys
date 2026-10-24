@@ -291,7 +291,7 @@ The script no longer writes token previews to the console. It only includes the 
 
 ## Notes
 
-- The action bundles `PasskeyLogin.ps1` and requires PowerShell 7.6. Hosted and self-hosted runners must have it installed before invoking the action; preflight fails clearly on an older runtime. This action does not install or download its implementation at runtime.
+- The action bundles `PasskeyLogin.ps1` and requires PowerShell 7.6 or later. Hosted and self-hosted runners must have it installed before invoking the action; preflight fails clearly on an older runtime. This action does not install or download its implementation at runtime. Offline CI and the live-validation examples deliberately select PowerShell 7.6; numeric minimum-version acceptance is not evidence that later runtimes have been validated.
 - The action masks sensitive inputs before invoking the script.
 - `azure/login` should run before this action when using Key Vault-backed signing.
 - If you grant Key Vault data-plane access, use a role or permission set that allows signing but no broader secret access than necessary.

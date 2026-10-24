@@ -13,8 +13,24 @@ function Assert-LabInputs {
 
 function Read-LabApi {
     param([Parameter(Mandatory)][string]$Path)
-    # All callers construct paths from fixed repositories and validated numbers/SHAs.
-    if ($Path -notmatch '^/repos/nathanmcnulty/(action-passkey-login|research-passkeys)/' -or $Path.Contains('..')) {
+    # Admit only the ten GET route shapes used below. Match the raw path without
+    # decoding or normalization: percent escapes, traversal, host substitutions,
+    # extra query parameters, case variants and terminal newlines are not routes.
+    # The compare separator is literal three dots, not a traversal component.
+    $sha = '(?!0{40}(?:[^0-9a-f]|\z))[0-9a-f]{40}'
+    $routes = @(
+        '/repos/nathanmcnulty/action-passkey-login/git/ref/heads/main'
+        '/repos/nathanmcnulty/action-passkey-login/pulls/[1-9][0-9]{0,8}'
+        "/repos/nathanmcnulty/research-passkeys/compare/$sha\.\.\.main"
+        "/repos/nathanmcnulty/research-passkeys/git/trees/$sha\?recursive=1"
+        "/repos/nathanmcnulty/action-passkey-login/git/commits/$sha"
+        "/repos/nathanmcnulty/action-passkey-login/git/trees/$sha\?recursive=1"
+        "/repos/nathanmcnulty/action-passkey-login/actions/workflows/ci\.yml/runs\?head_sha=$sha&event=push&per_page=1"
+        "/repos/nathanmcnulty/research-passkeys/actions/workflows/passkey-ci\.yml/runs\?head_sha=$sha&event=push&per_page=1"
+        '/repos/nathanmcnulty/action-passkey-login/environments/passkey-validation'
+        '/repos/nathanmcnulty/action-passkey-login/environments/passkey-validation/deployment-branch-policies\?per_page=100'
+    )
+    if (-not ($routes | Where-Object { $Path -cmatch ('\A' + $_ + '\z') })) {
         throw 'Unexpected API target.'
     }
     try {

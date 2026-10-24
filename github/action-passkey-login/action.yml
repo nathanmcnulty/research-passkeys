@@ -83,8 +83,8 @@ runs:
         DOTNET_CLI_TELEMETRY_OPTOUT: '1'
       run: |
         Write-Host "Installed PowerShell: $($PSVersionTable.PSVersion) ($([Environment]::ProcessPath))"
-        if ($PSVersionTable.PSVersion.Major -ne 7 -or $PSVersionTable.PSVersion.Minor -ne 6) {
-          throw "This action requires installed PowerShell 7.6, got $($PSVersionTable.PSVersion)."
+        if ($PSVersionTable.PSVersion -lt [version]'7.6') {
+          throw "This action requires installed PowerShell 7.6 or later, got $($PSVersionTable.PSVersion)."
         }
         if ([Microsoft.PowerShell.Telemetry.ApplicationInsightsTelemetry]::CanSendTelemetry) {
           throw 'Telemetry must be disabled before PowerShell starts.'
