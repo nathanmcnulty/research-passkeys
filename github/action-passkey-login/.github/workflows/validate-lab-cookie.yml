@@ -147,7 +147,7 @@ jobs:
           private-key: ${{ secrets.PASSKEY_LAB_PRIVATE_KEY }}
           auth-url: ${{ steps.lab-config.outputs.auth-url }}
           expected-client-id: ${{ vars.PASSKEY_LAB_CLIENT_ID }}
-          confirm-application: 'false'
+          confirm-application: 'true'
           export-auth-cookie: 'true'
       - name: Observe cookie output contract without exposing values
         shell: pwsh
