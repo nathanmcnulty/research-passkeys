@@ -1,0 +1,163 @@
+name: Lab cookie contract only (not end-to-end validation)
+run-name: Lab cookie contract ${{ inputs.candidate_sha }} from ${{ inputs.source_sha }}
+
+on:
+  workflow_dispatch:
+    inputs:
+      candidate_sha:
+        description: Exact reviewed Action PR head (40 lowercase hex characters)
+        required: true
+        type: string
+      source_sha:
+        description: Exact reviewed canonical source commit already merged to main
+        required: true
+        type: string
+      pull_request:
+        description: Open same-repository Action pull request number
+        required: true
+        type: string
+
+permissions: {}
+concurrency:
+  group: passkey-validation-lab-account
+  cancel-in-progress: false
+env:
+  POWERSHELL_TELEMETRY_OPTOUT: '1'
+  DOTNET_CLI_TELEMETRY_OPTOUT: '1'
+
+jobs:
+  preflight:
+    if: github.repository == 'nathanmcnulty/action-passkey-login' && github.ref == 'refs/heads/main' && github.event_name == 'workflow_dispatch'
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    permissions:
+      contents: read
+      actions: read
+      pull-requests: read
+    steps:
+      - name: Check out trusted controller
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ github.workflow_sha }}
+          persist-credentials: false
+          path: controller
+      - name: Admit immutable candidate without credentials
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ github.token }}
+          CANDIDATE_SHA: ${{ inputs.candidate_sha }}
+          SOURCE_SHA: ${{ inputs.source_sha }}
+          PR_NUMBER: ${{ inputs.pull_request }}
+          CONTROLLER_SHA: ${{ github.workflow_sha }}
+        run: |
+          . ./controller/.github/validation/LabController.ps1
+          $receipt = Invoke-LabAdmission $env:CANDIDATE_SHA $env:SOURCE_SHA $env:PR_NUMBER $env:CONTROLLER_SHA
+          $receipt | ConvertTo-Json -Depth 4 | Add-Content $env:GITHUB_STEP_SUMMARY
+          @"
+          Candidate: $env:CANDIDATE_SHA
+          Canonical source: $env:SOURCE_SHA
+          Controller: $env:CONTROLLER_SHA
+          Reviewer: approve these exact revisions to receive the disposable lab key.
+          This is not a sandbox or independent authentication proof.
+          "@ | Add-Content $env:GITHUB_STEP_SUMMARY
+
+  cookie-contract:
+    name: Cookie output contract (not identity proof)
+    needs: preflight
+    runs-on: windows-latest
+    timeout-minutes: 10
+    environment: passkey-validation
+    permissions:
+      contents: read
+      actions: read
+      pull-requests: read
+    steps:
+      - name: Check out trusted controller
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ github.workflow_sha }}
+          persist-credentials: false
+          path: controller
+      - name: Recheck admission after environment approval
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ github.token }}
+          CANDIDATE_SHA: ${{ inputs.candidate_sha }}
+          SOURCE_SHA: ${{ inputs.source_sha }}
+          PR_NUMBER: ${{ inputs.pull_request }}
+          CONTROLLER_SHA: ${{ github.workflow_sha }}
+        run: |
+          . ./controller/.github/validation/LabController.ps1
+          $receipt = Invoke-LabAdmission $env:CANDIDATE_SHA $env:SOURCE_SHA $env:PR_NUMBER $env:CONTROLLER_SHA
+          $receipt | ConvertTo-Json -Depth 4 | Add-Content $env:GITHUB_STEP_SUMMARY
+      - name: Check out admitted candidate
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ inputs.candidate_sha }}
+          persist-credentials: false
+          path: candidate
+      - name: Verify exact checkout and runtime
+        shell: pwsh
+        env:
+          CANDIDATE_SHA: ${{ inputs.candidate_sha }}
+        run: |
+          $actual = git -C candidate rev-parse HEAD
+          if ($LASTEXITCODE -ne 0 -or $actual -cne $env:CANDIDATE_SHA) { throw 'Candidate checkout mismatch.' }
+          if ($PSVersionTable.PSVersion.Major -ne 7 -or $PSVersionTable.PSVersion.Minor -ne 6) { throw 'Installed PowerShell 7.6 required.' }
+          if ([Microsoft.PowerShell.Telemetry.ApplicationInsightsTelemetry]::CanSendTelemetry) { throw 'Telemetry must be disabled.' }
+      - name: Require all four environment-only lab values
+        shell: pwsh
+        env:
+          LAB_ID: ${{ secrets.PASSKEY_LAB_CREDENTIAL_ID }}
+          LAB_HANDLE: ${{ secrets.PASSKEY_LAB_USER_HANDLE }}
+          LAB_UPN: ${{ secrets.PASSKEY_LAB_USER_PRINCIPAL_NAME }}
+          LAB_KEY: ${{ secrets.PASSKEY_LAB_PRIVATE_KEY }}
+        run: |
+          foreach ($name in @('LAB_ID', 'LAB_HANDLE', 'LAB_UPN', 'LAB_KEY')) {
+            if ([string]::IsNullOrWhiteSpace([Environment]::GetEnvironmentVariable($name))) { throw 'Lab configuration incomplete; not run.' }
+          }
+      - name: Run admitted candidate with lab credential
+        id: passkey
+        uses: ./candidate
+        with:
+          credential-id: ${{ secrets.PASSKEY_LAB_CREDENTIAL_ID }}
+          user-handle: ${{ secrets.PASSKEY_LAB_USER_HANDLE }}
+          user-principal-name: ${{ secrets.PASSKEY_LAB_USER_PRINCIPAL_NAME }}
+          private-key: ${{ secrets.PASSKEY_LAB_PRIVATE_KEY }}
+          confirm-application: 'false'
+          export-auth-cookie: 'true'
+      - name: Observe cookie output contract without exposing values
+        shell: pwsh
+        env:
+          AUTHENTICATED: ${{ steps.passkey.outputs.authenticated }}
+          COOKIE: ${{ steps.passkey.outputs.auth-cookie }}
+          COOKIE_NAME: ${{ steps.passkey.outputs.cookie-name }}
+          METHOD: ${{ steps.passkey.outputs.signature-method }}
+          RETURNED_UPN: ${{ steps.passkey.outputs.user-principal-name }}
+          REQUESTED_UPN: ${{ secrets.PASSKEY_LAB_USER_PRINCIPAL_NAME }}
+        run: |
+          . ./controller/.github/validation/LabController.ps1
+          Assert-LabCookieContract $env:AUTHENTICATED $env:COOKIE $env:COOKIE_NAME $env:METHOD $env:REQUESTED_UPN $env:RETURNED_UPN
+          [ordered]@{ runtime = [string]$PSVersionTable.PSVersion; cookie_contract_observed = $true; independent_readback = $false } | ConvertTo-Json | Add-Content $env:GITHUB_STEP_SUMMARY
+          'Cookie output contract observed. This runner executed the candidate: its observations are not tamper-proof independent evidence. Account identity, session reuse and XDR access NOT VERIFIED.' | Add-Content $env:GITHUB_STEP_SUMMARY
+      - name: Discard checkout files (does not revoke remote sessions)
+        if: ${{ always() }}
+        shell: pwsh
+        run: |
+          foreach ($path in @('candidate', 'controller')) {
+            if (Test-Path -LiteralPath $path) { Remove-Item -LiteralPath $path -Recurse -Force -ErrorAction SilentlyContinue }
+          }
+
+  independent-readback-not-implemented:
+    name: End-to-end gate deliberately incomplete
+    needs: [preflight, cookie-contract]
+    if: ${{ always() }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 2
+    permissions: {}
+    steps:
+      - name: Do not publish an end-to-end live pass
+        shell: bash
+        run: |
+          echo 'Independent authenticated readback is NOT IMPLEMENTED / NOT RUN. Cookie-contract observations alone do not establish live acceptance or merge readiness.'
+          exit 1

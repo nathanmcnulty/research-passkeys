@@ -1,3 +1,14 @@
+function Assert-GitHubPasskeyProfile {
+    param([switch]$ProtectedLab, [string]$Environment)
+    if ($ProtectedLab) {
+        if ($Environment -cnotmatch '\A[A-Za-z0-9][A-Za-z0-9_.-]{0,99}\z') {
+            throw 'ProtectedLab requires an explicit Environment of 1-100 letters, digits, dots, underscores or hyphens, starting with a letter or digit.'
+        }
+    } elseif (-not [string]::IsNullOrEmpty($Environment)) {
+        throw 'Environment requires ProtectedLab; repository-secret fallback is not supported.'
+    }
+}
+
 function Assert-GitHubPasskeyRepository {
     param([Parameter(Mandatory)][string]$Repository)
     if ($Repository -cnotmatch '^[A-Za-z0-9](?:[A-Za-z0-9-]{0,38})/[A-Za-z0-9_.-]{1,100}$' -or
@@ -7,7 +18,7 @@ function Assert-GitHubPasskeyRepository {
 }
 
 function Get-GitHubPasskeySecretValues {
-    param([Parameter(Mandatory)][object]$Credential)
+    param([Parameter(Mandatory)][object]$Credential, [switch]$ProtectedLab)
     $values = [ordered]@{}
     $mapping = [ordered]@{
         PASSKEY_PRIVATE_CREDENTIAL_ID = 'credentialId'
@@ -56,6 +67,14 @@ function Get-GitHubPasskeySecretValues {
         }
     } catch { throw 'Credential privateKey must contain a valid unencrypted ECDSA P-256 private PEM key.' }
     finally { $key.Dispose(); if ($null -ne $parameters -and $null -ne $parameters.D) { [Array]::Clear($parameters.D, 0, $parameters.D.Length) } }
+    if ($ProtectedLab) {
+        return [ordered]@{
+            PASSKEY_LAB_CREDENTIAL_ID = $values.PASSKEY_PRIVATE_CREDENTIAL_ID
+            PASSKEY_LAB_USER_HANDLE = $values.PASSKEY_PRIVATE_USER_HANDLE
+            PASSKEY_LAB_USER_PRINCIPAL_NAME = $values.PASSKEY_PRIVATE_USER_PRINCIPAL_NAME
+            PASSKEY_LAB_PRIVATE_KEY = $values.PASSKEY_PRIVATE_KEY
+        }
+    }
     return $values
 }
 
