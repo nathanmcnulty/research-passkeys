@@ -48,7 +48,33 @@ BeforeAll {
     function Invoke-ProbeTest {
         Invoke-LabSessionProbe @script:probeArguments
     }
+    $probeDefinition = @($definitions | Where-Object Name -CEQ 'Invoke-LabSessionProbe')[0]
+    $probeTry = @($probeDefinition.Body.EndBlock.Statements | Where-Object { $_ -is [Management.Automation.Language.TryStatementAst] })[0]
+    $emissionSource = $probeTry.CatchClauses[0].Body.Extent.Text
+    # Exercise the exact public catch body independently to test labels that
+    # ordinary protocol input cannot assign. No transport is loaded here.
+    $script:probeFailureEmission = [scriptblock]::Create($emissionSource.Substring(1, $emissionSource.Length - 2))
+    $script:probeFormFunction = (Get-Command ConvertTo-LabProbeForm -CommandType Function).ScriptBlock
     $script:probeSafeError = 'Server-backed session probe failed; no live acceptance. Sensitive details suppressed.'
+    function Assert-ProbeTestFailure {
+        param([string]$Phase, [string]$Code, [int]$Requests, [scriptblock]$Action = { Invoke-ProbeTest })
+        $before = $script:probeRequests.Count
+        $messages = [Collections.Generic.List[object]]::new()
+        $caught = $null
+        $VerbosePreference = 'Continue'; $DebugPreference = 'Continue'; $InformationPreference = 'Continue'; $WarningPreference = 'Continue'
+        try { & $Action *>&1 | ForEach-Object { $messages.Add($_) } } catch { $caught = $_ }
+        $caught | Should -Not -BeNullOrEmpty
+        $expected = "$script:probeSafeError Phase=$Phase; Code=$Code."
+        $caught.Exception.Message | Should -BeExactly $expected
+        $caught.Exception.InnerException | Should -BeNullOrEmpty
+        $messages.Count | Should -Be 0
+        ($script:probeRequests.Count - $before) | Should -Be $Requests
+        # Inspect the entire public error and ordinary/verbose/debug/information
+        # streams, not only Message. Test markers never contain real credentials.
+        $rendered = @($caught.ToString(), $caught.Exception.ToString(), ($caught | Out-String),
+            ($caught | Format-List * -Force | Out-String), [string]$caught.TargetObject, [string]$caught.ErrorDetails) -join "`n"
+        $rendered | Should -Not -Match 'fixture-sensitive|synthetic-cookie|synthetic-authorization|synthetic-opaque|fixture@example|diagnostic-secret|11111111-1111|22222222-2222|33333333-3333'
+    }
 }
 
 Describe 'Server-backed session readback with synthetic, offline evidence' {
@@ -72,6 +98,7 @@ Describe 'Server-backed session readback with synthetic, offline evidence' {
         $script:probeCallbackMode = 'success'
         $script:probeRedirectOverride = $null
         $script:probeThrowStage = ''
+        $script:probeException = $null
         $script:probeMetadataOverrides = @{}
         $script:probeMetadataRemove = @()
         $script:probeHeaderOverrides = @{}
@@ -93,7 +120,10 @@ Describe 'Server-backed session readback with synthetic, offline evidence' {
             if ($null -eq $Headers) { $Headers = @{} }
             $script:probeRequests.Add(@{ Uri = [string]$Uri; Method = $Method; Headers = @{} + $Headers; Body = $Body })
             if ($Uri -ceq $script:probeDiscovery) {
-                if ($script:probeThrowStage -eq 'Discovery') { throw 'fixture-sensitive-discovery-detail' }
+                if ($script:probeThrowStage -eq 'Discovery') {
+                    if ($null -ne $script:probeException) { throw $script:probeException }
+                    throw 'fixture-sensitive-discovery-detail'
+                }
                 $metadata = @{
                     issuer = $script:probeAuthority + '/v2.0'
                     authorization_endpoint = $script:probeAuthorizeEndpoint
@@ -104,7 +134,10 @@ Describe 'Server-backed session readback with synthetic, offline evidence' {
                 return New-ProbeTestJsonResponse Discovery $metadata
             }
             if ($Uri.StartsWith($script:probeAuthorizeEndpoint + '?', [StringComparison]::Ordinal)) {
-                if ($script:probeThrowStage -eq 'Authorization') { throw 'fixture-sensitive-cookie-detail' }
+                if ($script:probeThrowStage -eq 'Authorization') {
+                    if ($null -ne $script:probeException) { throw $script:probeException }
+                    throw 'fixture-sensitive-cookie-detail'
+                }
                 $script:probeAuthorizeCount++
                 if ($null -eq $script:probeAuthorizeQuery) { $script:probeAuthorizeQuery = [Web.HttpUtility]::ParseQueryString(([uri]$Uri).Query) }
                 $state = [uri]::EscapeDataString($script:probeAuthorizeQuery['state'])
@@ -140,7 +173,10 @@ Describe 'Server-backed session readback with synthetic, offline evidence' {
                 return $response
             }
             if ($Uri -ceq $script:probeTokenEndpoint) {
-                if ($script:probeThrowStage -eq 'Token') { throw 'fixture-sensitive-code-and-token-detail' }
+                if ($script:probeThrowStage -eq 'Token') {
+                    if ($null -ne $script:probeException) { throw $script:probeException }
+                    throw 'fixture-sensitive-code-and-token-detail'
+                }
                 $now = [DateTimeOffset]::UtcNow.ToUnixTimeSeconds()
                 $header = @{ alg = 'RS256'; typ = 'JWT'; kid = 'synthetic-only' }
                 $claims = @{
@@ -177,7 +213,10 @@ Describe 'Server-backed session readback with synthetic, offline evidence' {
                 return New-ProbeTestJsonResponse Token $tokens
             }
             if ($Uri -ceq $script:probeUserInfoEndpoint) {
-                if ($script:probeThrowStage -eq 'UserInfo') { throw 'fixture-sensitive-userinfo-detail' }
+                if ($script:probeThrowStage -eq 'UserInfo') {
+                    if ($null -ne $script:probeException) { throw $script:probeException }
+                    throw 'fixture-sensitive-userinfo-detail'
+                }
                 $user = @{ sub = 'synthetic-pairwise-subject'; name = 'Synthetic fixture only' }
                 Set-ProbeTestProperties $user $script:probeUserInfoOverrides $script:probeUserInfoRemove
                 return New-ProbeTestJsonResponse UserInfo $user
@@ -198,6 +237,7 @@ Describe 'Server-backed session readback with synthetic, offline evidence' {
         $result.TamperProofAgainstCandidate | Should -BeFalse
         (@($result.Keys) | Sort-Object) -join ',' | Should -BeExactly 'ExpectedTenantAndCurrentName,ServerBackedSessionReuse,TamperProofAgainstCandidate,UserInfoSubjectMatched'
         ($result | ConvertTo-Json -Compress) | Should -Not -Match 'synthetic|fixture@example|11111111|22222222|33333333'
+        ($result | ConvertTo-Json -Compress) | Should -BeExactly '{"ServerBackedSessionReuse":true,"ExpectedTenantAndCurrentName":true,"UserInfoSubjectMatched":true,"TamperProofAgainstCandidate":false}'
         Should -Invoke Send-LabProbeRequest -Times 4 -Exactly
     }
     It 'binds state, nonce and S256 PKCE and requests only silent openid profile authorization' {
@@ -269,14 +309,14 @@ Describe 'Server-backed session readback with synthetic, offline evidence' {
 
     It 'requires explicit <Field> before any request' -ForEach @('TenantId', 'ClientId', 'ExpectedUpn') {
         [void]$script:probeArguments.Remove($_)
-        { Invoke-ProbeTest } | Should -Throw $script:probeSafeError
+        Assert-ProbeTestFailure Configuration InvalidConfiguration 0
         Should -Invoke Send-LabProbeRequest -Times 0 -Exactly
     }
     It 'rejects malformed tenant/client IDs before HTTP: <Value>' -ForEach @('', 'organizations', 'common', '00000000-0000-0000-0000-000000000000', 'AAAAAAAA-AAAA-4AAA-8AAA-AAAAAAAAAAAA', "11111111-1111-4111-8111-111111111111`n", '11111111-1111-4111-8111-111111111111/extra') {
         foreach ($field in @('TenantId', 'ClientId')) {
             $original = $script:probeArguments[$field]
             $script:probeArguments[$field] = $_
-            { Invoke-ProbeTest } | Should -Throw $script:probeSafeError
+            Assert-ProbeTestFailure Configuration InvalidConfiguration 0
             $script:probeArguments[$field] = $original
         }
         Should -Invoke Send-LabProbeRequest -Times 0 -Exactly
@@ -287,23 +327,23 @@ Describe 'Server-backed session readback with synthetic, offline evidence' {
     }
     It 'rejects missing or malformed expected UPNs' -ForEach @('', 'fixture', 'fixture@@example.invalid', ' fixture@example.invalid', "fixture@example.invalid`n", (('x' * 310) + '@example.invalid')) {
         $script:probeArguments.ExpectedUpn = $_
-        { Invoke-ProbeTest } | Should -Throw $script:probeSafeError
+        Assert-ProbeTestFailure Configuration InvalidConfiguration 0
         Should -Invoke Send-LabProbeRequest -Times 0 -Exactly
     }
     It 'rejects invalid cookie material without any request' -ForEach @('', "cookie`nvalue", "cookie`rvalue", 'cookie;second=value', 'cookie,value', 'cookie value', 'cookie"value', 'cookie\value', ('x' * 32769)) {
         $script:probeArguments.Cookie = $_
-        { Invoke-ProbeTest } | Should -Throw $script:probeSafeError
+        Assert-ProbeTestFailure Cookie InvalidCookie 0
         Should -Invoke Send-LabProbeRequest -Times 0 -Exactly
     }
     It 'rejects absent or unknown cookie names' -ForEach @('', 'estsauth', 'OTHER', "ESTSAUTH`r`nInjected: x") {
         $script:probeArguments.CookieName = $_
-        { Invoke-ProbeTest } | Should -Throw $script:probeSafeError
+        Assert-ProbeTestFailure Cookie InvalidCookie 0
         Should -Invoke Send-LabProbeRequest -Times 0 -Exactly
     }
 
     It 'requires every pinned discovery endpoint: <_>' -ForEach @('issuer', 'authorization_endpoint', 'token_endpoint', 'userinfo_endpoint') {
         $script:probeMetadataRemove = @($_)
-        { Invoke-ProbeTest } | Should -Throw $script:probeSafeError
+        Assert-ProbeTestFailure DiscoveryMetadata InvalidMetadata 1
         Should -Invoke Send-LabProbeRequest -Times 1 -Exactly
     }
     It 'rejects alternate or non-string discovery metadata: <Field>' -ForEach @(
@@ -315,7 +355,7 @@ Describe 'Server-backed session readback with synthetic, offline evidence' {
         @{ Field = 'userinfo_endpoint'; Value = $null }
     ) {
         $script:probeMetadataOverrides[$Field] = $Value
-        { Invoke-ProbeTest } | Should -Throw $script:probeSafeError
+        Assert-ProbeTestFailure DiscoveryMetadata InvalidMetadata 1
         Should -Invoke Send-LabProbeRequest -Times 1 -Exactly
     }
     It 'rejects a trailing slash, query, fragment or extra path on every pinned discovery value' -ForEach @(@{Suffix='/'}, @{Suffix='?extra=1'}, @{Suffix='#fragment'}, @{Suffix='/extra'}) {
@@ -327,7 +367,7 @@ Describe 'Server-backed session readback with synthetic, offline evidence' {
                 'userinfo_endpoint' { $script:probeUserInfoEndpoint }
             }
             $script:probeMetadataOverrides = @{ $field = $base + $Suffix }
-            { Invoke-ProbeTest } | Should -Throw $script:probeSafeError
+            Assert-ProbeTestFailure DiscoveryMetadata InvalidMetadata 1
         }
     }
     It 'rejects invalid status, media type, redirect or JSON at <Stage>' -ForEach @(
@@ -349,7 +389,7 @@ Describe 'Server-backed session readback with synthetic, offline evidence' {
         @{ Stage = 'UserInfo'; Change = @{ Body = '{"sub":"one","SUB":"two"}' } }
     ) {
         $script:probeResponseOverrides[$Stage] = $Change
-        { Invoke-ProbeTest } | Should -Throw $script:probeSafeError
+        Assert-ProbeTestFailure ($Stage + 'Response') InvalidResponse (@{ Discovery = 1; Token = 3; UserInfo = 4 }[$Stage])
         @($script:probeRequests | Where-Object { $_.Uri.StartsWith('https://example.invalid') }).Count | Should -Be 0
     }
 
@@ -363,7 +403,7 @@ Describe 'Server-backed session readback with synthetic, offline evidence' {
         @{ Change = @{ Locations = @('https://login.microsoftonline.com/common/oauth2/nativeclient', 'https://example.invalid/') } }
     ) {
         $script:probeResponseOverrides.Authorization = $Change
-        { Invoke-ProbeTest } | Should -Throw $script:probeSafeError
+        Assert-ProbeTestFailure AuthorizationResponse InvalidAuthorizationResponse 2
         Should -Invoke Send-LabProbeRequest -Times 2 -Exactly
     }
     It 'rejects untrusted authorization redirects before forwarding the cookie: <_>' -ForEach @(
@@ -376,12 +416,12 @@ Describe 'Server-backed session readback with synthetic, offline evidence' {
         'https://login.microsoftonline.com/another-tenant/oauth2/v2.0/authorize'
     ) {
         $script:probeRedirectOverride = $_
-        { Invoke-ProbeTest } | Should -Throw $script:probeSafeError
+        Assert-ProbeTestFailure Callback InvalidCallback 2
         Should -Invoke Send-LabProbeRequest -Times 2 -Exactly
     }
     It 'does not follow even a same-origin authorization loop' {
         $script:probeCallbackMode = 'loop'
-        { Invoke-ProbeTest } | Should -Throw $script:probeSafeError
+        Assert-ProbeTestFailure Callback InvalidCallback 2
         $script:probeAuthorizeCount | Should -Be 1
         Should -Invoke Send-LabProbeRequest -Times 2 -Exactly
         @($script:probeRequests | Where-Object Method -EQ 'POST').Count | Should -Be 0
@@ -392,7 +432,7 @@ Describe 'Server-backed session readback with synthetic, offline evidence' {
         'oversize-code', 'unnamed-field', 'duplicate-extra-field', 'login-required', 'interaction-required', 'consent-required', 'access-denied'
     ) {
         $script:probeCallbackMode = $_
-        { Invoke-ProbeTest } | Should -Throw $script:probeSafeError
+        Assert-ProbeTestFailure Callback InvalidCallback 2
         Should -Invoke Send-LabProbeRequest -Times 2 -Exactly
         @($script:probeRequests | Where-Object Method -EQ 'POST').Count | Should -Be 0
     }
@@ -403,13 +443,13 @@ Describe 'Server-backed session readback with synthetic, offline evidence' {
     }
     It 'rejects broader or malformed returned scopes' -ForEach @('openid profile User.Read', 'openid offline_access', 'https://graph.microsoft.com/.default', 'OPENID', '', "openid`nprofile", @('openid','profile'), $null) {
         $script:probeTokenOverrides.scope = $_
-        { Invoke-ProbeTest } | Should -Throw $script:probeSafeError
+        Assert-ProbeTestFailure TokenResponse InvalidTokenResponse 3
         Should -Invoke Send-LabProbeRequest -Times 3 -Exactly
     }
 
     It 'requires each token response field: <_>' -ForEach @('id_token', 'access_token', 'token_type') {
         $script:probeTokenRemove = @($_)
-        { Invoke-ProbeTest } | Should -Throw $script:probeSafeError
+        Assert-ProbeTestFailure TokenResponse InvalidTokenResponse 3
         Should -Invoke Send-LabProbeRequest -Times 3 -Exactly
     }
     It 'rejects malformed token response <Field>' -ForEach @(
@@ -420,7 +460,7 @@ Describe 'Server-backed session readback with synthetic, offline evidence' {
         @{ Field = 'refresh_token'; Value = 'unrequested-refresh-token' }
     ) {
         $script:probeTokenOverrides[$Field] = $Value
-        { Invoke-ProbeTest } | Should -Throw $script:probeSafeError
+        Assert-ProbeTestFailure TokenResponse InvalidTokenResponse 3
         Should -Invoke Send-LabProbeRequest -Times 3 -Exactly
     }
     It 'rejects an opaque or malformed ID token: <_>' -ForEach @(
@@ -429,16 +469,16 @@ Describe 'Server-backed session readback with synthetic, offline evidence' {
         'invalid-header-utf8', 'invalid-payload-utf8', 'empty-signature', 'invalid-signature-alphabet'
     ) {
         $script:probeIdTokenMode = $_
-        { Invoke-ProbeTest } | Should -Throw $script:probeSafeError
+        Assert-ProbeTestFailure TokenEncoding InvalidTokenEncoding 3
         Should -Invoke Send-LabProbeRequest -Times 3 -Exactly
     }
     It 'rejects unexpected ID-token algorithms: <_>' -ForEach @('none', 'HS256', 'rs256', '', @('RS256')) {
         $script:probeHeaderOverrides.alg = $_
-        { Invoke-ProbeTest } | Should -Throw $script:probeSafeError
+        Assert-ProbeTestFailure TokenEncoding InvalidTokenEncoding 3
     }
     It 'rejects unsupported critical header extensions' -ForEach @(@('custom'), 'custom', $null) {
         $script:probeHeaderOverrides.crit = $_
-        { Invoke-ProbeTest } | Should -Throw $script:probeSafeError
+        Assert-ProbeTestFailure TokenEncoding InvalidTokenEncoding 3
     }
     It 'rejects malformed, non-object or duplicate header/claim JSON: <Part>' -ForEach @(
         @{ Part = 'Header'; Json = '{broken' }, @{ Part = 'Header'; Json = '[]' },
@@ -447,11 +487,11 @@ Describe 'Server-backed session readback with synthetic, offline evidence' {
         @{ Part = 'Claims'; Json = '{"iss":"one","ISS":"two"}' }
     ) {
         if ($Part -eq 'Header') { $script:probeRawHeader = $Json } else { $script:probeRawClaims = $Json }
-        { Invoke-ProbeTest } | Should -Throw $script:probeSafeError
+        Assert-ProbeTestFailure TokenEncoding InvalidTokenEncoding 3
     }
     It 'requires all identity, transaction and time claims: <_>' -ForEach @('iss', 'tid', 'aud', 'nonce', 'oid', 'preferred_username', 'sub', 'iat', 'exp') {
         $script:probeClaimsRemove = @($_)
-        { Invoke-ProbeTest } | Should -Throw $script:probeSafeError
+        Assert-ProbeTestFailure $(if ($_ -in @('iat', 'exp')) { 'TokenTimes' } else { 'TokenBinding' }) $(if ($_ -in @('iat', 'exp')) { 'InvalidTokenTimes' } else { 'InvalidTokenBinding' }) 3
         Should -Invoke Send-LabProbeRequest -Times 3 -Exactly
     }
     It 'rejects incorrectly bound or non-string identity claims: <Field>' -ForEach @(
@@ -469,7 +509,7 @@ Describe 'Server-backed session readback with synthetic, offline evidence' {
         @{ Field = 'sub'; Value = '' }, @{ Field = 'sub'; Value = ' ' }, @{ Field = 'sub'; Value = @('synthetic-pairwise-subject') }
     ) {
         $script:probeClaimsOverrides[$Field] = $Value
-        { Invoke-ProbeTest } | Should -Throw $script:probeSafeError
+        Assert-ProbeTestFailure TokenBinding InvalidTokenBinding 3
         Should -Invoke Send-LabProbeRequest -Times 3 -Exactly
     }
     It 'rejects non-integer numeric-date claims: <Field>' -ForEach @(
@@ -478,7 +518,7 @@ Describe 'Server-backed session readback with synthetic, offline evidence' {
         @{ Field = 'nbf'; Value = '1770000000' }, @{ Field = 'nbf'; Value = 1.5 }, @{ Field = 'nbf'; Value = $null }
     ) {
         $script:probeClaimsOverrides[$Field] = $Value
-        { Invoke-ProbeTest } | Should -Throw $script:probeSafeError
+        Assert-ProbeTestFailure TokenTimes InvalidTokenTimes 3
         Should -Invoke Send-LabProbeRequest -Times 3 -Exactly
     }
     It 'rejects expired, stale, future or internally inconsistent token times: <_>' -ForEach @('expired', 'stale-iat', 'future-iat', 'future-nbf', 'exp-before-iat', 'exp-equals-iat') {
@@ -491,28 +531,120 @@ Describe 'Server-backed session readback with synthetic, offline evidence' {
             'exp-before-iat' { $script:probeClaimsOverrides.iat = $now + 30; $script:probeClaimsOverrides.exp = $now + 20 }
             'exp-equals-iat' { $script:probeClaimsOverrides.iat = $now + 30; $script:probeClaimsOverrides.exp = $now + 30 }
         }
-        { Invoke-ProbeTest } | Should -Throw $script:probeSafeError
+        Assert-ProbeTestFailure TokenTimes InvalidTokenTimes 3
         Should -Invoke Send-LabProbeRequest -Times 3 -Exactly
     }
     It 'rejects UserInfo subject mismatch or malformed subject: <_>' -ForEach @('wrong-subject', 'SYNTHETIC-PAIRWISE-SUBJECT', '', ' ', @('synthetic-pairwise-subject'), $null) {
         $script:probeUserInfoOverrides.sub = $_
-        { Invoke-ProbeTest } | Should -Throw $script:probeSafeError
+        Assert-ProbeTestFailure UserInfoSubject InvalidUserInfoSubject 4
         Should -Invoke Send-LabProbeRequest -Times 4 -Exactly
     }
     It 'rejects missing UserInfo subject even when another user field matches' {
         $script:probeUserInfoRemove = @('sub')
         $script:probeUserInfoOverrides.preferred_username = 'fixture@example.invalid'
-        { Invoke-ProbeTest } | Should -Throw $script:probeSafeError
+        Assert-ProbeTestFailure UserInfoSubject InvalidUserInfoSubject 4
     }
     It 'suppresses secret-bearing transport details and emits no partial receipt: <_>' -ForEach @('Discovery', 'Authorization', 'Token', 'UserInfo') {
         $script:probeThrowStage = $_
-        $messages = [Collections.Generic.List[object]]::new()
-        $caught = $null
-        try { Invoke-ProbeTest *>&1 | ForEach-Object { $messages.Add($_) } } catch { $caught = $_ }
-        $caught | Should -Not -BeNullOrEmpty
-        $caught.Exception.Message | Should -BeExactly $script:probeSafeError
-        $messages.Count | Should -Be 0
-        $caught.ToString() | Should -Not -Match 'fixture-sensitive|synthetic-cookie|synthetic-authorization|synthetic-opaque|fixture@example'
+        Assert-ProbeTestFailure ($_ + 'Request') UnexpectedFailure (@{ Discovery = 1; Authorization = 2; Token = 3; UserInfo = 4 }[$_])
+    }
+    It 'suppresses synthetic nested constructor/disposal-style errors at the public request boundary: <Stage> <Kind>' -ForEach @(
+        @{ Stage = 'Discovery'; Kind = 'construction'; Requests = 1 },
+        @{ Stage = 'Discovery'; Kind = 'disposal'; Requests = 1 },
+        @{ Stage = 'Discovery'; Kind = 'error-record'; Requests = 1 },
+        @{ Stage = 'Authorization'; Kind = 'construction'; Requests = 2 },
+        @{ Stage = 'Authorization'; Kind = 'disposal'; Requests = 2 },
+        @{ Stage = 'Authorization'; Kind = 'error-record'; Requests = 2 },
+        @{ Stage = 'Token'; Kind = 'construction'; Requests = 3 },
+        @{ Stage = 'Token'; Kind = 'disposal'; Requests = 3 },
+        @{ Stage = 'Token'; Kind = 'error-record'; Requests = 3 },
+        @{ Stage = 'UserInfo'; Kind = 'construction'; Requests = 4 },
+        @{ Stage = 'UserInfo'; Kind = 'disposal'; Requests = 4 },
+        @{ Stage = 'UserInfo'; Kind = 'error-record'; Requests = 4 }
+    ) {
+        # This proves public-boundary sanitization, not actual constructor or
+        # Dispose runtime behavior. The native transport is not loaded here.
+        $inner = [InvalidOperationException]::new('diagnostic-secret-inner https://diagnostic-secret.invalid/?token=diagnostic-secret')
+        $exception = if ($Kind -eq 'disposal') {
+            [ObjectDisposedException]::new('diagnostic-secret-disposal', $inner)
+        } else { [InvalidOperationException]::new('diagnostic-secret-construction', $inner) }
+        $exception.Data['diagnostic-secret-key'] = 'diagnostic-secret-data'
+        $script:probeException = $exception
+        if ($Kind -eq 'error-record') {
+            $script:probeException = [Management.Automation.ErrorRecord]::new($exception, 'diagnostic-secret-id',
+                [Management.Automation.ErrorCategory]::InvalidOperation, 'diagnostic-secret-target')
+            $script:probeException.ErrorDetails = [Management.Automation.ErrorDetails]::new('diagnostic-secret-details')
+        }
+        $script:probeThrowStage = $Stage
+        Assert-ProbeTestFailure ($Stage + 'Request') UnexpectedFailure $Requests
+    }
+    It 'uses UnexpectedFailure for local request construction before HTTP: <Phase>' -ForEach @(
+        @{ Phase = 'AuthorizationRequest'; FailureCall = 1; Requests = 1 },
+        @{ Phase = 'TokenRequest'; FailureCall = 2; Requests = 2 }
+    ) {
+        $script:probeFormCalls = 0
+        $script:probeFormFailureCall = $FailureCall
+        Mock ConvertTo-LabProbeForm {
+            param($Values)
+            $script:probeFormCalls++
+            if ($script:probeFormCalls -eq $script:probeFormFailureCall) {
+                throw [InvalidOperationException]::new('diagnostic-secret-form', [Exception]::new('diagnostic-secret-inner'))
+            }
+            & $script:probeFormFunction $Values
+        }
+        Assert-ProbeTestFailure $Phase UnexpectedFailure $Requests
+        $script:probeFormCalls | Should -Be $FailureCall
+    }
+    It 'does not retain a prior successful validation code during transaction construction' {
+        Mock ConvertTo-LabProbeBase64Url { throw 'diagnostic-secret-random' }
+        Assert-ProbeTestFailure AuthorizationRequest UnexpectedFailure 1
+    }
+    It 'never emits secret markers from protocol inputs: <Case>' -ForEach @(
+        @{ Case = 'configuration'; Phase = 'Configuration'; Code = 'InvalidConfiguration'; Requests = 0 },
+        @{ Case = 'cookie'; Phase = 'Cookie'; Code = 'InvalidCookie'; Requests = 0 },
+        @{ Case = 'discovery-url'; Phase = 'DiscoveryMetadata'; Code = 'InvalidMetadata'; Requests = 1 },
+        @{ Case = 'discovery-body'; Phase = 'DiscoveryResponse'; Code = 'InvalidResponse'; Requests = 1 },
+        @{ Case = 'authorization-body'; Phase = 'AuthorizationResponse'; Code = 'InvalidAuthorizationResponse'; Requests = 2 },
+        @{ Case = 'callback-header'; Phase = 'Callback'; Code = 'InvalidCallback'; Requests = 2 },
+        @{ Case = 'malformed-callback'; Phase = 'Callback'; Code = 'InvalidCallback'; Requests = 2 },
+        @{ Case = 'token-body'; Phase = 'TokenResponse'; Code = 'InvalidResponse'; Requests = 3 },
+        @{ Case = 'token-scope'; Phase = 'TokenResponse'; Code = 'InvalidTokenResponse'; Requests = 3 },
+        @{ Case = 'token-header'; Phase = 'TokenEncoding'; Code = 'InvalidTokenEncoding'; Requests = 3 },
+        @{ Case = 'token-claims'; Phase = 'TokenBinding'; Code = 'InvalidTokenBinding'; Requests = 3 },
+        @{ Case = 'userinfo-body'; Phase = 'UserInfoResponse'; Code = 'InvalidResponse'; Requests = 4 },
+        @{ Case = 'userinfo-subject'; Phase = 'UserInfoSubject'; Code = 'InvalidUserInfoSubject'; Requests = 4 }
+    ) {
+        switch ($Case) {
+            'configuration' { $script:probeArguments.ExpectedUpn = 'diagnostic-secret-invalid-upn' }
+            'cookie' { $script:probeArguments.Cookie = 'diagnostic-secret-cookie;invalid' }
+            'discovery-url' { $script:probeMetadataOverrides.issuer = 'https://diagnostic-secret.invalid/?id=diagnostic-secret' }
+            'discovery-body' { $script:probeResponseOverrides.Discovery = @{ Body = '{"diagnostic-secret":' } }
+            'authorization-body' { $script:probeResponseOverrides.Authorization = @{ Status = 200; Body = '<form>diagnostic-secret</form>' } }
+            'callback-header' { $script:probeResponseOverrides.Authorization = @{ Locations = @('https://diagnostic-secret.invalid/?code=diagnostic-secret'); Body = 'diagnostic-secret-body' } }
+            'malformed-callback' { $script:probeRedirectOverride = 'https://[diagnostic-secret' }
+            'token-body' { $script:probeResponseOverrides.Token = @{ Body = '{"access_token":"diagnostic-secret","ACCESS_TOKEN":"diagnostic-secret"}' } }
+            'token-scope' { $script:probeTokenOverrides.scope = 'diagnostic-secret-scope' }
+            'token-header' { $script:probeHeaderOverrides.alg = 'diagnostic-secret-algorithm' }
+            'token-claims' { $script:probeClaimsOverrides.preferred_username = 'diagnostic-secret@example.invalid' }
+            'userinfo-body' { $script:probeResponseOverrides.UserInfo = @{ Body = '["diagnostic-secret"]' } }
+            'userinfo-subject' { $script:probeUserInfoOverrides.sub = 'diagnostic-secret-subject' }
+        }
+        Assert-ProbeTestFailure $Phase $Code $Requests
+    }
+    It 'normalizes unknown labels at the exact public emission boundary: <Case>' -ForEach @(
+        @{ Case = 'both unknown'; InputPhase = 'diagnostic-secret-phase'; InputCode = 'diagnostic-secret-code'; ExpectedPhase = 'Unknown'; ExpectedCode = 'UnexpectedFailure' },
+        @{ Case = 'unknown code'; InputPhase = 'TokenResponse'; InputCode = 'diagnostic-secret-code'; ExpectedPhase = 'TokenResponse'; ExpectedCode = 'UnexpectedFailure' },
+        @{ Case = 'unknown phase'; InputPhase = 'diagnostic-secret-phase'; InputCode = 'InvalidResponse'; ExpectedPhase = 'Unknown'; ExpectedCode = 'InvalidResponse' },
+        @{ Case = 'wrong casing'; InputPhase = 'discoveryrequest'; InputCode = 'unexpectedfailure'; ExpectedPhase = 'Unknown'; ExpectedCode = 'UnexpectedFailure' },
+        @{ Case = 'missing labels'; InputPhase = $null; InputCode = $null; ExpectedPhase = 'Unknown'; ExpectedCode = 'UnexpectedFailure' },
+        @{ Case = 'single-element arrays'; InputPhase = @('DiscoveryRequest'); InputCode = @('InvalidResponse'); ExpectedPhase = 'Unknown'; ExpectedCode = 'UnexpectedFailure' },
+        @{ Case = 'object labels'; InputPhase = [pscustomobject]@{ Value = 'diagnostic-secret-phase' }; InputCode = [pscustomobject]@{ Value = 'diagnostic-secret-code' }; ExpectedPhase = 'Unknown'; ExpectedCode = 'UnexpectedFailure' },
+        @{ Case = 'multiple labels'; InputPhase = @('DiscoveryRequest', 'diagnostic-secret'); InputCode = @('UnexpectedFailure', 'diagnostic-secret'); ExpectedPhase = 'Unknown'; ExpectedCode = 'UnexpectedFailure' }
+    ) {
+        Assert-ProbeTestFailure $ExpectedPhase $ExpectedCode 0 -Action {
+            $phase = $InputPhase; $failureCode = $InputCode
+            & $script:probeFailureEmission
+        }
     }
 }
 
