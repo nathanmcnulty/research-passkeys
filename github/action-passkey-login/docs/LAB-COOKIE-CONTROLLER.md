@@ -102,9 +102,12 @@ checkouts; it does not revoke remote sessions or the passkey. Revocation is sepa
 ## Sanitized failure diagnostics
 
 A failed session probe remains a failed validation. Its public error includes only
-fixed, locally assigned and allowlisted phase/failure codes, never the original
+fixed, locally assigned and allowlisted phase/category/predicate tuples, never the original
 exception text, URLs, response headers/bodies, identity claims or credential values.
-Unexpected failures use a fixed fallback rather than reflecting external data.
+Unknown labels/types/combinations use a fixed fallback rather than reflecting external data.
+The [complete predicate inventory and coverage contract](LAB-COOKIE-PREDICATES.md)
+distinguishes first-rejecting checks from entered operations and explains cleanup
+failure precedence. `TransportFailure` is a bounded category, not a root-cause claim.
 
 The phase identifies the operation or guard entered, not proof that a network
 request reached Microsoft. A rejection code identifies a local acceptance boundary;

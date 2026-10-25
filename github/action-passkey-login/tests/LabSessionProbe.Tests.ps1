@@ -1,5 +1,307 @@
 # Offline fixtures only. The native transport is inspected as source but is
 # deliberately NEVER loaded or invoked, even if a Pester mock is absent.
+$probeExpectedTuples = @(
+    @{ Phase = 'Configuration'; Code = 'InvalidConfiguration'; Predicate = 'TenantFormat' }
+    @{ Phase = 'Configuration'; Code = 'InvalidConfiguration'; Predicate = 'TenantNonzero' }
+    @{ Phase = 'Configuration'; Code = 'InvalidConfiguration'; Predicate = 'ClientFormat' }
+    @{ Phase = 'Configuration'; Code = 'InvalidConfiguration'; Predicate = 'ClientNonzero' }
+    @{ Phase = 'Configuration'; Code = 'InvalidConfiguration'; Predicate = 'UpnLength' }
+    @{ Phase = 'Configuration'; Code = 'InvalidConfiguration'; Predicate = 'UpnFormat' }
+    @{ Phase = 'Configuration'; Code = 'UnexpectedFailure'; Predicate = 'ConfigurationValidation' }
+    @{ Phase = 'Cookie'; Code = 'InvalidCookie'; Predicate = 'CookieName' }
+    @{ Phase = 'Cookie'; Code = 'InvalidCookie'; Predicate = 'CookieLength' }
+    @{ Phase = 'Cookie'; Code = 'InvalidCookie'; Predicate = 'CookieAlphabet' }
+    @{ Phase = 'DiscoveryResponse'; Code = 'InvalidResponse'; Predicate = 'ResponseStatus' }
+    @{ Phase = 'DiscoveryResponse'; Code = 'InvalidResponse'; Predicate = 'ResponseMediaType' }
+    @{ Phase = 'DiscoveryResponse'; Code = 'InvalidResponse'; Predicate = 'ResponseLocations' }
+    @{ Phase = 'DiscoveryResponse'; Code = 'InvalidResponse'; Predicate = 'ResponseJsonParse' }
+    @{ Phase = 'DiscoveryResponse'; Code = 'InvalidResponse'; Predicate = 'ResponseJsonRootObject' }
+    @{ Phase = 'DiscoveryResponse'; Code = 'InvalidResponse'; Predicate = 'ResponseJsonPropertySetConstruction' }
+    @{ Phase = 'DiscoveryResponse'; Code = 'InvalidResponse'; Predicate = 'ResponseJsonPropertiesRead' }
+    @{ Phase = 'DiscoveryResponse'; Code = 'InvalidResponse'; Predicate = 'ResponseJsonPropertyUnique' }
+    @{ Phase = 'DiscoveryResponse'; Code = 'InvalidResponse'; Predicate = 'ResponseJsonConversion' }
+    @{ Phase = 'DiscoveryResponse'; Code = 'InvalidResponse'; Predicate = 'ResponseJsonDispose' }
+    @{ Phase = 'DiscoveryMetadata'; Code = 'InvalidMetadata'; Predicate = 'IssuerMetadataString' }
+    @{ Phase = 'DiscoveryMetadata'; Code = 'InvalidMetadata'; Predicate = 'IssuerMetadataMatch' }
+    @{ Phase = 'DiscoveryMetadata'; Code = 'InvalidMetadata'; Predicate = 'AuthorizationMetadataString' }
+    @{ Phase = 'DiscoveryMetadata'; Code = 'InvalidMetadata'; Predicate = 'AuthorizationMetadataMatch' }
+    @{ Phase = 'DiscoveryMetadata'; Code = 'InvalidMetadata'; Predicate = 'TokenMetadataString' }
+    @{ Phase = 'DiscoveryMetadata'; Code = 'InvalidMetadata'; Predicate = 'TokenMetadataMatch' }
+    @{ Phase = 'DiscoveryMetadata'; Code = 'InvalidMetadata'; Predicate = 'UserInfoMetadataString' }
+    @{ Phase = 'DiscoveryMetadata'; Code = 'InvalidMetadata'; Predicate = 'UserInfoMetadataMatch' }
+    @{ Phase = 'AuthorizationResponse'; Code = 'InvalidAuthorizationResponse'; Predicate = 'AuthorizationStatus' }
+    @{ Phase = 'AuthorizationResponse'; Code = 'InvalidAuthorizationResponse'; Predicate = 'AuthorizationLocationCount' }
+    @{ Phase = 'Callback'; Code = 'InvalidCallback'; Predicate = 'CallbackUriConstruction' }
+    @{ Phase = 'Callback'; Code = 'InvalidCallback'; Predicate = 'CallbackScheme' }
+    @{ Phase = 'Callback'; Code = 'InvalidCallback'; Predicate = 'CallbackHost' }
+    @{ Phase = 'Callback'; Code = 'InvalidCallback'; Predicate = 'CallbackPort' }
+    @{ Phase = 'Callback'; Code = 'InvalidCallback'; Predicate = 'CallbackUserInfo' }
+    @{ Phase = 'Callback'; Code = 'InvalidCallback'; Predicate = 'CallbackFragment' }
+    @{ Phase = 'Callback'; Code = 'InvalidCallback'; Predicate = 'CallbackPath' }
+    @{ Phase = 'Callback'; Code = 'InvalidCallback'; Predicate = 'CallbackQueryParsing' }
+    @{ Phase = 'Callback'; Code = 'InvalidCallback'; Predicate = 'CallbackKeyName' }
+    @{ Phase = 'Callback'; Code = 'InvalidCallback'; Predicate = 'CallbackKeyMultiplicity' }
+    @{ Phase = 'Callback'; Code = 'InvalidCallback'; Predicate = 'CallbackErrorAbsent' }
+    @{ Phase = 'Callback'; Code = 'InvalidCallback'; Predicate = 'CallbackStateMatch' }
+    @{ Phase = 'Callback'; Code = 'InvalidCallback'; Predicate = 'CallbackCodePresent' }
+    @{ Phase = 'Callback'; Code = 'InvalidCallback'; Predicate = 'CallbackCodeLength' }
+    @{ Phase = 'TokenResponse'; Code = 'InvalidTokenResponse'; Predicate = 'TokenTypeString' }
+    @{ Phase = 'TokenResponse'; Code = 'InvalidTokenResponse'; Predicate = 'TokenTypeBearer' }
+    @{ Phase = 'TokenResponse'; Code = 'InvalidTokenResponse'; Predicate = 'AccessTokenString' }
+    @{ Phase = 'TokenResponse'; Code = 'InvalidTokenResponse'; Predicate = 'AccessTokenNonblank' }
+    @{ Phase = 'TokenResponse'; Code = 'InvalidTokenResponse'; Predicate = 'AccessTokenNoNewline' }
+    @{ Phase = 'TokenResponse'; Code = 'InvalidTokenResponse'; Predicate = 'IdTokenString' }
+    @{ Phase = 'TokenResponse'; Code = 'InvalidTokenResponse'; Predicate = 'RefreshTokenFalsey' }
+    @{ Phase = 'TokenResponse'; Code = 'InvalidTokenResponse'; Predicate = 'ScopeString' }
+    @{ Phase = 'TokenResponse'; Code = 'InvalidTokenResponse'; Predicate = 'ScopeAllowedGrammar' }
+    @{ Phase = 'TokenEncoding'; Code = 'InvalidTokenEncoding'; Predicate = 'TokenSplit' }
+    @{ Phase = 'TokenEncoding'; Code = 'InvalidTokenEncoding'; Predicate = 'TokenPartCount' }
+    @{ Phase = 'TokenEncoding'; Code = 'InvalidTokenEncoding'; Predicate = 'HeaderAlphabet' }
+    @{ Phase = 'TokenEncoding'; Code = 'InvalidTokenEncoding'; Predicate = 'HeaderLength' }
+    @{ Phase = 'TokenEncoding'; Code = 'InvalidTokenEncoding'; Predicate = 'HeaderBase64Decode' }
+    @{ Phase = 'TokenEncoding'; Code = 'InvalidTokenEncoding'; Predicate = 'HeaderUtf8Decode' }
+    @{ Phase = 'TokenEncoding'; Code = 'InvalidTokenEncoding'; Predicate = 'HeaderUtf8Construction' }
+    @{ Phase = 'TokenEncoding'; Code = 'InvalidTokenEncoding'; Predicate = 'HeaderJsonParse' }
+    @{ Phase = 'TokenEncoding'; Code = 'InvalidTokenEncoding'; Predicate = 'HeaderJsonRootObject' }
+    @{ Phase = 'TokenEncoding'; Code = 'InvalidTokenEncoding'; Predicate = 'HeaderJsonPropertySetConstruction' }
+    @{ Phase = 'TokenEncoding'; Code = 'InvalidTokenEncoding'; Predicate = 'HeaderJsonPropertiesRead' }
+    @{ Phase = 'TokenEncoding'; Code = 'InvalidTokenEncoding'; Predicate = 'HeaderJsonPropertyUnique' }
+    @{ Phase = 'TokenEncoding'; Code = 'InvalidTokenEncoding'; Predicate = 'HeaderJsonConversion' }
+    @{ Phase = 'TokenEncoding'; Code = 'InvalidTokenEncoding'; Predicate = 'HeaderJsonDispose' }
+    @{ Phase = 'TokenEncoding'; Code = 'InvalidTokenEncoding'; Predicate = 'ClaimsAlphabet' }
+    @{ Phase = 'TokenEncoding'; Code = 'InvalidTokenEncoding'; Predicate = 'ClaimsLength' }
+    @{ Phase = 'TokenEncoding'; Code = 'InvalidTokenEncoding'; Predicate = 'ClaimsBase64Decode' }
+    @{ Phase = 'TokenEncoding'; Code = 'InvalidTokenEncoding'; Predicate = 'ClaimsUtf8Decode' }
+    @{ Phase = 'TokenEncoding'; Code = 'InvalidTokenEncoding'; Predicate = 'ClaimsUtf8Construction' }
+    @{ Phase = 'TokenEncoding'; Code = 'InvalidTokenEncoding'; Predicate = 'ClaimsJsonParse' }
+    @{ Phase = 'TokenEncoding'; Code = 'InvalidTokenEncoding'; Predicate = 'ClaimsJsonRootObject' }
+    @{ Phase = 'TokenEncoding'; Code = 'InvalidTokenEncoding'; Predicate = 'ClaimsJsonPropertySetConstruction' }
+    @{ Phase = 'TokenEncoding'; Code = 'InvalidTokenEncoding'; Predicate = 'ClaimsJsonPropertiesRead' }
+    @{ Phase = 'TokenEncoding'; Code = 'InvalidTokenEncoding'; Predicate = 'ClaimsJsonPropertyUnique' }
+    @{ Phase = 'TokenEncoding'; Code = 'InvalidTokenEncoding'; Predicate = 'ClaimsJsonConversion' }
+    @{ Phase = 'TokenEncoding'; Code = 'InvalidTokenEncoding'; Predicate = 'ClaimsJsonDispose' }
+    @{ Phase = 'TokenEncoding'; Code = 'InvalidTokenEncoding'; Predicate = 'HeaderAlgorithmString' }
+    @{ Phase = 'TokenEncoding'; Code = 'InvalidTokenEncoding'; Predicate = 'HeaderAlgorithmMatch' }
+    @{ Phase = 'TokenEncoding'; Code = 'InvalidTokenEncoding'; Predicate = 'HeaderCriticalAbsent' }
+    @{ Phase = 'TokenEncoding'; Code = 'InvalidTokenEncoding'; Predicate = 'SignatureAlphabet' }
+    @{ Phase = 'TokenBinding'; Code = 'InvalidTokenBinding'; Predicate = 'IssuerClaimString' }
+    @{ Phase = 'TokenBinding'; Code = 'InvalidTokenBinding'; Predicate = 'IssuerClaimMatch' }
+    @{ Phase = 'TokenBinding'; Code = 'InvalidTokenBinding'; Predicate = 'AudienceClaimString' }
+    @{ Phase = 'TokenBinding'; Code = 'InvalidTokenBinding'; Predicate = 'AudienceClaimMatch' }
+    @{ Phase = 'TokenBinding'; Code = 'InvalidTokenBinding'; Predicate = 'TenantClaimString' }
+    @{ Phase = 'TokenBinding'; Code = 'InvalidTokenBinding'; Predicate = 'TenantClaimMatch' }
+    @{ Phase = 'TokenBinding'; Code = 'InvalidTokenBinding'; Predicate = 'NonceClaimString' }
+    @{ Phase = 'TokenBinding'; Code = 'InvalidTokenBinding'; Predicate = 'NonceClaimMatch' }
+    @{ Phase = 'TokenBinding'; Code = 'InvalidTokenBinding'; Predicate = 'AuthorizedPartyString' }
+    @{ Phase = 'TokenBinding'; Code = 'InvalidTokenBinding'; Predicate = 'AuthorizedPartyMatch' }
+    @{ Phase = 'TokenBinding'; Code = 'InvalidTokenBinding'; Predicate = 'ObjectIdString' }
+    @{ Phase = 'TokenBinding'; Code = 'InvalidTokenBinding'; Predicate = 'ObjectIdFormat' }
+    @{ Phase = 'TokenBinding'; Code = 'InvalidTokenBinding'; Predicate = 'ObjectIdNonzero' }
+    @{ Phase = 'TokenBinding'; Code = 'InvalidTokenBinding'; Predicate = 'UsernameString' }
+    @{ Phase = 'TokenBinding'; Code = 'InvalidTokenBinding'; Predicate = 'UsernameMatch' }
+    @{ Phase = 'TokenBinding'; Code = 'InvalidTokenBinding'; Predicate = 'SubjectString' }
+    @{ Phase = 'TokenBinding'; Code = 'InvalidTokenBinding'; Predicate = 'SubjectNonblank' }
+    @{ Phase = 'TokenTimes'; Code = 'UnexpectedFailure'; Predicate = 'ClockRead' }
+    @{ Phase = 'TokenTimes'; Code = 'InvalidTokenTimes'; Predicate = 'IssuedAtInteger' }
+    @{ Phase = 'TokenTimes'; Code = 'InvalidTokenTimes'; Predicate = 'ExpiryInteger' }
+    @{ Phase = 'TokenTimes'; Code = 'InvalidTokenTimes'; Predicate = 'ExpiryFuture' }
+    @{ Phase = 'TokenTimes'; Code = 'InvalidTokenTimes'; Predicate = 'IssuedAtNotFuture' }
+    @{ Phase = 'TokenTimes'; Code = 'InvalidTokenTimes'; Predicate = 'IssuedAtRecent' }
+    @{ Phase = 'TokenTimes'; Code = 'InvalidTokenTimes'; Predicate = 'ExpiryAfterIssuedAt' }
+    @{ Phase = 'TokenTimes'; Code = 'InvalidTokenTimes'; Predicate = 'NotBeforeInteger' }
+    @{ Phase = 'TokenTimes'; Code = 'InvalidTokenTimes'; Predicate = 'NotBeforeNotFuture' }
+    @{ Phase = 'UserInfoSubject'; Code = 'InvalidUserInfoSubject'; Predicate = 'UserInfoSubjectString' }
+    @{ Phase = 'UserInfoSubject'; Code = 'InvalidUserInfoSubject'; Predicate = 'UserInfoSubjectMatch' }
+    @{ Phase = 'DiscoveryRequest'; Code = 'UnexpectedFailure'; Predicate = 'RequestInvocation' }
+    @{ Phase = 'AuthorizationRequest'; Code = 'UnexpectedFailure'; Predicate = 'StateCreation' }
+    @{ Phase = 'AuthorizationRequest'; Code = 'UnexpectedFailure'; Predicate = 'NonceCreation' }
+    @{ Phase = 'AuthorizationRequest'; Code = 'UnexpectedFailure'; Predicate = 'VerifierCreation' }
+    @{ Phase = 'AuthorizationRequest'; Code = 'UnexpectedFailure'; Predicate = 'ChallengeCreation' }
+    @{ Phase = 'AuthorizationRequest'; Code = 'UnexpectedFailure'; Predicate = 'AuthorizationFormCreation' }
+    @{ Phase = 'AuthorizationRequest'; Code = 'UnexpectedFailure'; Predicate = 'AuthorizationUriConstruction' }
+    @{ Phase = 'AuthorizationRequest'; Code = 'UnexpectedFailure'; Predicate = 'RequestInvocation' }
+    @{ Phase = 'TokenRequest'; Code = 'UnexpectedFailure'; Predicate = 'TokenFormCreation' }
+    @{ Phase = 'TokenRequest'; Code = 'UnexpectedFailure'; Predicate = 'RequestInvocation' }
+    @{ Phase = 'UserInfoRequest'; Code = 'UnexpectedFailure'; Predicate = 'RequestInvocation' }
+    @{ Phase = 'TokenResponse'; Code = 'InvalidResponse'; Predicate = 'ResponseStatus' }
+    @{ Phase = 'TokenResponse'; Code = 'InvalidResponse'; Predicate = 'ResponseMediaType' }
+    @{ Phase = 'TokenResponse'; Code = 'InvalidResponse'; Predicate = 'ResponseLocations' }
+    @{ Phase = 'TokenResponse'; Code = 'InvalidResponse'; Predicate = 'ResponseJsonParse' }
+    @{ Phase = 'TokenResponse'; Code = 'InvalidResponse'; Predicate = 'ResponseJsonRootObject' }
+    @{ Phase = 'TokenResponse'; Code = 'InvalidResponse'; Predicate = 'ResponseJsonPropertySetConstruction' }
+    @{ Phase = 'TokenResponse'; Code = 'InvalidResponse'; Predicate = 'ResponseJsonPropertiesRead' }
+    @{ Phase = 'TokenResponse'; Code = 'InvalidResponse'; Predicate = 'ResponseJsonPropertyUnique' }
+    @{ Phase = 'TokenResponse'; Code = 'InvalidResponse'; Predicate = 'ResponseJsonConversion' }
+    @{ Phase = 'TokenResponse'; Code = 'InvalidResponse'; Predicate = 'ResponseJsonDispose' }
+    @{ Phase = 'UserInfoResponse'; Code = 'InvalidResponse'; Predicate = 'ResponseStatus' }
+    @{ Phase = 'UserInfoResponse'; Code = 'InvalidResponse'; Predicate = 'ResponseMediaType' }
+    @{ Phase = 'UserInfoResponse'; Code = 'InvalidResponse'; Predicate = 'ResponseLocations' }
+    @{ Phase = 'UserInfoResponse'; Code = 'InvalidResponse'; Predicate = 'ResponseJsonParse' }
+    @{ Phase = 'UserInfoResponse'; Code = 'InvalidResponse'; Predicate = 'ResponseJsonRootObject' }
+    @{ Phase = 'UserInfoResponse'; Code = 'InvalidResponse'; Predicate = 'ResponseJsonPropertySetConstruction' }
+    @{ Phase = 'UserInfoResponse'; Code = 'InvalidResponse'; Predicate = 'ResponseJsonPropertiesRead' }
+    @{ Phase = 'UserInfoResponse'; Code = 'InvalidResponse'; Predicate = 'ResponseJsonPropertyUnique' }
+    @{ Phase = 'UserInfoResponse'; Code = 'InvalidResponse'; Predicate = 'ResponseJsonConversion' }
+    @{ Phase = 'UserInfoResponse'; Code = 'InvalidResponse'; Predicate = 'ResponseJsonDispose' }
+    @{ Phase = 'DiscoveryRequest'; Code = 'TransportFailure'; Predicate = 'TransportUriConstruction' }
+    @{ Phase = 'DiscoveryRequest'; Code = 'TransportFailure'; Predicate = 'TransportScheme' }
+    @{ Phase = 'DiscoveryRequest'; Code = 'TransportFailure'; Predicate = 'TransportPort' }
+    @{ Phase = 'DiscoveryRequest'; Code = 'TransportFailure'; Predicate = 'TransportUserInfo' }
+    @{ Phase = 'DiscoveryRequest'; Code = 'TransportFailure'; Predicate = 'TransportFragment' }
+    @{ Phase = 'DiscoveryRequest'; Code = 'TransportFailure'; Predicate = 'TransportHost' }
+    @{ Phase = 'DiscoveryRequest'; Code = 'TransportFailure'; Predicate = 'TransportHandlerConstruction' }
+    @{ Phase = 'DiscoveryRequest'; Code = 'TransportFailure'; Predicate = 'TransportRedirectPolicy' }
+    @{ Phase = 'DiscoveryRequest'; Code = 'TransportFailure'; Predicate = 'TransportCookiePolicy' }
+    @{ Phase = 'DiscoveryRequest'; Code = 'TransportFailure'; Predicate = 'TransportCredentialPolicy' }
+    @{ Phase = 'DiscoveryRequest'; Code = 'TransportFailure'; Predicate = 'TransportProxyPolicy' }
+    @{ Phase = 'DiscoveryRequest'; Code = 'TransportFailure'; Predicate = 'TransportClientConstruction' }
+    @{ Phase = 'DiscoveryRequest'; Code = 'TransportFailure'; Predicate = 'TransportTimeoutConfiguration' }
+    @{ Phase = 'DiscoveryRequest'; Code = 'TransportFailure'; Predicate = 'TransportMethodConstruction' }
+    @{ Phase = 'DiscoveryRequest'; Code = 'TransportFailure'; Predicate = 'TransportRequestConstruction' }
+    @{ Phase = 'DiscoveryRequest'; Code = 'TransportFailure'; Predicate = 'TransportBufferConstruction' }
+    @{ Phase = 'DiscoveryRequest'; Code = 'TransportFailure'; Predicate = 'TransportHeaderConstruction' }
+    @{ Phase = 'DiscoveryRequest'; Code = 'TransportFailure'; Predicate = 'TransportBodyConstruction' }
+    @{ Phase = 'DiscoveryRequest'; Code = 'TransportFailure'; Predicate = 'TransportSend' }
+    @{ Phase = 'DiscoveryRequest'; Code = 'TransportFailure'; Predicate = 'TransportAdvertisedLimit' }
+    @{ Phase = 'DiscoveryRequest'; Code = 'TransportFailure'; Predicate = 'TransportDeadlineConstruction' }
+    @{ Phase = 'DiscoveryRequest'; Code = 'TransportFailure'; Predicate = 'TransportStreamOpen' }
+    @{ Phase = 'DiscoveryRequest'; Code = 'TransportFailure'; Predicate = 'TransportReadBufferConstruction' }
+    @{ Phase = 'DiscoveryRequest'; Code = 'TransportFailure'; Predicate = 'TransportRead' }
+    @{ Phase = 'DiscoveryRequest'; Code = 'TransportFailure'; Predicate = 'TransportStreamedLimit' }
+    @{ Phase = 'DiscoveryRequest'; Code = 'TransportFailure'; Predicate = 'TransportBufferWrite' }
+    @{ Phase = 'DiscoveryRequest'; Code = 'TransportFailure'; Predicate = 'TransportLocationRead' }
+    @{ Phase = 'DiscoveryRequest'; Code = 'TransportFailure'; Predicate = 'TransportResponseProjection' }
+    @{ Phase = 'DiscoveryRequest'; Code = 'TransportFailure'; Predicate = 'TransportUtf8Decode' }
+    @{ Phase = 'DiscoveryRequest'; Code = 'TransportFailure'; Predicate = 'TransportStreamDispose' }
+    @{ Phase = 'DiscoveryRequest'; Code = 'TransportFailure'; Predicate = 'TransportResponseDispose' }
+    @{ Phase = 'DiscoveryRequest'; Code = 'TransportFailure'; Predicate = 'TransportDeadlineDispose' }
+    @{ Phase = 'DiscoveryRequest'; Code = 'TransportFailure'; Predicate = 'TransportBufferDispose' }
+    @{ Phase = 'DiscoveryRequest'; Code = 'TransportFailure'; Predicate = 'TransportRequestDispose' }
+    @{ Phase = 'DiscoveryRequest'; Code = 'TransportFailure'; Predicate = 'TransportClientDispose' }
+    @{ Phase = 'AuthorizationRequest'; Code = 'TransportFailure'; Predicate = 'TransportUriConstruction' }
+    @{ Phase = 'AuthorizationRequest'; Code = 'TransportFailure'; Predicate = 'TransportScheme' }
+    @{ Phase = 'AuthorizationRequest'; Code = 'TransportFailure'; Predicate = 'TransportPort' }
+    @{ Phase = 'AuthorizationRequest'; Code = 'TransportFailure'; Predicate = 'TransportUserInfo' }
+    @{ Phase = 'AuthorizationRequest'; Code = 'TransportFailure'; Predicate = 'TransportFragment' }
+    @{ Phase = 'AuthorizationRequest'; Code = 'TransportFailure'; Predicate = 'TransportHost' }
+    @{ Phase = 'AuthorizationRequest'; Code = 'TransportFailure'; Predicate = 'TransportHandlerConstruction' }
+    @{ Phase = 'AuthorizationRequest'; Code = 'TransportFailure'; Predicate = 'TransportRedirectPolicy' }
+    @{ Phase = 'AuthorizationRequest'; Code = 'TransportFailure'; Predicate = 'TransportCookiePolicy' }
+    @{ Phase = 'AuthorizationRequest'; Code = 'TransportFailure'; Predicate = 'TransportCredentialPolicy' }
+    @{ Phase = 'AuthorizationRequest'; Code = 'TransportFailure'; Predicate = 'TransportProxyPolicy' }
+    @{ Phase = 'AuthorizationRequest'; Code = 'TransportFailure'; Predicate = 'TransportClientConstruction' }
+    @{ Phase = 'AuthorizationRequest'; Code = 'TransportFailure'; Predicate = 'TransportTimeoutConfiguration' }
+    @{ Phase = 'AuthorizationRequest'; Code = 'TransportFailure'; Predicate = 'TransportMethodConstruction' }
+    @{ Phase = 'AuthorizationRequest'; Code = 'TransportFailure'; Predicate = 'TransportRequestConstruction' }
+    @{ Phase = 'AuthorizationRequest'; Code = 'TransportFailure'; Predicate = 'TransportBufferConstruction' }
+    @{ Phase = 'AuthorizationRequest'; Code = 'TransportFailure'; Predicate = 'TransportHeaderConstruction' }
+    @{ Phase = 'AuthorizationRequest'; Code = 'TransportFailure'; Predicate = 'TransportBodyConstruction' }
+    @{ Phase = 'AuthorizationRequest'; Code = 'TransportFailure'; Predicate = 'TransportSend' }
+    @{ Phase = 'AuthorizationRequest'; Code = 'TransportFailure'; Predicate = 'TransportAdvertisedLimit' }
+    @{ Phase = 'AuthorizationRequest'; Code = 'TransportFailure'; Predicate = 'TransportDeadlineConstruction' }
+    @{ Phase = 'AuthorizationRequest'; Code = 'TransportFailure'; Predicate = 'TransportStreamOpen' }
+    @{ Phase = 'AuthorizationRequest'; Code = 'TransportFailure'; Predicate = 'TransportReadBufferConstruction' }
+    @{ Phase = 'AuthorizationRequest'; Code = 'TransportFailure'; Predicate = 'TransportRead' }
+    @{ Phase = 'AuthorizationRequest'; Code = 'TransportFailure'; Predicate = 'TransportStreamedLimit' }
+    @{ Phase = 'AuthorizationRequest'; Code = 'TransportFailure'; Predicate = 'TransportBufferWrite' }
+    @{ Phase = 'AuthorizationRequest'; Code = 'TransportFailure'; Predicate = 'TransportLocationRead' }
+    @{ Phase = 'AuthorizationRequest'; Code = 'TransportFailure'; Predicate = 'TransportResponseProjection' }
+    @{ Phase = 'AuthorizationRequest'; Code = 'TransportFailure'; Predicate = 'TransportUtf8Decode' }
+    @{ Phase = 'AuthorizationRequest'; Code = 'TransportFailure'; Predicate = 'TransportStreamDispose' }
+    @{ Phase = 'AuthorizationRequest'; Code = 'TransportFailure'; Predicate = 'TransportResponseDispose' }
+    @{ Phase = 'AuthorizationRequest'; Code = 'TransportFailure'; Predicate = 'TransportDeadlineDispose' }
+    @{ Phase = 'AuthorizationRequest'; Code = 'TransportFailure'; Predicate = 'TransportBufferDispose' }
+    @{ Phase = 'AuthorizationRequest'; Code = 'TransportFailure'; Predicate = 'TransportRequestDispose' }
+    @{ Phase = 'AuthorizationRequest'; Code = 'TransportFailure'; Predicate = 'TransportClientDispose' }
+    @{ Phase = 'TokenRequest'; Code = 'TransportFailure'; Predicate = 'TransportUriConstruction' }
+    @{ Phase = 'TokenRequest'; Code = 'TransportFailure'; Predicate = 'TransportScheme' }
+    @{ Phase = 'TokenRequest'; Code = 'TransportFailure'; Predicate = 'TransportPort' }
+    @{ Phase = 'TokenRequest'; Code = 'TransportFailure'; Predicate = 'TransportUserInfo' }
+    @{ Phase = 'TokenRequest'; Code = 'TransportFailure'; Predicate = 'TransportFragment' }
+    @{ Phase = 'TokenRequest'; Code = 'TransportFailure'; Predicate = 'TransportHost' }
+    @{ Phase = 'TokenRequest'; Code = 'TransportFailure'; Predicate = 'TransportHandlerConstruction' }
+    @{ Phase = 'TokenRequest'; Code = 'TransportFailure'; Predicate = 'TransportRedirectPolicy' }
+    @{ Phase = 'TokenRequest'; Code = 'TransportFailure'; Predicate = 'TransportCookiePolicy' }
+    @{ Phase = 'TokenRequest'; Code = 'TransportFailure'; Predicate = 'TransportCredentialPolicy' }
+    @{ Phase = 'TokenRequest'; Code = 'TransportFailure'; Predicate = 'TransportProxyPolicy' }
+    @{ Phase = 'TokenRequest'; Code = 'TransportFailure'; Predicate = 'TransportClientConstruction' }
+    @{ Phase = 'TokenRequest'; Code = 'TransportFailure'; Predicate = 'TransportTimeoutConfiguration' }
+    @{ Phase = 'TokenRequest'; Code = 'TransportFailure'; Predicate = 'TransportMethodConstruction' }
+    @{ Phase = 'TokenRequest'; Code = 'TransportFailure'; Predicate = 'TransportRequestConstruction' }
+    @{ Phase = 'TokenRequest'; Code = 'TransportFailure'; Predicate = 'TransportBufferConstruction' }
+    @{ Phase = 'TokenRequest'; Code = 'TransportFailure'; Predicate = 'TransportHeaderConstruction' }
+    @{ Phase = 'TokenRequest'; Code = 'TransportFailure'; Predicate = 'TransportBodyConstruction' }
+    @{ Phase = 'TokenRequest'; Code = 'TransportFailure'; Predicate = 'TransportSend' }
+    @{ Phase = 'TokenRequest'; Code = 'TransportFailure'; Predicate = 'TransportAdvertisedLimit' }
+    @{ Phase = 'TokenRequest'; Code = 'TransportFailure'; Predicate = 'TransportDeadlineConstruction' }
+    @{ Phase = 'TokenRequest'; Code = 'TransportFailure'; Predicate = 'TransportStreamOpen' }
+    @{ Phase = 'TokenRequest'; Code = 'TransportFailure'; Predicate = 'TransportReadBufferConstruction' }
+    @{ Phase = 'TokenRequest'; Code = 'TransportFailure'; Predicate = 'TransportRead' }
+    @{ Phase = 'TokenRequest'; Code = 'TransportFailure'; Predicate = 'TransportStreamedLimit' }
+    @{ Phase = 'TokenRequest'; Code = 'TransportFailure'; Predicate = 'TransportBufferWrite' }
+    @{ Phase = 'TokenRequest'; Code = 'TransportFailure'; Predicate = 'TransportLocationRead' }
+    @{ Phase = 'TokenRequest'; Code = 'TransportFailure'; Predicate = 'TransportResponseProjection' }
+    @{ Phase = 'TokenRequest'; Code = 'TransportFailure'; Predicate = 'TransportUtf8Decode' }
+    @{ Phase = 'TokenRequest'; Code = 'TransportFailure'; Predicate = 'TransportStreamDispose' }
+    @{ Phase = 'TokenRequest'; Code = 'TransportFailure'; Predicate = 'TransportResponseDispose' }
+    @{ Phase = 'TokenRequest'; Code = 'TransportFailure'; Predicate = 'TransportDeadlineDispose' }
+    @{ Phase = 'TokenRequest'; Code = 'TransportFailure'; Predicate = 'TransportBufferDispose' }
+    @{ Phase = 'TokenRequest'; Code = 'TransportFailure'; Predicate = 'TransportRequestDispose' }
+    @{ Phase = 'TokenRequest'; Code = 'TransportFailure'; Predicate = 'TransportClientDispose' }
+    @{ Phase = 'UserInfoRequest'; Code = 'TransportFailure'; Predicate = 'TransportUriConstruction' }
+    @{ Phase = 'UserInfoRequest'; Code = 'TransportFailure'; Predicate = 'TransportScheme' }
+    @{ Phase = 'UserInfoRequest'; Code = 'TransportFailure'; Predicate = 'TransportPort' }
+    @{ Phase = 'UserInfoRequest'; Code = 'TransportFailure'; Predicate = 'TransportUserInfo' }
+    @{ Phase = 'UserInfoRequest'; Code = 'TransportFailure'; Predicate = 'TransportFragment' }
+    @{ Phase = 'UserInfoRequest'; Code = 'TransportFailure'; Predicate = 'TransportHost' }
+    @{ Phase = 'UserInfoRequest'; Code = 'TransportFailure'; Predicate = 'TransportHandlerConstruction' }
+    @{ Phase = 'UserInfoRequest'; Code = 'TransportFailure'; Predicate = 'TransportRedirectPolicy' }
+    @{ Phase = 'UserInfoRequest'; Code = 'TransportFailure'; Predicate = 'TransportCookiePolicy' }
+    @{ Phase = 'UserInfoRequest'; Code = 'TransportFailure'; Predicate = 'TransportCredentialPolicy' }
+    @{ Phase = 'UserInfoRequest'; Code = 'TransportFailure'; Predicate = 'TransportProxyPolicy' }
+    @{ Phase = 'UserInfoRequest'; Code = 'TransportFailure'; Predicate = 'TransportClientConstruction' }
+    @{ Phase = 'UserInfoRequest'; Code = 'TransportFailure'; Predicate = 'TransportTimeoutConfiguration' }
+    @{ Phase = 'UserInfoRequest'; Code = 'TransportFailure'; Predicate = 'TransportMethodConstruction' }
+    @{ Phase = 'UserInfoRequest'; Code = 'TransportFailure'; Predicate = 'TransportRequestConstruction' }
+    @{ Phase = 'UserInfoRequest'; Code = 'TransportFailure'; Predicate = 'TransportBufferConstruction' }
+    @{ Phase = 'UserInfoRequest'; Code = 'TransportFailure'; Predicate = 'TransportHeaderConstruction' }
+    @{ Phase = 'UserInfoRequest'; Code = 'TransportFailure'; Predicate = 'TransportBodyConstruction' }
+    @{ Phase = 'UserInfoRequest'; Code = 'TransportFailure'; Predicate = 'TransportSend' }
+    @{ Phase = 'UserInfoRequest'; Code = 'TransportFailure'; Predicate = 'TransportAdvertisedLimit' }
+    @{ Phase = 'UserInfoRequest'; Code = 'TransportFailure'; Predicate = 'TransportDeadlineConstruction' }
+    @{ Phase = 'UserInfoRequest'; Code = 'TransportFailure'; Predicate = 'TransportStreamOpen' }
+    @{ Phase = 'UserInfoRequest'; Code = 'TransportFailure'; Predicate = 'TransportReadBufferConstruction' }
+    @{ Phase = 'UserInfoRequest'; Code = 'TransportFailure'; Predicate = 'TransportRead' }
+    @{ Phase = 'UserInfoRequest'; Code = 'TransportFailure'; Predicate = 'TransportStreamedLimit' }
+    @{ Phase = 'UserInfoRequest'; Code = 'TransportFailure'; Predicate = 'TransportBufferWrite' }
+    @{ Phase = 'UserInfoRequest'; Code = 'TransportFailure'; Predicate = 'TransportLocationRead' }
+    @{ Phase = 'UserInfoRequest'; Code = 'TransportFailure'; Predicate = 'TransportResponseProjection' }
+    @{ Phase = 'UserInfoRequest'; Code = 'TransportFailure'; Predicate = 'TransportUtf8Decode' }
+    @{ Phase = 'UserInfoRequest'; Code = 'TransportFailure'; Predicate = 'TransportStreamDispose' }
+    @{ Phase = 'UserInfoRequest'; Code = 'TransportFailure'; Predicate = 'TransportResponseDispose' }
+    @{ Phase = 'UserInfoRequest'; Code = 'TransportFailure'; Predicate = 'TransportDeadlineDispose' }
+    @{ Phase = 'UserInfoRequest'; Code = 'TransportFailure'; Predicate = 'TransportBufferDispose' }
+    @{ Phase = 'UserInfoRequest'; Code = 'TransportFailure'; Predicate = 'TransportRequestDispose' }
+    @{ Phase = 'UserInfoRequest'; Code = 'TransportFailure'; Predicate = 'TransportClientDispose' }
+    @{ Phase = 'Configuration'; Code = 'UnexpectedFailure'; Predicate = 'UnexpectedFailure' }
+    @{ Phase = 'Cookie'; Code = 'UnexpectedFailure'; Predicate = 'UnexpectedFailure' }
+    @{ Phase = 'DiscoveryRequest'; Code = 'UnexpectedFailure'; Predicate = 'UnexpectedFailure' }
+    @{ Phase = 'DiscoveryResponse'; Code = 'UnexpectedFailure'; Predicate = 'UnexpectedFailure' }
+    @{ Phase = 'DiscoveryMetadata'; Code = 'UnexpectedFailure'; Predicate = 'UnexpectedFailure' }
+    @{ Phase = 'AuthorizationRequest'; Code = 'UnexpectedFailure'; Predicate = 'UnexpectedFailure' }
+    @{ Phase = 'AuthorizationResponse'; Code = 'UnexpectedFailure'; Predicate = 'UnexpectedFailure' }
+    @{ Phase = 'Callback'; Code = 'UnexpectedFailure'; Predicate = 'UnexpectedFailure' }
+    @{ Phase = 'TokenRequest'; Code = 'UnexpectedFailure'; Predicate = 'UnexpectedFailure' }
+    @{ Phase = 'TokenResponse'; Code = 'UnexpectedFailure'; Predicate = 'UnexpectedFailure' }
+    @{ Phase = 'TokenEncoding'; Code = 'UnexpectedFailure'; Predicate = 'UnexpectedFailure' }
+    @{ Phase = 'TokenBinding'; Code = 'UnexpectedFailure'; Predicate = 'UnexpectedFailure' }
+    @{ Phase = 'TokenTimes'; Code = 'UnexpectedFailure'; Predicate = 'UnexpectedFailure' }
+    @{ Phase = 'UserInfoRequest'; Code = 'UnexpectedFailure'; Predicate = 'UnexpectedFailure' }
+    @{ Phase = 'UserInfoResponse'; Code = 'UnexpectedFailure'; Predicate = 'UnexpectedFailure' }
+    @{ Phase = 'UserInfoSubject'; Code = 'UnexpectedFailure'; Predicate = 'UnexpectedFailure' }
+    @{ Phase = 'Unknown'; Code = 'UnexpectedFailure'; Predicate = 'UnexpectedFailure' }
+)
+
 BeforeAll {
     $script:probeSource = Get-Content (Join-Path $PSScriptRoot '../.github/validation/LabSessionProbe.ps1') -Raw
     $parseTokens = $null; $parseErrors = $null
@@ -25,8 +327,42 @@ BeforeAll {
         . ([scriptblock]::Create($definition.Extent.Text))
     }
     function Send-LabProbeRequest {
-        param([string]$Uri, [string]$Method = 'GET', [hashtable]$Headers = @{}, [string]$Body)
+        param([string]$Uri, [string]$Method = 'GET', [hashtable]$Headers = @{}, [string]$Body, [hashtable]$Diagnostic)
         throw 'Native HTTP is unavailable in this offline test suite.'
+    }
+    # Immutable canonical source is checked before parsing and is NEVER dot-sourced.
+    # The isolated AST loader excludes BOTH native factory and native transport.
+    $baselinePath = Join-Path $PSScriptRoot 'fixtures/LabSessionProbe.Baseline.ps1'
+    if ((Get-FileHash $baselinePath -Algorithm SHA256).Hash -cne '9A42B6785D3D4E70108B0D8D4CB88C106123ADB4994B564A0B2AB3F7A6D639CC') {
+        throw 'The immutable canonical baseline hash changed.'
+    }
+    $baselineSource = Get-Content $baselinePath -Raw
+    $baselineTokens = $null; $baselineErrors = $null
+    $baselineAst = [Management.Automation.Language.Parser]::ParseInput($baselineSource, [ref]$baselineTokens, [ref]$baselineErrors)
+    if ($baselineErrors.Count -ne 0) { throw 'Immutable baseline source must parse.' }
+    $baselineDefinitions = @($baselineAst.EndBlock.Statements)
+    if ($baselineAst.BeginBlock -or $baselineAst.ProcessBlock -or $baselineAst.ParamBlock -or
+        @($baselineDefinitions | Where-Object { $_ -isnot [Management.Automation.Language.FunctionDefinitionAst] }).Count -ne 0) {
+        throw 'Baseline fixture permits only top-level function declarations.'
+    }
+    foreach ($excluded in @('Send-LabProbeRequest', 'New-LabProbeHttpHandler')) {
+        if (@($baselineDefinitions | Where-Object Name -CEQ $excluded).Count -ne 1) { throw 'Baseline isolation boundary missing.' }
+    }
+    foreach ($definition in $baselineDefinitions) {
+        if ($definition.Name -cin @('Send-LabProbeRequest', 'New-LabProbeHttpHandler')) { continue }
+        $renamed = $definition.Extent.Text
+        if ($renamed -match '(?i)HttpClient|HttpWebRequest|WebClient|TcpClient|Socket|SendAsync|DownloadString|Start-Process|Invoke-Expression') {
+            throw 'Network-capable baseline code outside the excluded transport is forbidden.'
+        }
+        foreach ($original in @($baselineDefinitions.Name | Sort-Object Length -Descending)) {
+            $replacement = $original.Replace('-Lab', '-BaselineLab')
+            $renamed = [regex]::Replace($renamed, ('\b' + [regex]::Escape($original) + '\b'), $replacement)
+        }
+        . ([scriptblock]::Create($renamed))
+    }
+    function Send-BaselineLabProbeRequest {
+        param([string]$Uri, [string]$Method = 'GET', [hashtable]$Headers = @{}, [string]$Body)
+        throw 'Native HTTP is unavailable in the immutable baseline test suite.'
     }
     function ConvertTo-ProbeTestSegment {
         param([string]$Text)
@@ -45,8 +381,74 @@ BeforeAll {
         foreach ($key in $Overrides.Keys) { $Value[$key] = $Overrides[$key] }
         foreach ($key in $Remove) { [void]$Value.Remove($key) }
     }
+    function ConvertTo-ProbeNormalizedRequestTrace {
+        # Compare destinations, methods, headers, and decoded query/form field
+        # values. Sorting and decoding normalize field order and percent-encoding,
+        # in addition to fresh transaction values; this is NOT a raw-byte trace.
+        # Exact baseline source checks below separately pin form serialization
+        # and the original authorization-query and token-body expressions.
+        param($Requests)
+        $normalized = foreach ($request in $Requests) {
+            $uriParts = $request.Uri.Split('?', 2)
+            $query = [ordered]@{}
+            if ($uriParts.Count -eq 2) {
+                $parsed = [Web.HttpUtility]::ParseQueryString($uriParts[1])
+                foreach ($key in @($parsed.AllKeys | Sort-Object -CaseSensitive)) {
+                    $values = @($parsed.GetValues($key))
+                    if ($key -cin @('state', 'nonce', 'code_challenge')) {
+                        $values.Count | Should -Be 1
+                        $values[0] | Should -Match '^[A-Za-z0-9_-]{43}$'
+                        $values = @('<transaction-' + $key + '>')
+                    }
+                    $query[$key] = $values
+                }
+            }
+            $headers = [ordered]@{}
+            foreach ($key in @($request.Headers.Keys | Sort-Object -CaseSensitive)) { $headers[$key] = $request.Headers[$key] }
+            $body = $request.Body
+            if ($request.Method -ceq 'POST' -and $null -ne $body) {
+                $parsed = [Web.HttpUtility]::ParseQueryString($body)
+                $body = [ordered]@{}
+                foreach ($key in @($parsed.AllKeys | Sort-Object -CaseSensitive)) {
+                    $values = @($parsed.GetValues($key))
+                    if ($key -ceq 'code_verifier') {
+                        $values.Count | Should -Be 1
+                        $values[0] | Should -Match '^[A-Za-z0-9_-]{43}$'
+                        $values = @('<transaction-code_verifier>')
+                    }
+                    $body[$key] = $values
+                }
+            }
+            [ordered]@{ Uri = $uriParts[0]; QueryPresent = ($uriParts.Count -eq 2); Query = $query; Method = $request.Method; Headers = $headers; Body = $body }
+        }
+        return ConvertTo-Json -InputObject @($normalized) -Depth 16 -Compress
+    }
     function Invoke-ProbeTest {
-        Invoke-LabSessionProbe @script:probeArguments
+        if (-not $script:probeCompareBaseline) { return Invoke-LabSessionProbe @script:probeArguments }
+        $requestStart = $script:probeRequests.Count
+        $candidateOutput = [Collections.Generic.List[object]]::new(); $candidateError = $null
+        try { Invoke-LabSessionProbe @script:probeArguments *>&1 | ForEach-Object { $candidateOutput.Add($_) } } catch { $candidateError = $_ }
+        $candidateRequests = @($script:probeRequests | Select-Object -Skip $requestStart)
+        $savedRequests = $script:probeRequests; $savedQuery = $script:probeAuthorizeQuery; $savedCount = $script:probeAuthorizeCount
+        $baselineOutput = [Collections.Generic.List[object]]::new(); $baselineError = $null
+        try {
+            $script:probeRequests = [Collections.Generic.List[object]]::new()
+            $script:probeAuthorizeQuery = $null; $script:probeAuthorizeCount = 0
+            try { Invoke-BaselineLabSessionProbe @script:probeArguments *>&1 | ForEach-Object { $baselineOutput.Add($_) } } catch { $baselineError = $_ }
+            $baselineRequests = $script:probeRequests.ToArray()
+        } finally {
+            $script:probeRequests = $savedRequests; $script:probeAuthorizeQuery = $savedQuery; $script:probeAuthorizeCount = $savedCount
+        }
+        # Error strings intentionally change. Acceptance and receipts must match;
+        # request destinations/methods/headers and decoded query/form field values
+        # must match after the documented semantic normalization, not bytewise.
+        ($null -eq $candidateError) | Should -Be ($null -eq $baselineError)
+        (ConvertTo-ProbeNormalizedRequestTrace $candidateRequests) | Should -BeExactly (ConvertTo-ProbeNormalizedRequestTrace $baselineRequests)
+        if ($null -eq $candidateError) {
+            (ConvertTo-Json -InputObject $candidateOutput.ToArray() -Depth 16 -Compress) | Should -BeExactly (ConvertTo-Json -InputObject $baselineOutput.ToArray() -Depth 16 -Compress)
+        } else { $baselineOutput.Count | Should -Be 0 }
+        foreach ($item in $candidateOutput) { Write-Output $item }
+        if ($null -ne $candidateError) { throw $candidateError }
     }
     $probeDefinition = @($definitions | Where-Object Name -CEQ 'Invoke-LabSessionProbe')[0]
     $probeTry = @($probeDefinition.Body.EndBlock.Statements | Where-Object { $_ -is [Management.Automation.Language.TryStatementAst] })[0]
@@ -54,17 +456,20 @@ BeforeAll {
     # Exercise the exact public catch body independently to test labels that
     # ordinary protocol input cannot assign. No transport is loaded here.
     $script:probeFailureEmission = [scriptblock]::Create($emissionSource.Substring(1, $emissionSource.Length - 2))
+    $script:probeBase64Function = (Get-Command ConvertTo-LabProbeBase64Url -CommandType Function).ScriptBlock
+    $script:probeDefinitions = $definitions
+    $script:probeBaselineDefinitions = $baselineDefinitions
     $script:probeFormFunction = (Get-Command ConvertTo-LabProbeForm -CommandType Function).ScriptBlock
     $script:probeSafeError = 'Server-backed session probe failed; no live acceptance. Sensitive details suppressed.'
     function Assert-ProbeTestFailure {
-        param([string]$Phase, [string]$Code, [int]$Requests, [scriptblock]$Action = { Invoke-ProbeTest })
+        param([string]$Phase, [string]$Code, [int]$Requests, [Parameter(Mandatory)][string]$Predicate, [scriptblock]$Action = { Invoke-ProbeTest })
         $before = $script:probeRequests.Count
         $messages = [Collections.Generic.List[object]]::new()
         $caught = $null
         $VerbosePreference = 'Continue'; $DebugPreference = 'Continue'; $InformationPreference = 'Continue'; $WarningPreference = 'Continue'
         try { & $Action *>&1 | ForEach-Object { $messages.Add($_) } } catch { $caught = $_ }
         $caught | Should -Not -BeNullOrEmpty
-        $expected = "$script:probeSafeError Phase=$Phase; Code=$Code."
+        $expected = "$script:probeSafeError Phase=$Phase; Code=$Code; Predicate=$Predicate."
         $caught.Exception.Message | Should -BeExactly $expected
         $caught.Exception.InnerException | Should -BeNullOrEmpty
         $messages.Count | Should -Be 0
@@ -72,7 +477,10 @@ BeforeAll {
         # Inspect the entire public error and ordinary/verbose/debug/information
         # streams, not only Message. Test markers never contain real credentials.
         $rendered = @($caught.ToString(), $caught.Exception.ToString(), ($caught | Out-String),
-            ($caught | Format-List * -Force | Out-String), [string]$caught.TargetObject, [string]$caught.ErrorDetails) -join "`n"
+            ($caught | Format-List * -Force | Out-String), ($caught.Exception | Format-List * -Force | Out-String),
+            ($caught.Exception.Data | Out-String), [string]$caught.TargetObject, [string]$caught.ErrorDetails,
+            [string]$caught.FullyQualifiedErrorId, [string]$caught.CategoryInfo, [string]$caught.ScriptStackTrace,
+            [string]$caught.InvocationInfo.PositionMessage) -join "`n"
         $rendered | Should -Not -Match 'fixture-sensitive|synthetic-cookie|synthetic-authorization|synthetic-opaque|fixture@example|diagnostic-secret|11111111-1111|22222222-2222|33333333-3333'
     }
 }
@@ -113,10 +521,11 @@ Describe 'Server-backed session readback with synthetic, offline evidence' {
         $script:probeRawClaims = $null
         $script:probeIdTokenMode = ''
         $script:probeSignature = 'c3ludGhldGljLXNpZ25hdHVyZQ'
+        $script:probeCompareBaseline = $true
         Mock Invoke-RestMethod { throw 'Real HTTP is forbidden in offline session tests.' }
         Mock Invoke-WebRequest { throw 'Real HTTP is forbidden in offline session tests.' }
-        Mock Send-LabProbeRequest {
-            param($Uri, $Method = 'GET', $Headers = @{}, $Body)
+        $script:probeSyntheticRequest = {
+            param($Uri, $Method = 'GET', $Headers = @{}, $Body, [hashtable]$Diagnostic)
             if ($null -eq $Headers) { $Headers = @{} }
             $script:probeRequests.Add(@{ Uri = [string]$Uri; Method = $Method; Headers = @{} + $Headers; Body = $Body })
             if ($Uri -ceq $script:probeDiscovery) {
@@ -156,6 +565,7 @@ Describe 'Server-backed session readback with synthetic, offline evidence' {
                     'encoded-duplicate-code' { $query += '&co%64e=second-code' }
                     'case-duplicate-code' { $query += '&CODE=second-code' }
                     'oversize-code' { $query = "state=$state&code=" + ('x' * 16385) }
+                    'boundary-code' { $query = "state=$state&code=" + ('x' * 16384) }
                     'unnamed-field' { $query += '&unkeyed-value' }
                     'duplicate-extra-field' { $query += '&extra=one&extra=two' }
                     'login-required' { $query += '&error=login_required&error_description=fixture-sensitive-login-detail' }
@@ -223,6 +633,8 @@ Describe 'Server-backed session readback with synthetic, offline evidence' {
             }
             throw 'Offline fixture refused an unexpected destination; no HTTP was attempted.'
         }
+        Mock Send-LabProbeRequest { param($Uri, $Method = 'GET', $Headers = @{}, $Body, [hashtable]$Diagnostic); & $script:probeSyntheticRequest @PSBoundParameters }
+        Mock Send-BaselineLabProbeRequest { param($Uri, $Method = 'GET', $Headers = @{}, $Body); & $script:probeSyntheticRequest @PSBoundParameters }
     }
     AfterEach {
         Should -Invoke Invoke-RestMethod -Times 0 -Exactly
@@ -309,14 +721,14 @@ Describe 'Server-backed session readback with synthetic, offline evidence' {
 
     It 'requires explicit <Field> before any request' -ForEach @('TenantId', 'ClientId', 'ExpectedUpn') {
         [void]$script:probeArguments.Remove($_)
-        Assert-ProbeTestFailure Configuration InvalidConfiguration 0
+        Assert-ProbeTestFailure Configuration InvalidConfiguration 0 (@{ TenantId = 'TenantFormat'; ClientId = 'ClientFormat'; ExpectedUpn = 'UpnFormat' }[$_])
         Should -Invoke Send-LabProbeRequest -Times 0 -Exactly
     }
     It 'rejects malformed tenant/client IDs before HTTP: <Value>' -ForEach @('', 'organizations', 'common', '00000000-0000-0000-0000-000000000000', 'AAAAAAAA-AAAA-4AAA-8AAA-AAAAAAAAAAAA', "11111111-1111-4111-8111-111111111111`n", '11111111-1111-4111-8111-111111111111/extra') {
         foreach ($field in @('TenantId', 'ClientId')) {
             $original = $script:probeArguments[$field]
             $script:probeArguments[$field] = $_
-            Assert-ProbeTestFailure Configuration InvalidConfiguration 0
+            Assert-ProbeTestFailure Configuration InvalidConfiguration 0 (($field -replace 'Id$','') + $(if ($_ -eq '00000000-0000-0000-0000-000000000000') { 'Nonzero' } else { 'Format' }))
             $script:probeArguments[$field] = $original
         }
         Should -Invoke Send-LabProbeRequest -Times 0 -Exactly
@@ -327,23 +739,23 @@ Describe 'Server-backed session readback with synthetic, offline evidence' {
     }
     It 'rejects missing or malformed expected UPNs' -ForEach @('', 'fixture', 'fixture@@example.invalid', ' fixture@example.invalid', "fixture@example.invalid`n", (('x' * 310) + '@example.invalid')) {
         $script:probeArguments.ExpectedUpn = $_
-        Assert-ProbeTestFailure Configuration InvalidConfiguration 0
+        Assert-ProbeTestFailure Configuration InvalidConfiguration 0 $(if ($_.Length -gt 320) { 'UpnLength' } else { 'UpnFormat' })
         Should -Invoke Send-LabProbeRequest -Times 0 -Exactly
     }
     It 'rejects invalid cookie material without any request' -ForEach @('', "cookie`nvalue", "cookie`rvalue", 'cookie;second=value', 'cookie,value', 'cookie value', 'cookie"value', 'cookie\value', ('x' * 32769)) {
         $script:probeArguments.Cookie = $_
-        Assert-ProbeTestFailure Cookie InvalidCookie 0
+        Assert-ProbeTestFailure Cookie InvalidCookie 0 $(if ($_.Length -gt 32768) { 'CookieLength' } else { 'CookieAlphabet' })
         Should -Invoke Send-LabProbeRequest -Times 0 -Exactly
     }
     It 'rejects absent or unknown cookie names' -ForEach @('', 'estsauth', 'OTHER', "ESTSAUTH`r`nInjected: x") {
         $script:probeArguments.CookieName = $_
-        Assert-ProbeTestFailure Cookie InvalidCookie 0
+        Assert-ProbeTestFailure Cookie InvalidCookie 0 CookieName
         Should -Invoke Send-LabProbeRequest -Times 0 -Exactly
     }
 
     It 'requires every pinned discovery endpoint: <_>' -ForEach @('issuer', 'authorization_endpoint', 'token_endpoint', 'userinfo_endpoint') {
         $script:probeMetadataRemove = @($_)
-        Assert-ProbeTestFailure DiscoveryMetadata InvalidMetadata 1
+        Assert-ProbeTestFailure DiscoveryMetadata InvalidMetadata 1 (@{ issuer = 'IssuerMetadataString'; authorization_endpoint = 'AuthorizationMetadataString'; token_endpoint = 'TokenMetadataString'; userinfo_endpoint = 'UserInfoMetadataString' }[$_])
         Should -Invoke Send-LabProbeRequest -Times 1 -Exactly
     }
     It 'rejects alternate or non-string discovery metadata: <Field>' -ForEach @(
@@ -355,7 +767,7 @@ Describe 'Server-backed session readback with synthetic, offline evidence' {
         @{ Field = 'userinfo_endpoint'; Value = $null }
     ) {
         $script:probeMetadataOverrides[$Field] = $Value
-        Assert-ProbeTestFailure DiscoveryMetadata InvalidMetadata 1
+        Assert-ProbeTestFailure DiscoveryMetadata InvalidMetadata 1 ((@{ issuer = 'Issuer'; authorization_endpoint = 'Authorization'; token_endpoint = 'Token'; userinfo_endpoint = 'UserInfo' }[$Field]) + 'Metadata' + $(if ($Value -is [string]) { 'Match' } else { 'String' }))
         Should -Invoke Send-LabProbeRequest -Times 1 -Exactly
     }
     It 'rejects a trailing slash, query, fragment or extra path on every pinned discovery value' -ForEach @(@{Suffix='/'}, @{Suffix='?extra=1'}, @{Suffix='#fragment'}, @{Suffix='/extra'}) {
@@ -367,7 +779,7 @@ Describe 'Server-backed session readback with synthetic, offline evidence' {
                 'userinfo_endpoint' { $script:probeUserInfoEndpoint }
             }
             $script:probeMetadataOverrides = @{ $field = $base + $Suffix }
-            Assert-ProbeTestFailure DiscoveryMetadata InvalidMetadata 1
+            Assert-ProbeTestFailure DiscoveryMetadata InvalidMetadata 1 ((@{ issuer = 'Issuer'; authorization_endpoint = 'Authorization'; token_endpoint = 'Token'; userinfo_endpoint = 'UserInfo' }[$field]) + 'MetadataMatch')
         }
     }
     It 'rejects invalid status, media type, redirect or JSON at <Stage>' -ForEach @(
@@ -389,7 +801,8 @@ Describe 'Server-backed session readback with synthetic, offline evidence' {
         @{ Stage = 'UserInfo'; Change = @{ Body = '{"sub":"one","SUB":"two"}' } }
     ) {
         $script:probeResponseOverrides[$Stage] = $Change
-        Assert-ProbeTestFailure ($Stage + 'Response') InvalidResponse (@{ Discovery = 1; Token = 3; UserInfo = 4 }[$Stage])
+        $predicate = if ($Change.Contains('Status')) { 'ResponseStatus' } elseif ($Change.Contains('ContentType')) { 'ResponseMediaType' } elseif ($Change.Contains('Locations')) { 'ResponseLocations' } elseif ($Change.Body -eq '{not-json') { 'ResponseJsonParse' } elseif ($Change.Body -in @('[]', 'null', '[{"sub":"synthetic-pairwise-subject"}]')) { 'ResponseJsonRootObject' } else { 'ResponseJsonPropertyUnique' }
+        Assert-ProbeTestFailure ($Stage + 'Response') InvalidResponse (@{ Discovery = 1; Token = 3; UserInfo = 4 }[$Stage]) $predicate
         @($script:probeRequests | Where-Object { $_.Uri.StartsWith('https://example.invalid') }).Count | Should -Be 0
     }
 
@@ -403,7 +816,7 @@ Describe 'Server-backed session readback with synthetic, offline evidence' {
         @{ Change = @{ Locations = @('https://login.microsoftonline.com/common/oauth2/nativeclient', 'https://example.invalid/') } }
     ) {
         $script:probeResponseOverrides.Authorization = $Change
-        Assert-ProbeTestFailure AuthorizationResponse InvalidAuthorizationResponse 2
+        Assert-ProbeTestFailure AuthorizationResponse InvalidAuthorizationResponse 2 $(if ($Change.Contains('Status')) { 'AuthorizationStatus' } else { 'AuthorizationLocationCount' })
         Should -Invoke Send-LabProbeRequest -Times 2 -Exactly
     }
     It 'rejects untrusted authorization redirects before forwarding the cookie: <_>' -ForEach @(
@@ -416,12 +829,20 @@ Describe 'Server-backed session readback with synthetic, offline evidence' {
         'https://login.microsoftonline.com/another-tenant/oauth2/v2.0/authorize'
     ) {
         $script:probeRedirectOverride = $_
-        Assert-ProbeTestFailure Callback InvalidCallback 2
+        $predicate = switch -Regex ($_) {
+            '^(http:|file:)' { 'CallbackScheme'; break }
+            '^https://login.microsoftonline.com:444' { 'CallbackPort'; break }
+            '^https://user@' { 'CallbackUserInfo'; break }
+            '#fragment$' { 'CallbackFragment'; break }
+            '^https://login.microsoftonline.com/(logout|another-tenant)' { 'CallbackPath'; break }
+            default { 'CallbackHost' }
+        }
+        Assert-ProbeTestFailure Callback InvalidCallback 2 $predicate
         Should -Invoke Send-LabProbeRequest -Times 2 -Exactly
     }
     It 'does not follow even a same-origin authorization loop' {
         $script:probeCallbackMode = 'loop'
-        Assert-ProbeTestFailure Callback InvalidCallback 2
+        Assert-ProbeTestFailure Callback InvalidCallback 2 CallbackPath
         $script:probeAuthorizeCount | Should -Be 1
         Should -Invoke Send-LabProbeRequest -Times 2 -Exactly
         @($script:probeRequests | Where-Object Method -EQ 'POST').Count | Should -Be 0
@@ -432,7 +853,15 @@ Describe 'Server-backed session readback with synthetic, offline evidence' {
         'oversize-code', 'unnamed-field', 'duplicate-extra-field', 'login-required', 'interaction-required', 'consent-required', 'access-denied'
     ) {
         $script:probeCallbackMode = $_
-        Assert-ProbeTestFailure Callback InvalidCallback 2
+        $predicate = switch -Regex ($_) {
+            'duplicate' { 'CallbackKeyMultiplicity'; break }
+            '^(missing|wrong|empty)-state$' { 'CallbackStateMatch'; break }
+            '^(missing|empty|blank)-code$' { 'CallbackCodePresent'; break }
+            '^oversize-code$' { 'CallbackCodeLength'; break }
+            '^unnamed-field$' { 'CallbackKeyName'; break }
+            default { 'CallbackErrorAbsent' }
+        }
+        Assert-ProbeTestFailure Callback InvalidCallback 2 $predicate
         Should -Invoke Send-LabProbeRequest -Times 2 -Exactly
         @($script:probeRequests | Where-Object Method -EQ 'POST').Count | Should -Be 0
     }
@@ -443,13 +872,13 @@ Describe 'Server-backed session readback with synthetic, offline evidence' {
     }
     It 'rejects broader or malformed returned scopes' -ForEach @('openid profile User.Read', 'openid offline_access', 'https://graph.microsoft.com/.default', 'OPENID', '', "openid`nprofile", @('openid','profile'), $null) {
         $script:probeTokenOverrides.scope = $_
-        Assert-ProbeTestFailure TokenResponse InvalidTokenResponse 3
+        Assert-ProbeTestFailure TokenResponse InvalidTokenResponse 3 $(if ($_ -is [string]) { 'ScopeAllowedGrammar' } else { 'ScopeString' })
         Should -Invoke Send-LabProbeRequest -Times 3 -Exactly
     }
 
     It 'requires each token response field: <_>' -ForEach @('id_token', 'access_token', 'token_type') {
         $script:probeTokenRemove = @($_)
-        Assert-ProbeTestFailure TokenResponse InvalidTokenResponse 3
+        Assert-ProbeTestFailure TokenResponse InvalidTokenResponse 3 (@{ token_type = 'TokenTypeString'; access_token = 'AccessTokenString'; id_token = 'IdTokenString' }[$_])
         Should -Invoke Send-LabProbeRequest -Times 3 -Exactly
     }
     It 'rejects malformed token response <Field>' -ForEach @(
@@ -460,7 +889,13 @@ Describe 'Server-backed session readback with synthetic, offline evidence' {
         @{ Field = 'refresh_token'; Value = 'unrequested-refresh-token' }
     ) {
         $script:probeTokenOverrides[$Field] = $Value
-        Assert-ProbeTestFailure TokenResponse InvalidTokenResponse 3
+        $predicate = switch ($Field) {
+            'token_type' { if ($Value -is [string]) { 'TokenTypeBearer' } else { 'TokenTypeString' } }
+            'access_token' { if ($Value -isnot [string]) { 'AccessTokenString' } elseif ([string]::IsNullOrWhiteSpace($Value)) { 'AccessTokenNonblank' } else { 'AccessTokenNoNewline' } }
+            'id_token' { 'IdTokenString' }
+            'refresh_token' { 'RefreshTokenFalsey' }
+        }
+        Assert-ProbeTestFailure TokenResponse InvalidTokenResponse 3 $predicate
         Should -Invoke Send-LabProbeRequest -Times 3 -Exactly
     }
     It 'rejects an opaque or malformed ID token: <_>' -ForEach @(
@@ -469,16 +904,26 @@ Describe 'Server-backed session readback with synthetic, offline evidence' {
         'invalid-header-utf8', 'invalid-payload-utf8', 'empty-signature', 'invalid-signature-alphabet'
     ) {
         $script:probeIdTokenMode = $_
-        Assert-ProbeTestFailure TokenEncoding InvalidTokenEncoding 3
+        $predicate = switch -Regex ($_) {
+            '^(opaque|empty|two-parts|four-parts)$' { 'TokenPartCount'; break }
+            '^(empty-header|invalid-header-alphabet)$' { 'HeaderAlphabet'; break }
+            '^(empty-payload|invalid-payload-alphabet)$' { 'ClaimsAlphabet'; break }
+            '^invalid-header-length$' { 'HeaderLength'; break }
+            '^invalid-payload-length$' { 'ClaimsLength'; break }
+            '^invalid-header-utf8$' { 'HeaderUtf8Decode'; break }
+            '^invalid-payload-utf8$' { 'ClaimsUtf8Decode'; break }
+            default { 'SignatureAlphabet' }
+        }
+        Assert-ProbeTestFailure TokenEncoding InvalidTokenEncoding 3 $predicate
         Should -Invoke Send-LabProbeRequest -Times 3 -Exactly
     }
     It 'rejects unexpected ID-token algorithms: <_>' -ForEach @('none', 'HS256', 'rs256', '', @('RS256')) {
         $script:probeHeaderOverrides.alg = $_
-        Assert-ProbeTestFailure TokenEncoding InvalidTokenEncoding 3
+        Assert-ProbeTestFailure TokenEncoding InvalidTokenEncoding 3 $(if ($_ -is [string]) { 'HeaderAlgorithmMatch' } else { 'HeaderAlgorithmString' })
     }
     It 'rejects unsupported critical header extensions' -ForEach @(@('custom'), 'custom', $null) {
         $script:probeHeaderOverrides.crit = $_
-        Assert-ProbeTestFailure TokenEncoding InvalidTokenEncoding 3
+        Assert-ProbeTestFailure TokenEncoding InvalidTokenEncoding 3 HeaderCriticalAbsent
     }
     It 'rejects malformed, non-object or duplicate header/claim JSON: <Part>' -ForEach @(
         @{ Part = 'Header'; Json = '{broken' }, @{ Part = 'Header'; Json = '[]' },
@@ -487,11 +932,11 @@ Describe 'Server-backed session readback with synthetic, offline evidence' {
         @{ Part = 'Claims'; Json = '{"iss":"one","ISS":"two"}' }
     ) {
         if ($Part -eq 'Header') { $script:probeRawHeader = $Json } else { $script:probeRawClaims = $Json }
-        Assert-ProbeTestFailure TokenEncoding InvalidTokenEncoding 3
+        Assert-ProbeTestFailure TokenEncoding InvalidTokenEncoding 3 ($Part + 'Json' + $(if ($Json -eq '{broken') { 'Parse' } elseif ($Json -eq '[]') { 'RootObject' } else { 'PropertyUnique' }))
     }
     It 'requires all identity, transaction and time claims: <_>' -ForEach @('iss', 'tid', 'aud', 'nonce', 'oid', 'preferred_username', 'sub', 'iat', 'exp') {
         $script:probeClaimsRemove = @($_)
-        Assert-ProbeTestFailure $(if ($_ -in @('iat', 'exp')) { 'TokenTimes' } else { 'TokenBinding' }) $(if ($_ -in @('iat', 'exp')) { 'InvalidTokenTimes' } else { 'InvalidTokenBinding' }) 3
+        Assert-ProbeTestFailure $(if ($_ -in @('iat', 'exp')) { 'TokenTimes' } else { 'TokenBinding' }) $(if ($_ -in @('iat', 'exp')) { 'InvalidTokenTimes' } else { 'InvalidTokenBinding' }) 3 (@{ iss = 'IssuerClaimString'; tid = 'TenantClaimString'; aud = 'AudienceClaimString'; nonce = 'NonceClaimString'; oid = 'ObjectIdString'; preferred_username = 'UsernameString'; sub = 'SubjectString'; iat = 'IssuedAtInteger'; exp = 'ExpiryInteger' }[$_])
         Should -Invoke Send-LabProbeRequest -Times 3 -Exactly
     }
     It 'rejects incorrectly bound or non-string identity claims: <Field>' -ForEach @(
@@ -509,7 +954,9 @@ Describe 'Server-backed session readback with synthetic, offline evidence' {
         @{ Field = 'sub'; Value = '' }, @{ Field = 'sub'; Value = ' ' }, @{ Field = 'sub'; Value = @('synthetic-pairwise-subject') }
     ) {
         $script:probeClaimsOverrides[$Field] = $Value
-        Assert-ProbeTestFailure TokenBinding InvalidTokenBinding 3
+        $prefix = @{ iss = 'IssuerClaim'; tid = 'TenantClaim'; aud = 'AudienceClaim'; nonce = 'NonceClaim'; azp = 'AuthorizedParty'; oid = 'ObjectId'; preferred_username = 'Username'; sub = 'Subject' }[$Field]
+        $suffix = if ($Value -isnot [string]) { 'String' } elseif ($Field -eq 'oid') { if ($Value -eq '00000000-0000-0000-0000-000000000000') { 'Nonzero' } else { 'Format' } } elseif ($Field -eq 'sub') { 'Nonblank' } else { 'Match' }
+        Assert-ProbeTestFailure TokenBinding InvalidTokenBinding 3 ($prefix + $suffix)
         Should -Invoke Send-LabProbeRequest -Times 3 -Exactly
     }
     It 'rejects non-integer numeric-date claims: <Field>' -ForEach @(
@@ -518,12 +965,13 @@ Describe 'Server-backed session readback with synthetic, offline evidence' {
         @{ Field = 'nbf'; Value = '1770000000' }, @{ Field = 'nbf'; Value = 1.5 }, @{ Field = 'nbf'; Value = $null }
     ) {
         $script:probeClaimsOverrides[$Field] = $Value
-        Assert-ProbeTestFailure TokenTimes InvalidTokenTimes 3
+        Assert-ProbeTestFailure TokenTimes InvalidTokenTimes 3 (@{ iat = 'IssuedAtInteger'; exp = 'ExpiryInteger'; nbf = 'NotBeforeInteger' }[$Field])
         Should -Invoke Send-LabProbeRequest -Times 3 -Exactly
     }
     It 'rejects expired, stale, future or internally inconsistent token times: <_>' -ForEach @('expired', 'stale-iat', 'future-iat', 'future-nbf', 'exp-before-iat', 'exp-equals-iat') {
+        $timeCase = $_
         $now = [DateTimeOffset]::UtcNow.ToUnixTimeSeconds()
-        switch ($_) {
+        switch ($timeCase) {
             'expired' { $script:probeClaimsOverrides.exp = $now - 10 }
             'stale-iat' { $script:probeClaimsOverrides.iat = $now - 600 }
             'future-iat' { $script:probeClaimsOverrides.iat = $now + 300 }
@@ -531,22 +979,22 @@ Describe 'Server-backed session readback with synthetic, offline evidence' {
             'exp-before-iat' { $script:probeClaimsOverrides.iat = $now + 30; $script:probeClaimsOverrides.exp = $now + 20 }
             'exp-equals-iat' { $script:probeClaimsOverrides.iat = $now + 30; $script:probeClaimsOverrides.exp = $now + 30 }
         }
-        Assert-ProbeTestFailure TokenTimes InvalidTokenTimes 3
+        Assert-ProbeTestFailure TokenTimes InvalidTokenTimes 3 (@{ expired = 'ExpiryFuture'; 'stale-iat' = 'IssuedAtRecent'; 'future-iat' = 'IssuedAtNotFuture'; 'future-nbf' = 'NotBeforeNotFuture'; 'exp-before-iat' = 'ExpiryAfterIssuedAt'; 'exp-equals-iat' = 'ExpiryAfterIssuedAt' }[$timeCase])
         Should -Invoke Send-LabProbeRequest -Times 3 -Exactly
     }
     It 'rejects UserInfo subject mismatch or malformed subject: <_>' -ForEach @('wrong-subject', 'SYNTHETIC-PAIRWISE-SUBJECT', '', ' ', @('synthetic-pairwise-subject'), $null) {
         $script:probeUserInfoOverrides.sub = $_
-        Assert-ProbeTestFailure UserInfoSubject InvalidUserInfoSubject 4
+        Assert-ProbeTestFailure UserInfoSubject InvalidUserInfoSubject 4 $(if ($_ -is [string]) { 'UserInfoSubjectMatch' } else { 'UserInfoSubjectString' })
         Should -Invoke Send-LabProbeRequest -Times 4 -Exactly
     }
     It 'rejects missing UserInfo subject even when another user field matches' {
         $script:probeUserInfoRemove = @('sub')
         $script:probeUserInfoOverrides.preferred_username = 'fixture@example.invalid'
-        Assert-ProbeTestFailure UserInfoSubject InvalidUserInfoSubject 4
+        Assert-ProbeTestFailure UserInfoSubject InvalidUserInfoSubject 4 UserInfoSubjectString
     }
     It 'suppresses secret-bearing transport details and emits no partial receipt: <_>' -ForEach @('Discovery', 'Authorization', 'Token', 'UserInfo') {
         $script:probeThrowStage = $_
-        Assert-ProbeTestFailure ($_ + 'Request') UnexpectedFailure (@{ Discovery = 1; Authorization = 2; Token = 3; UserInfo = 4 }[$_])
+        Assert-ProbeTestFailure ($_ + 'Request') UnexpectedFailure (@{ Discovery = 1; Authorization = 2; Token = 3; UserInfo = 4 }[$_]) RequestInvocation
     }
     It 'suppresses synthetic nested constructor/disposal-style errors at the public request boundary: <Stage> <Kind>' -ForEach @(
         @{ Stage = 'Discovery'; Kind = 'construction'; Requests = 1 },
@@ -576,12 +1024,14 @@ Describe 'Server-backed session readback with synthetic, offline evidence' {
             $script:probeException.ErrorDetails = [Management.Automation.ErrorDetails]::new('diagnostic-secret-details')
         }
         $script:probeThrowStage = $Stage
-        Assert-ProbeTestFailure ($Stage + 'Request') UnexpectedFailure $Requests
+        Assert-ProbeTestFailure ($Stage + 'Request') UnexpectedFailure $Requests RequestInvocation
     }
     It 'uses UnexpectedFailure for local request construction before HTTP: <Phase>' -ForEach @(
         @{ Phase = 'AuthorizationRequest'; FailureCall = 1; Requests = 1 },
         @{ Phase = 'TokenRequest'; FailureCall = 2; Requests = 2 }
     ) {
+        # Only candidate helper execution is fault-injected; protocol equivalence is tested separately.
+        $script:probeCompareBaseline = $false
         $script:probeFormCalls = 0
         $script:probeFormFailureCall = $FailureCall
         Mock ConvertTo-LabProbeForm {
@@ -592,12 +1042,14 @@ Describe 'Server-backed session readback with synthetic, offline evidence' {
             }
             & $script:probeFormFunction $Values
         }
-        Assert-ProbeTestFailure $Phase UnexpectedFailure $Requests
+        Assert-ProbeTestFailure $Phase UnexpectedFailure $Requests $(if ($FailureCall -eq 1) { 'AuthorizationFormCreation' } else { 'TokenFormCreation' })
         $script:probeFormCalls | Should -Be $FailureCall
     }
     It 'does not retain a prior successful validation code during transaction construction' {
+        # Fault-injected helper, not a changed protocol fixture.
+        $script:probeCompareBaseline = $false
         Mock ConvertTo-LabProbeBase64Url { throw 'diagnostic-secret-random' }
-        Assert-ProbeTestFailure AuthorizationRequest UnexpectedFailure 1
+        Assert-ProbeTestFailure AuthorizationRequest UnexpectedFailure 1 StateCreation
     }
     It 'never emits secret markers from protocol inputs: <Case>' -ForEach @(
         @{ Case = 'configuration'; Phase = 'Configuration'; Code = 'InvalidConfiguration'; Requests = 0 },
@@ -629,23 +1081,216 @@ Describe 'Server-backed session readback with synthetic, offline evidence' {
             'userinfo-body' { $script:probeResponseOverrides.UserInfo = @{ Body = '["diagnostic-secret"]' } }
             'userinfo-subject' { $script:probeUserInfoOverrides.sub = 'diagnostic-secret-subject' }
         }
-        Assert-ProbeTestFailure $Phase $Code $Requests
+        $predicate = @{ configuration = 'UpnFormat'; cookie = 'CookieAlphabet'; 'discovery-url' = 'IssuerMetadataMatch'; 'discovery-body' = 'ResponseJsonParse'; 'authorization-body' = 'AuthorizationStatus'; 'callback-header' = 'CallbackHost'; 'malformed-callback' = 'CallbackUriConstruction'; 'token-body' = 'ResponseJsonPropertyUnique'; 'token-scope' = 'ScopeAllowedGrammar'; 'token-header' = 'HeaderAlgorithmMatch'; 'token-claims' = 'UsernameMatch'; 'userinfo-body' = 'ResponseJsonRootObject'; 'userinfo-subject' = 'UserInfoSubjectMatch' }[$Case]
+        Assert-ProbeTestFailure $Phase $Code $Requests $predicate
     }
-    It 'normalizes unknown labels at the exact public emission boundary: <Case>' -ForEach @(
-        @{ Case = 'both unknown'; InputPhase = 'diagnostic-secret-phase'; InputCode = 'diagnostic-secret-code'; ExpectedPhase = 'Unknown'; ExpectedCode = 'UnexpectedFailure' },
-        @{ Case = 'unknown code'; InputPhase = 'TokenResponse'; InputCode = 'diagnostic-secret-code'; ExpectedPhase = 'TokenResponse'; ExpectedCode = 'UnexpectedFailure' },
-        @{ Case = 'unknown phase'; InputPhase = 'diagnostic-secret-phase'; InputCode = 'InvalidResponse'; ExpectedPhase = 'Unknown'; ExpectedCode = 'InvalidResponse' },
-        @{ Case = 'wrong casing'; InputPhase = 'discoveryrequest'; InputCode = 'unexpectedfailure'; ExpectedPhase = 'Unknown'; ExpectedCode = 'UnexpectedFailure' },
-        @{ Case = 'missing labels'; InputPhase = $null; InputCode = $null; ExpectedPhase = 'Unknown'; ExpectedCode = 'UnexpectedFailure' },
-        @{ Case = 'single-element arrays'; InputPhase = @('DiscoveryRequest'); InputCode = @('InvalidResponse'); ExpectedPhase = 'Unknown'; ExpectedCode = 'UnexpectedFailure' },
-        @{ Case = 'object labels'; InputPhase = [pscustomobject]@{ Value = 'diagnostic-secret-phase' }; InputCode = [pscustomobject]@{ Value = 'diagnostic-secret-code' }; ExpectedPhase = 'Unknown'; ExpectedCode = 'UnexpectedFailure' },
-        @{ Case = 'multiple labels'; InputPhase = @('DiscoveryRequest', 'diagnostic-secret'); InputCode = @('UnexpectedFailure', 'diagnostic-secret'); ExpectedPhase = 'Unknown'; ExpectedCode = 'UnexpectedFailure' }
+
+    It 'preserves baseline acceptance for case-insensitive bearer type and duplicate identity-only scopes' -ForEach @('profile', 'openid openid', 'profile profile openid') {
+        $script:probeTokenOverrides = @{ token_type = 'bEaReR'; scope = $_ }
+        (Invoke-ProbeTest).ServerBackedSessionReuse | Should -BeTrue
+    }
+    It 'preserves falsey refresh_token compatibility without requesting refresh permission' -ForEach @(
+        @{ Value = $null }, @{ Value = $false }, @{ Value = 0 }, @{ Value = '' }, @{ Value = @() }
     ) {
-        Assert-ProbeTestFailure $ExpectedPhase $ExpectedCode 0 -Action {
-            $phase = $InputPhase; $failureCode = $InputCode
+        $script:probeTokenOverrides.refresh_token = $Value
+        (Invoke-ProbeTest).ServerBackedSessionReuse | Should -BeTrue
+        $script:probeRequests[2].Body | Should -Not -Match 'refresh_token|offline_access'
+    }
+    It 'still rejects truthy refresh_token values irrespective of type' -ForEach @(@{ Value = $true }, @{ Value = 1 }, @{ Value = '0' }, @{ Value = @{ unrequested = 'value' } }) {
+        $script:probeTokenOverrides.refresh_token = $Value
+        Assert-ProbeTestFailure TokenResponse InvalidTokenResponse 3 RefreshTokenFalsey
+    }
+    It 'preserves ignored JWT metadata and signature alphabet-only acceptance' {
+        $script:probeHeaderOverrides = @{ typ = 'not-enforced-by-this-bounded-probe'; kid = $null }
+        $script:probeSignature = 'a'
+        (Invoke-ProbeTest).ServerBackedSessionReuse | Should -BeTrue
+    }
+    It 'preserves exact boundary lengths for cookie, expected UPN and callback code' -ForEach @('cookie', 'upn', 'code') {
+        switch ($_) {
+            'cookie' { $script:probeArguments.Cookie = 'x' * 32768 }
+            'upn' {
+                $script:probeArguments.ExpectedUpn = ('x' * 304) + '@example.invalid'
+                $script:probeClaimsOverrides.preferred_username = $script:probeArguments.ExpectedUpn
+            }
+            'code' { $script:probeCallbackMode = 'boundary-code' }
+        }
+        (Invoke-ProbeTest).ServerBackedSessionReuse | Should -BeTrue
+    }
+    It 'rejects wrong types independently at every metadata guard: <Field>' -ForEach @(
+        @{ Field = 'issuer'; Predicate = 'IssuerMetadataString' },
+        @{ Field = 'authorization_endpoint'; Predicate = 'AuthorizationMetadataString' },
+        @{ Field = 'token_endpoint'; Predicate = 'TokenMetadataString' },
+        @{ Field = 'userinfo_endpoint'; Predicate = 'UserInfoMetadataString' }
+    ) {
+        $script:probeMetadataOverrides[$Field] = @('synthetic-wrong-type')
+        Assert-ProbeTestFailure DiscoveryMetadata InvalidMetadata 1 $Predicate
+    }
+    It 'keeps every JSON response envelope guard ordered at <Stage>: <Predicate>' -ForEach @(
+        @{ Stage = 'Discovery'; Requests = 1 }, @{ Stage = 'Token'; Requests = 3 }, @{ Stage = 'UserInfo'; Requests = 4 }
+    ) {
+        foreach ($case in @(
+            @{ Change = @{ Status = 400; ContentType = 'text/plain'; Locations = @('https://example.invalid'); Body = '{broken' }; Predicate = 'ResponseStatus' },
+            @{ Change = @{ ContentType = 'Application/Json'; Locations = @('https://example.invalid'); Body = '{broken' }; Predicate = 'ResponseMediaType' },
+            @{ Change = @{ Locations = @('https://example.invalid'); Body = '{broken' }; Predicate = 'ResponseLocations' },
+            @{ Change = @{ Body = '{broken' }; Predicate = 'ResponseJsonParse' },
+            @{ Change = @{ Body = 'null' }; Predicate = 'ResponseJsonRootObject' },
+            @{ Change = @{ Body = '{"first":1,"FIRST":2}' }; Predicate = 'ResponseJsonPropertyUnique' }
+        )) {
+            $script:probeAuthorizeQuery = $null
+            $script:probeResponseOverrides[$Stage] = $case.Change
+            Assert-ProbeTestFailure ($Stage + 'Response') InvalidResponse $Requests $case.Predicate
+        }
+    }
+    It 'returns the original first-failing predicate when several checks fail: <Case>' -ForEach @(
+        @{ Case = 'tenant format before zero client and UPN'; Phase = 'Configuration'; Code = 'InvalidConfiguration'; Requests = 0; Predicate = 'TenantFormat'; Setup = { $script:probeArguments.TenantId = 'BAD'; $script:probeArguments.ClientId = '00000000-0000-0000-0000-000000000000'; $script:probeArguments.ExpectedUpn = '' } },
+        @{ Case = 'tenant nonzero before client format'; Phase = 'Configuration'; Code = 'InvalidConfiguration'; Requests = 0; Predicate = 'TenantNonzero'; Setup = { $script:probeArguments.TenantId = '00000000-0000-0000-0000-000000000000'; $script:probeArguments.ClientId = 'BAD' } },
+        @{ Case = 'client format before UPN'; Phase = 'Configuration'; Code = 'InvalidConfiguration'; Requests = 0; Predicate = 'ClientFormat'; Setup = { $script:probeArguments.ClientId = 'BAD'; $script:probeArguments.ExpectedUpn = '' } },
+        @{ Case = 'client nonzero before UPN'; Phase = 'Configuration'; Code = 'InvalidConfiguration'; Requests = 0; Predicate = 'ClientNonzero'; Setup = { $script:probeArguments.ClientId = '00000000-0000-0000-0000-000000000000'; $script:probeArguments.ExpectedUpn = '' } },
+        @{ Case = 'UPN length before format'; Phase = 'Configuration'; Code = 'InvalidConfiguration'; Requests = 0; Predicate = 'UpnLength'; Setup = { $script:probeArguments.ExpectedUpn = ' ' * 321 } },
+        @{ Case = 'cookie name before length and alphabet'; Phase = 'Cookie'; Code = 'InvalidCookie'; Requests = 0; Predicate = 'CookieName'; Setup = { $script:probeArguments.CookieName = 'bad'; $script:probeArguments.Cookie = ' ' * 32769 } },
+        @{ Case = 'cookie length before alphabet'; Phase = 'Cookie'; Code = 'InvalidCookie'; Requests = 0; Predicate = 'CookieLength'; Setup = { $script:probeArguments.Cookie = ' ' * 32769 } },
+        @{ Case = 'issuer metadata type before all later fields'; Phase = 'DiscoveryMetadata'; Code = 'InvalidMetadata'; Requests = 1; Predicate = 'IssuerMetadataString'; Setup = { $script:probeMetadataOverrides = @{ issuer = @('bad'); authorization_endpoint = $null; token_endpoint = $null; userinfo_endpoint = $null } } },
+        @{ Case = 'issuer metadata match before authorization'; Phase = 'DiscoveryMetadata'; Code = 'InvalidMetadata'; Requests = 1; Predicate = 'IssuerMetadataMatch'; Setup = { $script:probeMetadataOverrides = @{ issuer = 'bad'; authorization_endpoint = $null } } },
+        @{ Case = 'authorization metadata before token'; Phase = 'DiscoveryMetadata'; Code = 'InvalidMetadata'; Requests = 1; Predicate = 'AuthorizationMetadataMatch'; Setup = { $script:probeMetadataOverrides = @{ authorization_endpoint = 'bad'; token_endpoint = $null } } },
+        @{ Case = 'token metadata before UserInfo'; Phase = 'DiscoveryMetadata'; Code = 'InvalidMetadata'; Requests = 1; Predicate = 'TokenMetadataMatch'; Setup = { $script:probeMetadataOverrides = @{ token_endpoint = 'bad'; userinfo_endpoint = $null } } },
+        @{ Case = 'authorization status before locations'; Phase = 'AuthorizationResponse'; Code = 'InvalidAuthorizationResponse'; Requests = 2; Predicate = 'AuthorizationStatus'; Setup = { $script:probeResponseOverrides.Authorization = @{ Status = 200; Locations = @() } } },
+        @{ Case = 'callback scheme before host port userinfo fragment path'; Phase = 'Callback'; Code = 'InvalidCallback'; Requests = 2; Predicate = 'CallbackScheme'; Setup = { $script:probeRedirectOverride = 'http://user@example.invalid:444/wrong#fragment' } },
+        @{ Case = 'callback host before port userinfo fragment path'; Phase = 'Callback'; Code = 'InvalidCallback'; Requests = 2; Predicate = 'CallbackHost'; Setup = { $script:probeRedirectOverride = 'https://user@example.invalid:444/wrong#fragment' } },
+        @{ Case = 'callback port before userinfo fragment path'; Phase = 'Callback'; Code = 'InvalidCallback'; Requests = 2; Predicate = 'CallbackPort'; Setup = { $script:probeRedirectOverride = 'https://user@login.microsoftonline.com:444/wrong#fragment' } },
+        @{ Case = 'callback userinfo before fragment path'; Phase = 'Callback'; Code = 'InvalidCallback'; Requests = 2; Predicate = 'CallbackUserInfo'; Setup = { $script:probeRedirectOverride = 'https://user@login.microsoftonline.com/wrong#fragment' } },
+        @{ Case = 'callback fragment before path'; Phase = 'Callback'; Code = 'InvalidCallback'; Requests = 2; Predicate = 'CallbackFragment'; Setup = { $script:probeRedirectOverride = 'https://login.microsoftonline.com/wrong#fragment' } },
+        @{ Case = 'callback duplicate before error and binding'; Phase = 'Callback'; Code = 'InvalidCallback'; Requests = 2; Predicate = 'CallbackKeyMultiplicity'; Setup = { $script:probeRedirectOverride = $script:probeRedirect + '?code=one&code=two&error=login_required&state=wrong' } },
+        @{ Case = 'callback unnamed field before binding'; Phase = 'Callback'; Code = 'InvalidCallback'; Requests = 2; Predicate = 'CallbackKeyName'; Setup = { $script:probeRedirectOverride = $script:probeRedirect + '?unkeyed&state=wrong' } },
+        @{ Case = 'callback error before state and code'; Phase = 'Callback'; Code = 'InvalidCallback'; Requests = 2; Predicate = 'CallbackErrorAbsent'; Setup = { $script:probeRedirectOverride = $script:probeRedirect + '?error=login_required&state=wrong&code=' } },
+        @{ Case = 'callback state before blank code'; Phase = 'Callback'; Code = 'InvalidCallback'; Requests = 2; Predicate = 'CallbackStateMatch'; Setup = { $script:probeRedirectOverride = $script:probeRedirect + '?state=wrong&code=' } },
+        @{ Case = 'token type type before every token guard'; Phase = 'TokenResponse'; Code = 'InvalidTokenResponse'; Requests = 3; Predicate = 'TokenTypeString'; Setup = { $script:probeTokenOverrides = @{ token_type = @('PoP'); access_token = $null; id_token = $null; refresh_token = $true; scope = $null } } },
+        @{ Case = 'token type bearer before access token'; Phase = 'TokenResponse'; Code = 'InvalidTokenResponse'; Requests = 3; Predicate = 'TokenTypeBearer'; Setup = { $script:probeTokenOverrides = @{ token_type = 'PoP'; access_token = $null } } },
+        @{ Case = 'access token type before id token'; Phase = 'TokenResponse'; Code = 'InvalidTokenResponse'; Requests = 3; Predicate = 'AccessTokenString'; Setup = { $script:probeTokenOverrides = @{ access_token = @(''); id_token = $null } } },
+        @{ Case = 'access token blank before newline'; Phase = 'TokenResponse'; Code = 'InvalidTokenResponse'; Requests = 3; Predicate = 'AccessTokenNonblank'; Setup = { $script:probeTokenOverrides = @{ access_token = "`r`n"; id_token = $null } } },
+        @{ Case = 'access token newline before id token'; Phase = 'TokenResponse'; Code = 'InvalidTokenResponse'; Requests = 3; Predicate = 'AccessTokenNoNewline'; Setup = { $script:probeTokenOverrides = @{ access_token = "token`r`n"; id_token = $null } } },
+        @{ Case = 'id token type before refresh token'; Phase = 'TokenResponse'; Code = 'InvalidTokenResponse'; Requests = 3; Predicate = 'IdTokenString'; Setup = { $script:probeTokenOverrides = @{ id_token = $null; refresh_token = $true } } },
+        @{ Case = 'refresh token before scope'; Phase = 'TokenResponse'; Code = 'InvalidTokenResponse'; Requests = 3; Predicate = 'RefreshTokenFalsey'; Setup = { $script:probeTokenOverrides = @{ refresh_token = $true; scope = $null } } },
+        @{ Case = 'scope type before token encoding'; Phase = 'TokenResponse'; Code = 'InvalidTokenResponse'; Requests = 3; Predicate = 'ScopeString'; Setup = { $script:probeTokenOverrides.scope = @('openid'); $script:probeIdTokenMode = 'empty' } },
+        @{ Case = 'header alphabet before length claims signature'; Phase = 'TokenEncoding'; Code = 'InvalidTokenEncoding'; Requests = 3; Predicate = 'HeaderAlphabet'; Setup = { $script:probeTokenOverrides.id_token = '!.!.!' } },
+        @{ Case = 'header length before claims'; Phase = 'TokenEncoding'; Code = 'InvalidTokenEncoding'; Requests = 3; Predicate = 'HeaderLength'; Setup = { $script:probeTokenOverrides.id_token = 'a.!.!' } },
+        @{ Case = 'header JSON before claims'; Phase = 'TokenEncoding'; Code = 'InvalidTokenEncoding'; Requests = 3; Predicate = 'HeaderJsonParse'; Setup = { $script:probeRawHeader = '{broken'; $script:probeRawClaims = '{broken' } },
+        @{ Case = 'claims JSON before header algorithm'; Phase = 'TokenEncoding'; Code = 'InvalidTokenEncoding'; Requests = 3; Predicate = 'ClaimsJsonParse'; Setup = { $script:probeHeaderOverrides.alg = $null; $script:probeRawClaims = '{broken' } },
+        @{ Case = 'header algorithm type before crit signature'; Phase = 'TokenEncoding'; Code = 'InvalidTokenEncoding'; Requests = 3; Predicate = 'HeaderAlgorithmString'; Setup = { $script:probeHeaderOverrides = @{ alg = $null; crit = $null }; $script:probeSignature = '!' } },
+        @{ Case = 'header algorithm match before crit signature'; Phase = 'TokenEncoding'; Code = 'InvalidTokenEncoding'; Requests = 3; Predicate = 'HeaderAlgorithmMatch'; Setup = { $script:probeHeaderOverrides = @{ alg = 'none'; crit = $null }; $script:probeSignature = '!' } },
+        @{ Case = 'critical header before signature'; Phase = 'TokenEncoding'; Code = 'InvalidTokenEncoding'; Requests = 3; Predicate = 'HeaderCriticalAbsent'; Setup = { $script:probeHeaderOverrides.crit = $null; $script:probeSignature = '!' } },
+        @{ Case = 'issuer before audience tenant nonce'; Phase = 'TokenBinding'; Code = 'InvalidTokenBinding'; Requests = 3; Predicate = 'IssuerClaimMatch'; Setup = { $script:probeClaimsOverrides = @{ iss = 'bad'; aud = $null; tid = $null; nonce = $null } } },
+        @{ Case = 'audience before tenant nonce'; Phase = 'TokenBinding'; Code = 'InvalidTokenBinding'; Requests = 3; Predicate = 'AudienceClaimMatch'; Setup = { $script:probeClaimsOverrides = @{ aud = 'bad'; tid = $null; nonce = $null } } },
+        @{ Case = 'tenant before nonce'; Phase = 'TokenBinding'; Code = 'InvalidTokenBinding'; Requests = 3; Predicate = 'TenantClaimMatch'; Setup = { $script:probeClaimsOverrides = @{ tid = 'bad'; nonce = $null } } },
+        @{ Case = 'nonce before authorized party'; Phase = 'TokenBinding'; Code = 'InvalidTokenBinding'; Requests = 3; Predicate = 'NonceClaimMatch'; Setup = { $script:probeClaimsOverrides = @{ nonce = 'bad'; azp = $null } } },
+        @{ Case = 'authorized party type before identity'; Phase = 'TokenBinding'; Code = 'InvalidTokenBinding'; Requests = 3; Predicate = 'AuthorizedPartyString'; Setup = { $script:probeClaimsOverrides = @{ azp = $null; oid = $null } } },
+        @{ Case = 'authorized party match before identity'; Phase = 'TokenBinding'; Code = 'InvalidTokenBinding'; Requests = 3; Predicate = 'AuthorizedPartyMatch'; Setup = { $script:probeClaimsOverrides = @{ azp = 'bad'; oid = $null } } },
+        @{ Case = 'object identity type before username'; Phase = 'TokenBinding'; Code = 'InvalidTokenBinding'; Requests = 3; Predicate = 'ObjectIdString'; Setup = { $script:probeClaimsOverrides = @{ oid = $null; preferred_username = $null } } },
+        @{ Case = 'object identity format before username'; Phase = 'TokenBinding'; Code = 'InvalidTokenBinding'; Requests = 3; Predicate = 'ObjectIdFormat'; Setup = { $script:probeClaimsOverrides = @{ oid = 'bad'; preferred_username = $null } } },
+        @{ Case = 'object identity nonzero before username'; Phase = 'TokenBinding'; Code = 'InvalidTokenBinding'; Requests = 3; Predicate = 'ObjectIdNonzero'; Setup = { $script:probeClaimsOverrides = @{ oid = '00000000-0000-0000-0000-000000000000'; preferred_username = $null } } },
+        @{ Case = 'username type before subject'; Phase = 'TokenBinding'; Code = 'InvalidTokenBinding'; Requests = 3; Predicate = 'UsernameString'; Setup = { $script:probeClaimsOverrides = @{ preferred_username = $null; sub = $null } } },
+        @{ Case = 'username match before subject'; Phase = 'TokenBinding'; Code = 'InvalidTokenBinding'; Requests = 3; Predicate = 'UsernameMatch'; Setup = { $script:probeClaimsOverrides = @{ preferred_username = 'other@example.invalid'; sub = $null } } },
+        @{ Case = 'subject type before numeric dates'; Phase = 'TokenBinding'; Code = 'InvalidTokenBinding'; Requests = 3; Predicate = 'SubjectString'; Setup = { $script:probeClaimsOverrides = @{ sub = $null; iat = $null; exp = $null } } },
+        @{ Case = 'issued at type before expiry type'; Phase = 'TokenTimes'; Code = 'InvalidTokenTimes'; Requests = 3; Predicate = 'IssuedAtInteger'; Setup = { $script:probeClaimsOverrides = @{ iat = $null; exp = $null; nbf = $null } } },
+        @{ Case = 'expiry type before issued at freshness'; Phase = 'TokenTimes'; Code = 'InvalidTokenTimes'; Requests = 3; Predicate = 'ExpiryInteger'; Setup = { $script:probeClaimsOverrides = @{ iat = 0; exp = $null } } },
+        @{ Case = 'expiry future before issued at future'; Phase = 'TokenTimes'; Code = 'InvalidTokenTimes'; Requests = 3; Predicate = 'ExpiryFuture'; Setup = { $script:probeClaimsOverrides = @{ iat = [DateTimeOffset]::UtcNow.ToUnixTimeSeconds() + 300; exp = 0; nbf = $null } } },
+        @{ Case = 'issued at future before expiry relation'; Phase = 'TokenTimes'; Code = 'InvalidTokenTimes'; Requests = 3; Predicate = 'IssuedAtNotFuture'; Setup = { $now = [DateTimeOffset]::UtcNow.ToUnixTimeSeconds(); $script:probeClaimsOverrides = @{ iat = $now + 300; exp = $now + 200; nbf = $null } } },
+        @{ Case = 'issued at recent before nbf type'; Phase = 'TokenTimes'; Code = 'InvalidTokenTimes'; Requests = 3; Predicate = 'IssuedAtRecent'; Setup = { $script:probeClaimsOverrides = @{ iat = 0; nbf = $null } } },
+        @{ Case = 'expiry relation before nbf type'; Phase = 'TokenTimes'; Code = 'InvalidTokenTimes'; Requests = 3; Predicate = 'ExpiryAfterIssuedAt'; Setup = { $now = [DateTimeOffset]::UtcNow.ToUnixTimeSeconds(); $script:probeClaimsOverrides = @{ iat = $now + 30; exp = $now + 20; nbf = $null } } }
+    ) {
+        & $Setup
+        Assert-ProbeTestFailure $Phase $Code $Requests $Predicate
+    }
+
+
+    It 'reports each local entropy or challenge operation, not the previously successful operation: <Predicate>' -ForEach @(
+        @{ FailureCall = 1; Predicate = 'StateCreation' }, @{ FailureCall = 2; Predicate = 'NonceCreation' },
+        @{ FailureCall = 3; Predicate = 'VerifierCreation' }, @{ FailureCall = 4; Predicate = 'ChallengeCreation' }
+    ) {
+        # This is deliberate helper fault injection, not protocol-equivalence evidence.
+        $script:probeCompareBaseline = $false
+        $script:probeBase64Calls = 0; $script:probeBase64FailureCall = $FailureCall
+        Mock ConvertTo-LabProbeBase64Url {
+            param([byte[]]$Bytes)
+            $script:probeBase64Calls++
+            if ($script:probeBase64Calls -eq $script:probeBase64FailureCall) { throw 'diagnostic-secret-entropy-or-challenge' }
+            & $script:probeBase64Function $Bytes
+        }
+        Assert-ProbeTestFailure AuthorizationRequest UnexpectedFailure 1 $Predicate
+        $script:probeBase64Calls | Should -Be $FailureCall
+    }
+    It 'reports an entered configuration helper failure without claiming a rejected guard' {
+        $script:probeCompareBaseline = $false
+        Mock Assert-LabProbeConfiguration { throw 'diagnostic-secret-configuration-operation' }
+        Assert-ProbeTestFailure Configuration UnexpectedFailure 0 ConfigurationValidation
+    }
+    It 'classifies JSON conversion-depth failures without leaking nested response data: <Context>' -ForEach @(
+        @{ Context = 'Discovery'; Phase = 'DiscoveryResponse'; Code = 'InvalidResponse'; Predicate = 'ResponseJsonConversion'; Requests = 1 },
+        @{ Context = 'Token'; Phase = 'TokenResponse'; Code = 'InvalidResponse'; Predicate = 'ResponseJsonConversion'; Requests = 3 },
+        @{ Context = 'UserInfo'; Phase = 'UserInfoResponse'; Code = 'InvalidResponse'; Predicate = 'ResponseJsonConversion'; Requests = 4 },
+        @{ Context = 'Header'; Phase = 'TokenEncoding'; Code = 'InvalidTokenEncoding'; Predicate = 'HeaderJsonConversion'; Requests = 3 },
+        @{ Context = 'Claims'; Phase = 'TokenEncoding'; Code = 'InvalidTokenEncoding'; Predicate = 'ClaimsJsonConversion'; Requests = 3 }
+    ) {
+        # JsonDocument accepts this depth; the pre-existing ConvertFrom-Json
+        # maximum of 16 rejects it. No parser setting or acceptance rule changes.
+        $nested = ('{"nested":' * 20) + '"diagnostic-secret-depth"' + ('}' * 20)
+        if ($Context -eq 'Header') { $script:probeRawHeader = $nested }
+        elseif ($Context -eq 'Claims') { $script:probeRawClaims = $nested }
+        else { $script:probeResponseOverrides[$Context] = @{ Body = $nested } }
+        Assert-ProbeTestFailure $Phase $Code $Requests $Predicate
+    }
+    It 'rejects a poisoned diagnostic container rather than coercing it to a tuple' -ForEach @(
+        @{ Value = $null }, @{ Value = 'diagnostic-secret-container' },
+        @{ Value = [pscustomobject]@{ Code = 'InvalidResponse'; Predicate = 'ResponseStatus' } },
+        @{ Value = @(@{ Code = 'InvalidResponse'; Predicate = 'ResponseStatus' }) }
+    ) {
+        Assert-ProbeTestFailure Unknown UnexpectedFailure 0 UnexpectedFailure -Action {
+            $phase = 'DiscoveryResponse'; $diagnostic = $Value
             & $script:probeFailureEmission
         }
     }
+
+    It 'emits exactly the independently frozen permitted tuple: <Phase>/<Code>/<Predicate>' -ForEach $probeExpectedTuples {
+        Assert-ProbeTestFailure $Phase $Code 0 $Predicate -Action {
+            $phase = $Phase; $diagnostic = @{ Code = $Code; Predicate = $Predicate }
+            & $script:probeFailureEmission
+        }
+    }
+    It 'normalizes the complete tuple when any label is invalid or belongs to another tuple: <Case>' -ForEach @(
+        @{ Case = 'both unknown'; InputPhase = 'diagnostic-secret-phase'; InputCode = 'diagnostic-secret-code'; InputPredicate = 'diagnostic-secret-predicate' },
+        @{ Case = 'unknown phase'; InputPhase = 'diagnostic-secret-phase'; InputCode = 'InvalidResponse'; InputPredicate = 'ResponseStatus' },
+        @{ Case = 'unknown code'; InputPhase = 'DiscoveryResponse'; InputCode = 'diagnostic-secret-code'; InputPredicate = 'ResponseStatus' },
+        @{ Case = 'unknown predicate'; InputPhase = 'DiscoveryResponse'; InputCode = 'InvalidResponse'; InputPredicate = 'diagnostic-secret-predicate' },
+        @{ Case = 'wrong phase case'; InputPhase = 'discoveryresponse'; InputCode = 'InvalidResponse'; InputPredicate = 'ResponseStatus' },
+        @{ Case = 'wrong code case'; InputPhase = 'DiscoveryResponse'; InputCode = 'invalidresponse'; InputPredicate = 'ResponseStatus' },
+        @{ Case = 'wrong predicate case'; InputPhase = 'DiscoveryResponse'; InputCode = 'InvalidResponse'; InputPredicate = 'responsestatus' },
+        @{ Case = 'missing labels'; InputPhase = $null; InputCode = $null; InputPredicate = $null },
+        @{ Case = 'missing phase'; InputPhase = $null; InputCode = 'InvalidResponse'; InputPredicate = 'ResponseStatus' },
+        @{ Case = 'missing code'; InputPhase = 'DiscoveryResponse'; InputCode = $null; InputPredicate = 'ResponseStatus' },
+        @{ Case = 'missing predicate'; InputPhase = 'DiscoveryResponse'; InputCode = 'InvalidResponse'; InputPredicate = $null },
+        @{ Case = 'phase single array'; InputPhase = @('DiscoveryResponse'); InputCode = 'InvalidResponse'; InputPredicate = 'ResponseStatus' },
+        @{ Case = 'code single array'; InputPhase = 'DiscoveryResponse'; InputCode = @('InvalidResponse'); InputPredicate = 'ResponseStatus' },
+        @{ Case = 'predicate single array'; InputPhase = 'DiscoveryResponse'; InputCode = 'InvalidResponse'; InputPredicate = @('ResponseStatus') },
+        @{ Case = 'multiple labels'; InputPhase = @('DiscoveryResponse', 'diagnostic-secret'); InputCode = @('InvalidResponse', 'diagnostic-secret'); InputPredicate = @('ResponseStatus', 'diagnostic-secret') },
+        @{ Case = 'phase object'; InputPhase = [pscustomobject]@{ Value = 'DiscoveryResponse' }; InputCode = 'InvalidResponse'; InputPredicate = 'ResponseStatus' },
+        @{ Case = 'code object'; InputPhase = 'DiscoveryResponse'; InputCode = [pscustomobject]@{ Value = 'InvalidResponse' }; InputPredicate = 'ResponseStatus' },
+        @{ Case = 'predicate object'; InputPhase = 'DiscoveryResponse'; InputCode = 'InvalidResponse'; InputPredicate = [pscustomobject]@{ Value = 'ResponseStatus' } },
+        @{ Case = 'number phase'; InputPhase = 1; InputCode = 'InvalidResponse'; InputPredicate = 'ResponseStatus' },
+        @{ Case = 'boolean code'; InputPhase = 'DiscoveryResponse'; InputCode = $true; InputPredicate = 'ResponseStatus' },
+        @{ Case = 'dictionary predicate'; InputPhase = 'DiscoveryResponse'; InputCode = 'InvalidResponse'; InputPredicate = @{ ResponseStatus = $true } },
+        @{ Case = 'newline predicate'; InputPhase = 'DiscoveryResponse'; InputCode = 'InvalidResponse'; InputPredicate = "ResponseStatus`ndiagnostic-secret" },
+        @{ Case = 'valid labels wrong phase'; InputPhase = 'TokenBinding'; InputCode = 'InvalidResponse'; InputPredicate = 'ResponseStatus' },
+        @{ Case = 'valid labels wrong code'; InputPhase = 'DiscoveryResponse'; InputCode = 'InvalidConfiguration'; InputPredicate = 'ResponseStatus' },
+        @{ Case = 'valid labels wrong predicate'; InputPhase = 'DiscoveryResponse'; InputCode = 'InvalidResponse'; InputPredicate = 'CallbackScheme' },
+        @{ Case = 'request invocation wrong category'; InputPhase = 'DiscoveryRequest'; InputCode = 'TransportFailure'; InputPredicate = 'RequestInvocation' },
+        @{ Case = 'transport label wrong category'; InputPhase = 'DiscoveryRequest'; InputCode = 'UnexpectedFailure'; InputPredicate = 'TransportSend' },
+        @{ Case = 'fallback predicate with rejection category'; InputPhase = 'DiscoveryResponse'; InputCode = 'InvalidResponse'; InputPredicate = 'UnexpectedFailure' }
+    ) {
+        Assert-ProbeTestFailure Unknown UnexpectedFailure 0 UnexpectedFailure -Action {
+            $phase = $InputPhase; $diagnostic = @{ Code = $InputCode; Predicate = $InputPredicate }
+            & $script:probeFailureEmission
+        }
+    }
+
 }
 
 Describe 'Native transport is inspected but never executed' {
@@ -655,6 +1300,9 @@ Describe 'Native transport is inspected but never executed' {
     It 'has only one explicit, fully replaced HTTP boundary' {
         (Get-Command Send-LabProbeRequest -CommandType Function).ScriptBlock.ToString() | Should -Match 'Native HTTP is unavailable'
         (Get-Command Send-LabProbeRequest -CommandType Function).ScriptBlock.ToString() | Should -Not -Match 'HttpClient|SendAsync'
+        (Get-Command Send-BaselineLabProbeRequest -CommandType Function).ScriptBlock.ToString() | Should -Match 'Native HTTP is unavailable'
+        (Get-Command Send-BaselineLabProbeRequest -CommandType Function).ScriptBlock.ToString() | Should -Not -Match 'HttpClient|SendAsync'
+        Get-Command New-BaselineLabProbeHttpHandler -CommandType Function -ErrorAction SilentlyContinue | Should -BeNullOrEmpty
     }
     It 'forbids automatic redirects, ambient cookies, credentials and proxies in native source' {
         foreach ($setting in @('AllowAutoRedirect', 'UseCookies', 'UseDefaultCredentials', 'UseProxy')) {
@@ -683,5 +1331,120 @@ Describe 'Native transport is inspected but never executed' {
         $script:probeSource | Should -Not -Match 'grant_type\s*=\s*[''"]refresh_token|scope\s*=\s*[''"][^''"]*offline_access'
         $script:probeSource | Should -Match 'OIDC Core 3\.1\.3\.7 step 6'
         $script:probeSource | Should -Match 'TamperProofAgainstCandidate\s*=\s*\$false'
+    }
+}
+
+Describe 'Static diagnostic operation and guard contracts' {
+    It 'preserves the exact baseline form serializer source independently of normalized traces' {
+        $baseline = @($script:probeBaselineDefinitions | Where-Object Name -CEQ 'ConvertTo-LabProbeForm')
+        $candidate = @($script:probeDefinitions | Where-Object Name -CEQ 'ConvertTo-LabProbeForm')
+        $baseline.Count | Should -Be 1
+        $candidate.Count | Should -Be 1
+        $candidate[0].Extent.Text | Should -BeExactly $baseline[0].Extent.Text
+    }
+    It 'preserves the exact original request-form expression for <Variable>' -ForEach @(@{ Variable = '$query' }, @{ Variable = '$body' }) {
+        $baselineInvoke = @($script:probeBaselineDefinitions | Where-Object Name -CEQ 'Invoke-LabSessionProbe')[0]
+        $candidateInvoke = @($script:probeDefinitions | Where-Object Name -CEQ 'Invoke-LabSessionProbe')[0]
+        $findExpression = {
+            param($node)
+            $node -is [Management.Automation.Language.AssignmentStatementAst] -and
+                $node.Left.Extent.Text -ceq $Variable -and
+                $node.Right.Extent.Text.StartsWith('ConvertTo-LabProbeForm ', [StringComparison]::Ordinal)
+        }
+        $baseline = @($baselineInvoke.FindAll($findExpression, $true))
+        $candidate = @($candidateInvoke.FindAll($findExpression, $true))
+        $baseline.Count | Should -Be 1
+        $candidate.Count | Should -Be 1
+        $candidate[0].Extent.Text | Should -BeExactly $baseline[0].Extent.Text
+    }
+    It 'has no missing or extra public tuple relative to the independent frozen vocabulary' -ForEach @(@{ Expected = $probeExpectedTuples }) {
+        $expectedTuples = @($Expected | Where-Object Phase -CNE 'Unknown' | ForEach-Object { $_.Phase + '/' + $_.Code + '/' + $_.Predicate } | Sort-Object -CaseSensitive)
+        $allowlist = Get-LabProbeDiagnosticAllowlist
+        $actualTuples = @(foreach ($key in $allowlist.Keys) { foreach ($predicate in $allowlist[$key]) { $key + '/' + $predicate } }) | Sort-Object -CaseSensitive
+        ($actualTuples -join "`n") | Should -BeExactly ($expectedTuples -join "`n")
+        @($actualTuples | Select-Object -Unique).Count | Should -Be $actualTuples.Count
+    }
+    It 'keeps static operation markers adjacent to their entered operations: <Function> <Marker>' -ForEach @(
+        @{ Function = 'Read-LabProbeJson'; Marker = '$Diagnostic.Predicate = $ids[0]'; Operation = '$document = [System.Text.Json.JsonDocument]::Parse($Text)' },
+        @{ Function = 'Read-LabProbeJson'; Marker = '$Diagnostic.Predicate = $ids[2]'; Operation = '$names = [Collections.Generic.HashSet[string]]::new([StringComparer]::OrdinalIgnoreCase)' },
+        @{ Function = 'Read-LabProbeJson'; Marker = '$Diagnostic.Predicate = $ids[3]'; Operation = 'foreach ($property in $document.RootElement.EnumerateObject())' },
+        @{ Function = 'Read-LabProbeJson'; Marker = '$Diagnostic.Predicate = $ids[5]'; Operation = 'return ConvertFrom-Json -InputObject $Text -AsHashtable -Depth 16 -ErrorAction Stop' },
+        @{ Function = 'Read-LabProbeJson'; Marker = '$Diagnostic.Predicate = $ids[6]'; Operation = '$document.Dispose()' },
+        @{ Function = 'Invoke-LabSessionProbe'; Marker = "Predicate = 'ConfigurationValidation'"; Operation = 'Assert-LabProbeConfiguration $TenantId $ClientId $ExpectedUpn -Diagnostic $diagnostic' },
+        @{ Function = 'Invoke-LabSessionProbe'; Marker = "Predicate = 'StateCreation'"; Operation = '$state = ConvertTo-LabProbeBase64Url ([Security.Cryptography.RandomNumberGenerator]::GetBytes(32))' },
+        @{ Function = 'Invoke-LabSessionProbe'; Marker = "Predicate = 'NonceCreation'"; Operation = '$nonce = ConvertTo-LabProbeBase64Url ([Security.Cryptography.RandomNumberGenerator]::GetBytes(32))' },
+        @{ Function = 'Invoke-LabSessionProbe'; Marker = "Predicate = 'VerifierCreation'"; Operation = '$verifier = ConvertTo-LabProbeBase64Url ([Security.Cryptography.RandomNumberGenerator]::GetBytes(32))' },
+        @{ Function = 'Invoke-LabSessionProbe'; Marker = "Predicate = 'ChallengeCreation'"; Operation = '$challenge = ConvertTo-LabProbeBase64Url ([Security.Cryptography.SHA256]::HashData([Text.Encoding]::ASCII.GetBytes($verifier)))' },
+        @{ Function = 'Invoke-LabSessionProbe'; Marker = "Predicate = 'AuthorizationFormCreation'"; Operation = '$query = ConvertTo-LabProbeForm' },
+        @{ Function = 'Invoke-LabSessionProbe'; Marker = "Predicate = 'AuthorizationUriConstruction'"; Operation = '$current = "$($metadata.authorization_endpoint)?$query"' },
+        @{ Function = 'Invoke-LabSessionProbe'; Marker = "Predicate = 'CallbackUriConstruction'"; Operation = '$next = [uri]::new([uri]$current, [string]$response.Locations[0])' },
+        @{ Function = 'Invoke-LabSessionProbe'; Marker = "Predicate = 'CallbackQueryParsing'"; Operation = '$fields = [Web.HttpUtility]::ParseQueryString($next.Query)' },
+        @{ Function = 'Invoke-LabSessionProbe'; Marker = "Predicate = 'TokenFormCreation'"; Operation = '$body = ConvertTo-LabProbeForm' },
+        @{ Function = 'Invoke-LabSessionProbe'; Marker = "Predicate = 'TokenSplit'"; Operation = '$parts = $tokens.id_token.Split(''.'')' },
+        @{ Function = 'Invoke-LabSessionProbe'; Marker = '$diagnostic.Predicate = $partIds[5]'; Operation = '$decoder = [Text.UTF8Encoding]::new($false, $true)' },
+        @{ Function = 'Invoke-LabSessionProbe'; Marker = '$diagnostic.Predicate = $partIds[2]'; Operation = '$encoded = [Convert]::FromBase64String($encoded)' },
+        @{ Function = 'Invoke-LabSessionProbe'; Marker = '$diagnostic.Predicate = $partIds[3]'; Operation = '$encoded = $decoder.GetString($encoded)' },
+        @{ Function = 'Invoke-LabSessionProbe'; Marker = "Predicate = 'ClockRead'"; Operation = '$now = [DateTimeOffset]::UtcNow.ToUnixTimeSeconds()' }
+    ) {
+        # This proves source placement, not native constructor/disposal failure
+        # semantics. Native transport remains excluded from execution here.
+        $source = @($script:probeDefinitions | Where-Object Name -CEQ $Function)[0].Extent.Text
+        $markerOffset = $source.IndexOf($Marker, [StringComparison]::Ordinal)
+        $markerOffset | Should -BeGreaterOrEqual 0
+        $operationOffset = $source.IndexOf($Operation, $markerOffset, [StringComparison]::Ordinal)
+        $operationOffset | Should -BeGreaterThan $markerOffset
+        $between = $source.Substring($markerOffset + $Marker.Length, $operationOffset - $markerOffset - $Marker.Length)
+        $between | Should -Not -Match '\.Predicate\s*='
+    }
+    It 'marks exactly the four request invocations without changing their arguments' {
+        $source = @($script:probeDefinitions | Where-Object Name -CEQ 'Invoke-LabSessionProbe')[0].Extent.Text
+        ([regex]::Matches($source, "Predicate = 'RequestInvocation'")).Count | Should -Be 4
+        foreach ($operation in @(
+            '$metadata = Send-LabProbeRequest "$authority/v2.0/.well-known/openid-configuration" -Diagnostic $diagnostic',
+            '$response = Send-LabProbeRequest $current -Headers @{ Cookie = "$CookieName=$Cookie" } -Diagnostic $diagnostic',
+            '$tokens = Send-LabProbeRequest $metadata.token_endpoint -Method POST -Body $body -Diagnostic $diagnostic',
+            '$user = Send-LabProbeRequest $metadata.userinfo_endpoint -Headers @{ Authorization = "Bearer $($tokens.access_token)" } -Diagnostic $diagnostic'
+        )) {
+            $offset = $source.IndexOf($operation, [StringComparison]::Ordinal)
+            $offset | Should -BeGreaterThan 0
+            $prefix = $source.Substring(0, $offset)
+            $prefix | Should -Match "Predicate = 'RequestInvocation'\s*$"
+        }
+    }
+    It 'pins the fixed JSON context and token-part operation mappings in original order' {
+        $json = @($script:probeDefinitions | Where-Object Name -CEQ 'Read-LabProbeJson')[0].Extent.Text
+        foreach ($context in @('Response', 'Header', 'Claims')) {
+            $markers = @('JsonParse', 'JsonRootObject', 'JsonPropertySetConstruction', 'JsonPropertiesRead', 'JsonPropertyUnique', 'JsonConversion', 'JsonDispose')
+            $last = -1
+            foreach ($marker in $markers) {
+                $offset = $json.IndexOf("'$context$marker'", [StringComparison]::Ordinal)
+                $offset | Should -BeGreaterThan $last
+                $last = $offset
+            }
+        }
+        $invoke = @($script:probeDefinitions | Where-Object Name -CEQ 'Invoke-LabSessionProbe')[0].Extent.Text
+        $invoke | Should -Match ([regex]::Escape("@('HeaderAlphabet', 'HeaderLength', 'HeaderBase64Decode', 'HeaderUtf8Decode', 'Header', 'HeaderUtf8Construction')"))
+        $invoke | Should -Match ([regex]::Escape("@('ClaimsAlphabet', 'ClaimsLength', 'ClaimsBase64Decode', 'ClaimsUtf8Decode', 'Claims', 'ClaimsUtf8Construction')"))
+        $invoke | Should -Match 'Read-LabProbeJson\s+\$encoded\s+-Diagnostic\s+\$diagnostic\s+-Context\s+\$partIds\[4\]'
+    }
+    It 'assigns rejection labels inside true branches instead of while evaluating their guard' {
+        foreach ($name in @('Assert-LabProbeConfiguration', 'Read-LabProbeResponse', 'Read-LabProbeJson', 'Invoke-LabSessionProbe')) {
+            $definition = @($script:probeDefinitions | Where-Object Name -CEQ $name)[0]
+            $guards = $definition.FindAll({ param($node) $node -is [Management.Automation.Language.IfStatementAst] }, $true)
+            foreach ($guard in $guards) {
+                foreach ($clause in $guard.Clauses) {
+                    $body = $clause.Item2.Extent.Text
+                    if (@($clause.Item2.Statements | Where-Object { $_ -is [Management.Automation.Language.ThrowStatementAst] }).Count -eq 0) { continue }
+                    $siblings = @($guard.Parent.Statements)
+                    $position = [Array]::IndexOf([object[]]$siblings, $guard)
+                    $position | Should -BeGreaterThan 0
+                    $siblings[$position - 1].Extent.Text | Should -Match '\.Predicate\s*=\s*''UnexpectedFailure'''
+                    $clause.Item1.Extent.Text | Should -Not -Match '\.Predicate\s*='
+                    # Each actual throw branch sets a category and predicate before
+                    # the throw; no external field is used as a literal label.
+                    $body | Should -Match '(?s)\.Code\s*=.*\.Predicate\s*=.*\bthrow\b'
+                }
+            }
+        }
     }
 }
