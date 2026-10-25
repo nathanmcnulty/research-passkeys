@@ -1,6 +1,6 @@
 # Session-probe predicate diagnostics
 
-This is a diagnostic-only contract for [`LabSessionProbe.ps1`](../.github/validation/LabSessionProbe.ps1). The same rejection checks, comparisons, optional fields, destinations, scopes, request order, deadlines, size bounds, cleanup order and success receipt remain in force. No sign-in, consent, additional request or live retry is authorized by these diagnostics.
+This describes the fixed diagnostic labels for [`LabSessionProbe.ps1`](../.github/validation/LabSessionProbe.ps1). Diagnostics do not themselves change acceptance. The separately documented [returned-scope policy change](LAB-COOKIE-SCOPES.md) intentionally replaces a permission-name allowlist with RFC 6749 syntax validation; its predicate is now `ScopeSyntax`. All other rejection checks, comparisons, optional fields, destinations, requested scopes, request order, deadlines, size bounds, cleanup order and success receipt remain in force. No sign-in, consent, additional request or live retry is authorized by these diagnostics.
 
 A failure retains the fixed message `Server-backed session probe failed; no live acceptance. Sensitive details suppressed.` and appends exactly three bounded labels:
 
@@ -56,7 +56,7 @@ Every phase below additionally permits `Code=UnexpectedFailure; Predicate=Unexpe
 
 - `TokenTypeString`, `TokenTypeBearer`, `AccessTokenString`, `AccessTokenNonblank`.
 - `AccessTokenNoNewline`, `IdTokenString`, `RefreshTokenFalsey`, `ScopeString`.
-- `ScopeAllowedGrammar`.
+- `ScopeSyntax`.
 
 ### TokenEncoding / InvalidTokenEncoding
 
@@ -138,9 +138,9 @@ These `TransportFailure` identifiers are allowed independently in `DiscoveryRequ
 
 ## Coverage and limitations
 
-[`LabSessionProbe.Tests.ps1`](../tests/LabSessionProbe.Tests.ps1) keeps all previous negative fixtures, checks the exact first predicate, asserts no downstream request or partial public receipt, and inspects every output stream and rendered exception/error for synthetic secret markers. It adds multiple-failure order cases, compatibility cases for optional/falsey values, every allowed emission tuple, and poisoned labels/tuples. Every ordinary synthetic protocol fixture also compares acceptance, receipt and the complete normalized request trace against the immutable prior probe. This is semantic request equivalence, not a raw-byte claim: query/form fields are decoded and sorted, and transaction-random state, nonce, challenge and verifier values are replaced with fixed placeholders. Separate source checks pin the unchanged form encoder, form/query expressions and request arguments.
+[`LabSessionProbe.Tests.ps1`](../tests/LabSessionProbe.Tests.ps1) keeps all previous negative fixtures, checks the exact first predicate, asserts no downstream request or partial public receipt, and inspects every output stream and rendered exception/error for synthetic secret markers. It adds multiple-failure order cases, compatibility cases for optional/falsey values, every allowed emission tuple, and poisoned labels/tuples. Ordinary unchanged synthetic protocol fixtures also compare acceptance, receipt and the complete normalized request trace against the immutable current-base probe. Explicit scope-expansion fixtures instead assert the intentional old rejection/new acceptance, a byte-identical shared request prefix with deterministic transaction values, and only the newly reached UserInfo request. This is semantic request equivalence, not a raw-byte claim: query/form fields are decoded and sorted, and transaction-random state, nonce, challenge and verifier values are replaced with fixed placeholders. Separate source checks pin the unchanged form encoder, form/query expressions and request arguments.
 
-The baseline is the exact published probe from canonical commit `6c6c04aa68ac1c94dae2377b3aea82934419b438`, SHA-256 `9a42b6785d3d4e70108b0d8d4cb88c106123adb4994b564a0b2ab3f7a6d639cc`. It is stored under [`tests/fixtures`](../tests/fixtures/LabSessionProbe.Baseline.ps1), hash-checked, and loaded only through an isolated AST harness. Both real networking factories are excluded. Protocol tests replace both transport boundaries completely.
+The protocol baseline is the exact published probe from canonical commit `9dbbf1c4aa8990a2d3b4d9f926e7b36a68ddfd30`, SHA-256 `71591b0bb059220a64043b3232e445e7d0247cf1cb3bf19f0127791b3060a123`, stored as [`LabSessionProbe.ScopeBaseline.ps1`](../tests/fixtures/LabSessionProbe.ScopeBaseline.ps1). The existing native transport suite retains its prior immutable [`LabSessionProbe.Baseline.ps1`](../tests/fixtures/LabSessionProbe.Baseline.ps1), canonical commit `6c6c04aa68ac1c94dae2377b3aea82934419b438`, SHA-256 `9a42b6785d3d4e70108b0d8d4cb88c106123adb4994b564a0b2ab3f7a6d639cc`. Both are hash-checked and loaded only through isolated AST harnesses. Native factories are excluded; protocol tests replace both transport boundaries completely.
 
 [`LabSessionTransport.Tests.ps1`](../tests/LabSessionTransport.Tests.ps1) exercises the actual transport helper with an in-process fake handler and streams, including destination rejection, send/open/read failures and cancellation, advertised/streamed limits, malformed UTF-8, disposal-only failures, and primary failures followed by disposal failures. It also compares baseline/candidate native-helper results, request traces and cleanup behavior. The native handler factory is never loaded.
 
