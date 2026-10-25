@@ -175,8 +175,89 @@ function Read-LabProbeResponse {
     return Read-LabProbeJson $Response.Body -Diagnostic $Diagnostic -Context 'Response'
 }
 
+# Scope observations are optional local data, never authentication evidence.
+# Keep the narrower name representation separate from OAuth response syntax.
+function ConvertTo-LabProbeScopeNames {
+    param($Value)
+    $result = @{ Status = 'Unavailable'; Names = [string[]]@() }
+    try {
+        if ($Value -isnot [string] -or $Value.Length -gt 4096 -or
+            $Value -cnotmatch '\A[A-Za-z][A-Za-z0-9._-]{0,127}(?: [A-Za-z][A-Za-z0-9._-]{0,127})*\z') { return $result }
+        $names = $Value.Split(' ')
+        if ($names.Count -gt 64) { return $result }
+        # Preserve order, case and duplicates; never filter or truncate a list.
+        $result = @{ Status = 'Available'; Names = [string[]]$names }
+    } catch { $result = @{ Status = 'Unavailable'; Names = [string[]]@() } }
+    return $result
+}
+
+function Read-LabProbeAccessTokenScopes {
+    param($AccessToken)
+    $result = @{ Status = 'Unavailable'; Names = [string[]]@() }
+    try {
+        if ($AccessToken -isnot [string] -or $AccessToken.Length -gt 16384) { return $result }
+        $parts = $AccessToken.Split('.')
+        if ($parts.Count -ne 3) { return $result }
+        foreach ($part in $parts) {
+            if ($part -cnotmatch '\A[A-Za-z0-9_-]+\z' -or $part.Length % 4 -eq 1) { return $result }
+        }
+        # Header/payload parsing checks only representation, not signature,
+        # algorithm, issuer, audience, lifetime or effective authorization.
+        for ($index = 0; $index -lt 2; $index++) {
+            $part = $parts[$index]
+            $encoded = $part.Replace('-','+').Replace('_','/') + ('=' * ((4 - $part.Length % 4) % 4))
+            $bytes = $null
+            try {
+                $bytes = [Convert]::FromBase64String($encoded)
+                if ($bytes.Length -gt 8192) { return $result }
+                $json = [Text.UTF8Encoding]::new($false, $true).GetString($bytes)
+                $options = [System.Text.Json.JsonDocumentOptions]::new(); $options.MaxDepth = 16
+                $document = [System.Text.Json.JsonDocument]::Parse($json, $options)
+                try {
+                    if ($document.RootElement.ValueKind -ne [System.Text.Json.JsonValueKind]::Object) { throw 'Unavailable scope observation.' }
+                    $keys = [Collections.Generic.HashSet[string]]::new([StringComparer]::OrdinalIgnoreCase)
+                    foreach ($property in $document.RootElement.EnumerateObject()) {
+                        if (-not $keys.Add($property.Name)) { throw 'Unavailable scope observation.' }
+                    }
+                    if ($index -eq 1) {
+                        $scp = [System.Text.Json.JsonElement]::new()
+                        if (-not $document.RootElement.TryGetProperty('scp', [ref]$scp)) {
+                            $result = @{ Status = 'Absent'; Names = [string[]]@() }
+                        } elseif ($scp.ValueKind -eq [System.Text.Json.JsonValueKind]::String) {
+                            $result = ConvertTo-LabProbeScopeNames $scp.GetString()
+                        }
+                    }
+                } finally { $document.Dispose() }
+            } finally {
+                if ($null -ne $bytes) { [Array]::Clear($bytes, 0, $bytes.Length); $bytes = $null }
+            }
+        }
+    } catch { $result = @{ Status = 'Unavailable'; Names = [string[]]@() } }
+    finally {
+        # Best-effort lifetime reduction; managed strings cannot be zeroized.
+        $AccessToken = $null; $parts = $null; $part = $null; $encoded = $null; $json = $null; $document = $null; $scp = $null
+    }
+    return $result
+}
+
+function New-LabProbeScopeObservation {
+    param([hashtable]$Tokens)
+    $observedAt = [DateTimeOffset]::UtcNow.ToString('o', [Globalization.CultureInfo]::InvariantCulture)
+    $response = @{ Status = 'Absent'; Names = [string[]]@() }
+    if ($Tokens.Contains('scope')) { $response = ConvertTo-LabProbeScopeNames $Tokens.scope }
+    $access = Read-LabProbeAccessTokenScopes $Tokens.access_token
+    # A fresh projection contains no token, identity, other claim or server metadata.
+    return [ordered]@{
+        ResponseScope = [ordered]@{ Provenance = 'TokenResponseScope'; Status = $response.Status; ObservedAtUtc = $observedAt; Names = [string[]]$response.Names }
+        AccessTokenScp = [ordered]@{ Provenance = 'UnverifiedAccessTokenScp'; Status = $access.Status; ObservedAtUtc = $observedAt; Names = [string[]]$access.Names }
+    }
+}
+
 function Invoke-LabSessionProbe {
-    param([string]$Cookie, [string]$CookieName, [string]$TenantId, [string]$ClientId, [string]$ExpectedUpn)
+    param([string]$Cookie, [string]$CookieName, [string]$TenantId, [string]$ClientId, [string]$ExpectedUpn,
+        [Collections.Generic.List[object]]$ScopeObservation = $null)
+    # Explicit opt-in to caller-owned local storage. An empty list is not false/absent.
+    if ($null -ne $ScopeObservation) { $ScopeObservation.Clear() }
     # These IDs identify the first rejected check or entered failing operation,
     # not response values, a terminal exception, or proof a request reached a service.
     $phase = 'Configuration'
@@ -279,7 +360,7 @@ function Invoke-LabSessionProbe {
             $diagnostic.Code = 'UnexpectedFailure'; $diagnostic.Predicate = 'UnexpectedFailure'
             if ($tokens.scope -isnot [string]) { $diagnostic.Code = 'InvalidTokenResponse'; $diagnostic.Predicate = 'ScopeString'; throw 'Unexpected granted scopes.' }
             $diagnostic.Code = 'UnexpectedFailure'; $diagnostic.Predicate = 'UnexpectedFailure'
-            if ($tokens.scope -cnotmatch '\A(?:openid|profile)(?: (?:openid|profile))*\z') { $diagnostic.Code = 'InvalidTokenResponse'; $diagnostic.Predicate = 'ScopeAllowedGrammar'; throw 'Unexpected granted scopes.' }
+            if ($tokens.scope -cnotmatch '\A[\x21\x23-\x5B\x5D-\x7E]+(?: [\x21\x23-\x5B\x5D-\x7E]+)*\z') { $diagnostic.Code = 'InvalidTokenResponse'; $diagnostic.Predicate = 'ScopeSyntax'; throw 'Unexpected granted scopes.' }
         }
         $phase = 'TokenEncoding'; $diagnostic.Code = 'InvalidTokenEncoding'; $diagnostic.Predicate = 'TokenSplit'
         $parts = $tokens.id_token.Split('.')
@@ -372,6 +453,12 @@ function Invoke-LabSessionProbe {
         if ($user.sub -isnot [string]) { $diagnostic.Code = 'InvalidUserInfoSubject'; $diagnostic.Predicate = 'UserInfoSubjectString'; throw 'UserInfo subject mismatch.' }
         $diagnostic.Code = 'UnexpectedFailure'; $diagnostic.Predicate = 'UnexpectedFailure'
         if ($user.sub -cne $claims.sub) { $diagnostic.Code = 'InvalidUserInfoSubject'; $diagnostic.Predicate = 'UserInfoSubjectMatch'; throw 'UserInfo subject mismatch.' }
+        if ($null -ne $ScopeObservation) {
+            # Optional observation must never change acceptance or diagnostics.
+            # Fail closed to an empty container on any local projection fault.
+            try { $ScopeObservation.Add((New-LabProbeScopeObservation -Tokens $tokens)) }
+            catch { $ScopeObservation.Clear() }
+        }
         return [ordered]@{ ServerBackedSessionReuse = $true; ExpectedTenantAndCurrentName = $true; UserInfoSubjectMatched = $true; TamperProofAgainstCandidate = $false }
     } catch {
         # Only locally assigned scalar-string tuples may cross the public boundary.
@@ -421,7 +508,7 @@ function Get-LabProbeDiagnosticAllowlist {
         'TokenResponse/InvalidTokenResponse' = @(
             'TokenTypeString', 'TokenTypeBearer', 'AccessTokenString', 'AccessTokenNonblank',
             'AccessTokenNoNewline', 'IdTokenString', 'RefreshTokenFalsey', 'ScopeString',
-            'ScopeAllowedGrammar'
+            'ScopeSyntax'
         )
         'TokenEncoding/InvalidTokenEncoding' = @(
             'HeaderUtf8Construction', 'ClaimsUtf8Construction',

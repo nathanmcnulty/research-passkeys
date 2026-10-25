@@ -53,7 +53,7 @@ $probeExpectedTuples = @(
     @{ Phase = 'TokenResponse'; Code = 'InvalidTokenResponse'; Predicate = 'IdTokenString' }
     @{ Phase = 'TokenResponse'; Code = 'InvalidTokenResponse'; Predicate = 'RefreshTokenFalsey' }
     @{ Phase = 'TokenResponse'; Code = 'InvalidTokenResponse'; Predicate = 'ScopeString' }
-    @{ Phase = 'TokenResponse'; Code = 'InvalidTokenResponse'; Predicate = 'ScopeAllowedGrammar' }
+    @{ Phase = 'TokenResponse'; Code = 'InvalidTokenResponse'; Predicate = 'ScopeSyntax' }
     @{ Phase = 'TokenEncoding'; Code = 'InvalidTokenEncoding'; Predicate = 'TokenSplit' }
     @{ Phase = 'TokenEncoding'; Code = 'InvalidTokenEncoding'; Predicate = 'TokenPartCount' }
     @{ Phase = 'TokenEncoding'; Code = 'InvalidTokenEncoding'; Predicate = 'HeaderAlphabet' }
@@ -330,11 +330,11 @@ BeforeAll {
         param([string]$Uri, [string]$Method = 'GET', [hashtable]$Headers = @{}, [string]$Body, [hashtable]$Diagnostic)
         throw 'Native HTTP is unavailable in this offline test suite.'
     }
-    # Immutable canonical source is checked before parsing and is NEVER dot-sourced.
+    # Exact pre-scope-policy source is checked before parsing and is NEVER dot-sourced.
     # The isolated AST loader excludes BOTH native factory and native transport.
-    $baselinePath = Join-Path $PSScriptRoot 'fixtures/LabSessionProbe.Baseline.ps1'
-    if ((Get-FileHash $baselinePath -Algorithm SHA256).Hash -cne '9A42B6785D3D4E70108B0D8D4CB88C106123ADB4994B564A0B2AB3F7A6D639CC') {
-        throw 'The immutable canonical baseline hash changed.'
+    $baselinePath = Join-Path $PSScriptRoot 'fixtures/LabSessionProbe.ScopeBaseline.ps1'
+    if ((Get-FileHash $baselinePath -Algorithm SHA256).Hash -cne '71591B0BB059220A64043B3232E445E7D0247CF1CB3BF19F0127791B3060A123') {
+        throw 'The immutable pre-scope-policy baseline hash changed.'
     }
     $baselineSource = Get-Content $baselinePath -Raw
     $baselineTokens = $null; $baselineErrors = $null
@@ -361,7 +361,7 @@ BeforeAll {
         . ([scriptblock]::Create($renamed))
     }
     function Send-BaselineLabProbeRequest {
-        param([string]$Uri, [string]$Method = 'GET', [hashtable]$Headers = @{}, [string]$Body)
+        param([string]$Uri, [string]$Method = 'GET', [hashtable]$Headers = @{}, [string]$Body, [hashtable]$Diagnostic)
         throw 'Native HTTP is unavailable in the immutable baseline test suite.'
     }
     function ConvertTo-ProbeTestSegment {
@@ -439,16 +439,99 @@ BeforeAll {
         } finally {
             $script:probeRequests = $savedRequests; $script:probeAuthorizeQuery = $savedQuery; $script:probeAuthorizeCount = $savedCount
         }
-        # Error strings intentionally change. Acceptance and receipts must match;
-        # request destinations/methods/headers and decoded query/form field values
-        # must match after the documented semantic normalization, not bytewise.
+        # All decisions, receipts and error labels stay equal here, except for
+        # the explicit returned-scope predicate rename. Intentional acceptance
+        # expansion has its own helper below and never weakens this comparison.
+        # Requests use the documented semantic normalization, not bytewise.
         ($null -eq $candidateError) | Should -Be ($null -eq $baselineError)
         (ConvertTo-ProbeNormalizedRequestTrace $candidateRequests) | Should -BeExactly (ConvertTo-ProbeNormalizedRequestTrace $baselineRequests)
         if ($null -eq $candidateError) {
             (ConvertTo-Json -InputObject $candidateOutput.ToArray() -Depth 16 -Compress) | Should -BeExactly (ConvertTo-Json -InputObject $baselineOutput.ToArray() -Depth 16 -Compress)
-        } else { $baselineOutput.Count | Should -Be 0 }
+        } else {
+            $baselineOutput.Count | Should -Be 0
+            $expectedError = $baselineError.Exception.Message
+            if ($expectedError -ceq "$script:probeSafeError Phase=TokenResponse; Code=InvalidTokenResponse; Predicate=ScopeAllowedGrammar.") {
+                $expectedError = "$script:probeSafeError Phase=TokenResponse; Code=InvalidTokenResponse; Predicate=ScopeSyntax."
+            }
+            $candidateError.Exception.Message | Should -BeExactly $expectedError
+        }
         foreach ($item in $candidateOutput) { Write-Output $item }
         if ($null -ne $candidateError) { throw $candidateError }
+    }
+    function ConvertTo-ProbeExactRequestTrace {
+        # Only dictionary enumeration is stabilized. Raw URI, query and body strings,
+        # methods and every header value are compared without normalization.
+        param($Requests)
+        $trace = foreach ($request in $Requests) {
+            $headers = [ordered]@{}
+            foreach ($key in @($request.Headers.Keys | Sort-Object -CaseSensitive)) { $headers[$key] = $request.Headers[$key] }
+            [ordered]@{ Uri = $request.Uri; Method = $request.Method; Headers = $headers; Body = $request.Body }
+        }
+        return ConvertTo-Json -InputObject @($trace) -Depth 16 -Compress
+    }
+    function Assert-ProbeReturnedScopeExpansion {
+        param([Parameter(Mandatory)][string]$Scope)
+        # Intentional policy difference only: old source rejects this returned
+        # name, new source accepts its syntax. No request scope is expanded.
+        $script:probeTokenOverrides.scope = $Scope
+        $script:probeScopeCandidateRandomCalls = 0
+        $script:probeScopeBaselineRandomCalls = 0
+        Mock ConvertTo-LabProbeBase64Url {
+            param([byte[]]$Bytes)
+            $script:probeScopeCandidateRandomCalls++
+            switch ($script:probeScopeCandidateRandomCalls) {
+                1 { return ('s' * 43) }
+                2 { return ('n' * 43) }
+                3 { return ('v' * 43) }
+                4 { return (& $script:probeBase64Function $Bytes) }
+                default { throw 'Unexpected synthetic transaction encoding call.' }
+            }
+        }
+        Mock ConvertTo-BaselineLabProbeBase64Url {
+            param([byte[]]$Bytes)
+            $script:probeScopeBaselineRandomCalls++
+            switch ($script:probeScopeBaselineRandomCalls) {
+                1 { return ('s' * 43) }
+                2 { return ('n' * 43) }
+                3 { return ('v' * 43) }
+                4 { return (& $script:probeBase64Function $Bytes) }
+                default { throw 'Unexpected synthetic transaction encoding call.' }
+            }
+        }
+        $requestStart = $script:probeRequests.Count
+        $candidateOutput = [Collections.Generic.List[object]]::new(); $candidateError = $null
+        try { Invoke-LabSessionProbe @script:probeArguments *>&1 | ForEach-Object { $candidateOutput.Add($_) } } catch { $candidateError = $_ }
+        $candidateRequests = @($script:probeRequests | Select-Object -Skip $requestStart)
+        $savedRequests = $script:probeRequests; $savedQuery = $script:probeAuthorizeQuery; $savedCount = $script:probeAuthorizeCount
+        $baselineOutput = [Collections.Generic.List[object]]::new(); $baselineError = $null
+        try {
+            $script:probeRequests = [Collections.Generic.List[object]]::new()
+            $script:probeAuthorizeQuery = $null; $script:probeAuthorizeCount = 0
+            try { Invoke-BaselineLabSessionProbe @script:probeArguments *>&1 | ForEach-Object { $baselineOutput.Add($_) } } catch { $baselineError = $_ }
+            $baselineRequests = $script:probeRequests.ToArray()
+        } finally {
+            $script:probeRequests = $savedRequests; $script:probeAuthorizeQuery = $savedQuery; $script:probeAuthorizeCount = $savedCount
+        }
+        $candidateError | Should -BeNullOrEmpty
+        $candidateOutput.Count | Should -Be 1
+        (ConvertTo-Json -InputObject $candidateOutput[0] -Compress) | Should -BeExactly '{"ServerBackedSessionReuse":true,"ExpectedTenantAndCurrentName":true,"UserInfoSubjectMatched":true,"TamperProofAgainstCandidate":false}'
+        $baselineError | Should -Not -BeNullOrEmpty
+        $baselineError.Exception.Message | Should -BeExactly "$script:probeSafeError Phase=TokenResponse; Code=InvalidTokenResponse; Predicate=ScopeAllowedGrammar."
+        $baselineOutput.Count | Should -Be 0
+        $candidateRequests.Count | Should -Be 4
+        $baselineRequests.Count | Should -Be 3
+        $script:probeScopeCandidateRandomCalls | Should -Be 4
+        $script:probeScopeBaselineRandomCalls | Should -Be 4
+        (ConvertTo-ProbeExactRequestTrace $candidateRequests[0..2]) | Should -BeExactly (ConvertTo-ProbeExactRequestTrace $baselineRequests)
+        ([Web.HttpUtility]::ParseQueryString(([uri]$candidateRequests[1].Uri).Query))['scope'] | Should -BeExactly 'openid profile'
+        ([Web.HttpUtility]::ParseQueryString($candidateRequests[2].Body))['scope'] | Should -BeExactly 'openid profile'
+        $candidateRequests[3].Uri | Should -BeExactly $script:probeUserInfoEndpoint
+        $candidateRequests[3].Method | Should -BeExactly 'GET'
+        $candidateRequests[3].Headers.Count | Should -Be 1
+        $candidateRequests[3].Headers.Authorization | Should -BeExactly 'Bearer synthetic-opaque-access-token'
+        $candidateRequests[3].Body | Should -BeNullOrEmpty
+        Should -Invoke Send-LabProbeRequest -Times 4 -Exactly
+        Should -Invoke Send-BaselineLabProbeRequest -Times 3 -Exactly
     }
     $probeDefinition = @($definitions | Where-Object Name -CEQ 'Invoke-LabSessionProbe')[0]
     $probeTry = @($probeDefinition.Body.EndBlock.Statements | Where-Object { $_ -is [Management.Automation.Language.TryStatementAst] })[0]
@@ -460,6 +543,8 @@ BeforeAll {
     $script:probeDefinitions = $definitions
     $script:probeBaselineDefinitions = $baselineDefinitions
     $script:probeFormFunction = (Get-Command ConvertTo-LabProbeForm -CommandType Function).ScriptBlock
+    $script:probeReadResponseFunction = (Get-Command Read-LabProbeResponse -CommandType Function).ScriptBlock
+    $script:probeBaselineReadResponseFunction = (Get-Command Read-BaselineLabProbeResponse -CommandType Function).ScriptBlock
     $script:probeSafeError = 'Server-backed session probe failed; no live acceptance. Sensitive details suppressed.'
     function Assert-ProbeTestFailure {
         param([string]$Phase, [string]$Code, [int]$Requests, [Parameter(Mandatory)][string]$Predicate, [scriptblock]$Action = { Invoke-ProbeTest })
@@ -634,7 +719,7 @@ Describe 'Server-backed session readback with synthetic, offline evidence' {
             throw 'Offline fixture refused an unexpected destination; no HTTP was attempted.'
         }
         Mock Send-LabProbeRequest { param($Uri, $Method = 'GET', $Headers = @{}, $Body, [hashtable]$Diagnostic); & $script:probeSyntheticRequest @PSBoundParameters }
-        Mock Send-BaselineLabProbeRequest { param($Uri, $Method = 'GET', $Headers = @{}, $Body); & $script:probeSyntheticRequest @PSBoundParameters }
+        Mock Send-BaselineLabProbeRequest { param($Uri, $Method = 'GET', $Headers = @{}, $Body, [hashtable]$Diagnostic); & $script:probeSyntheticRequest @PSBoundParameters }
     }
     AfterEach {
         Should -Invoke Invoke-RestMethod -Times 0 -Exactly
@@ -866,13 +951,158 @@ Describe 'Server-backed session readback with synthetic, offline evidence' {
         @($script:probeRequests | Where-Object Method -EQ 'POST').Count | Should -Be 0
     }
 
-    It 'accepts only explicit identity-only returned scope strings' -ForEach @('openid profile', 'profile openid', 'openid') {
+    It 'preserves baseline acceptance when the optional returned scope is omitted' {
+        $script:probeTokenRemove = @('scope')
+        (Invoke-ProbeTest).ServerBackedSessionReuse | Should -BeTrue
+        $script:probeRequests.Count | Should -Be 4
+    }
+    It 'preserves baseline acceptance for identity-only returned scope strings' -ForEach @('openid profile', 'profile openid', 'openid') {
         $script:probeTokenOverrides.scope = $_
         (Invoke-ProbeTest).ServerBackedSessionReuse | Should -BeTrue
     }
-    It 'rejects broader or malformed returned scopes' -ForEach @('openid profile User.Read', 'openid offline_access', 'https://graph.microsoft.com/.default', 'OPENID', '', "openid`nprofile", @('openid','profile'), $null) {
-        $script:probeTokenOverrides.scope = $_
-        Assert-ProbeTestFailure TokenResponse InvalidTokenResponse 3 $(if ($_ -is [string]) { 'ScopeAllowedGrammar' } else { 'ScopeString' })
+    It 'accepts syntax-valid returned names rejected by the baseline without requesting them: <Case>' -ForEach @(
+        @{ Case = 'additional resource name'; Value = 'openid profile User.Read' },
+        @{ Case = 'offline_access name only'; Value = 'openid offline_access' },
+        @{ Case = 'resource URI'; Value = 'https://graph.microsoft.com/.default' },
+        @{ Case = 'uppercase identity name'; Value = 'OPENID' },
+        @{ Case = 'mixed case distinct names'; Value = 'openid OpenId OPENID profile Profile' },
+        @{ Case = 'duplicate additional names'; Value = 'User.Read User.Read' },
+        @{ Case = 'case-distinct resource names'; Value = 'User.Read user.read USER.READ' },
+        @{ Case = 'punctuation boundaries'; Value = '!#[]^~ / : ; = ? @' },
+        @{ Case = 'long single token'; Value = ('x' * 32768) },
+        @{ Case = 'long token list'; Value = (('x ' * 8192) + 'x') }
+    ) {
+        Assert-ProbeReturnedScopeExpansion $Value
+    }
+    It 'does not bypass later acceptance gates for a syntax-valid expanded scope: <Case>' -ForEach @(
+        @{ Case = 'ID-token structure'; Phase = 'TokenEncoding'; Code = 'InvalidTokenEncoding'; Requests = 3; Predicate = 'TokenPartCount'; Setup = { $script:probeIdTokenMode = 'empty' } },
+        @{ Case = 'ID-token algorithm'; Phase = 'TokenEncoding'; Code = 'InvalidTokenEncoding'; Requests = 3; Predicate = 'HeaderAlgorithmMatch'; Setup = { $script:probeHeaderOverrides.alg = 'none' } },
+        @{ Case = 'transaction binding'; Phase = 'TokenBinding'; Code = 'InvalidTokenBinding'; Requests = 3; Predicate = 'NonceClaimMatch'; Setup = { $script:probeClaimsOverrides.nonce = 'wrong-synthetic-nonce' } },
+        @{ Case = 'current identity'; Phase = 'TokenBinding'; Code = 'InvalidTokenBinding'; Requests = 3; Predicate = 'UsernameMatch'; Setup = { $script:probeClaimsOverrides.preferred_username = 'different@example.invalid' } },
+        @{ Case = 'freshness'; Phase = 'TokenTimes'; Code = 'InvalidTokenTimes'; Requests = 3; Predicate = 'ExpiryFuture'; Setup = { $script:probeClaimsOverrides.exp = [DateTimeOffset]::UtcNow.ToUnixTimeSeconds() - 1 } },
+        @{ Case = 'UserInfo response'; Phase = 'UserInfoResponse'; Code = 'InvalidResponse'; Requests = 4; Predicate = 'ResponseStatus'; Setup = { $script:probeResponseOverrides.UserInfo = @{ Status = 500 } } },
+        @{ Case = 'UserInfo subject'; Phase = 'UserInfoSubject'; Code = 'InvalidUserInfoSubject'; Requests = 4; Predicate = 'UserInfoSubjectMatch'; Setup = { $script:probeUserInfoOverrides.sub = 'different-synthetic-subject' } }
+    ) {
+        # Intentional ordering difference, so this is candidate-only: the
+        # unchanged baseline stops earlier at ScopeAllowedGrammar. The separate
+        # expansion helper proves that earlier stop and the shared raw request
+        # prefix. Here the exact later failure must emit no partial receipt.
+        $script:probeCompareBaseline = $false
+        $script:probeTokenOverrides.scope = 'openid profile User.Read'
+        & $Setup
+        Assert-ProbeTestFailure $Phase $Code $Requests $Predicate
+        Should -Invoke Send-LabProbeRequest -Times $Requests -Exactly
+        Should -Invoke Send-BaselineLabProbeRequest -Times 0 -Exactly
+        $script:probeRequests[0].Uri | Should -BeExactly $script:probeDiscovery
+        $script:probeRequests[1].Uri.StartsWith($script:probeAuthorizeEndpoint + '?', [StringComparison]::Ordinal) | Should -BeTrue
+        $script:probeRequests[2].Uri | Should -BeExactly $script:probeTokenEndpoint
+        $script:probeAuthorizeQuery['scope'] | Should -BeExactly 'openid profile'
+        ([Web.HttpUtility]::ParseQueryString($script:probeRequests[2].Body))['scope'] | Should -BeExactly 'openid profile'
+        if ($Requests -eq 4) {
+            $script:probeRequests[3].Uri | Should -BeExactly $script:probeUserInfoEndpoint
+            $script:probeRequests[3].Method | Should -BeExactly 'GET'
+            $script:probeRequests[3].Headers.Count | Should -Be 1
+            $script:probeRequests[3].Headers.Authorization | Should -BeExactly 'Bearer synthetic-opaque-access-token'
+        }
+    }
+    It 'checks every ASCII code point as a complete returned scope: <CodePoint>' -ForEach @(
+        foreach ($codePoint in 0..127) {
+            # Independent RFC 6749 ABNF ranges, not the production regex.
+            @{ CodePoint = $codePoint; Allowed = ($codePoint -eq 0x21 -or ($codePoint -ge 0x23 -and $codePoint -le 0x5B) -or ($codePoint -ge 0x5D -and $codePoint -le 0x7E)) }
+        }
+    ) {
+        $value = [string][char]$CodePoint
+        if ($Allowed) {
+            Assert-ProbeReturnedScopeExpansion $value
+        } else {
+            $script:probeTokenOverrides.scope = $value
+            Assert-ProbeTestFailure TokenResponse InvalidTokenResponse 3 ScopeSyntax
+            Should -Invoke Send-LabProbeRequest -Times 3 -Exactly
+        }
+    }
+    It 'rejects malformed returned scope syntax with unchanged baseline decisions: <Case>' -ForEach @(
+        @{ Case = 'empty'; Value = '' },
+        @{ Case = 'space only'; Value = ' ' },
+        @{ Case = 'multiple spaces only'; Value = '  ' },
+        @{ Case = 'leading space'; Value = ' openid' },
+        @{ Case = 'trailing space'; Value = 'openid ' },
+        @{ Case = 'empty middle token'; Value = 'openid  profile' },
+        @{ Case = 'leading LF'; Value = "`nopenid" },
+        @{ Case = 'trailing LF'; Value = "openid`n" },
+        @{ Case = 'embedded LF'; Value = "openid`nprofile" },
+        @{ Case = 'trailing CRLF'; Value = "openid`r`n" },
+        @{ Case = 'embedded tab'; Value = "openid`tprofile" },
+        @{ Case = 'embedded quote'; Value = 'openid"profile' },
+        @{ Case = 'embedded backslash'; Value = 'openid\profile' },
+        @{ Case = 'first non-ASCII code point'; Value = [string][char]0x0080 },
+        @{ Case = 'next-line control'; Value = ('openid' + [char]0x0085) },
+        @{ Case = 'last C1 control'; Value = [string][char]0x009F },
+        @{ Case = 'nonbreaking space'; Value = ('openid' + [char]0x00A0 + 'profile') },
+        @{ Case = 'Latin letter'; Value = ('profil' + [char]0x00E9) },
+        @{ Case = 'combining mark'; Value = ('profile' + [char]0x0301) },
+        @{ Case = 'em space'; Value = ('openid' + [char]0x2003 + 'profile') },
+        @{ Case = 'zero width space'; Value = ('openid' + [char]0x200B) },
+        @{ Case = 'line separator'; Value = ('openid' + [char]0x2028) },
+        @{ Case = 'paragraph separator'; Value = ('openid' + [char]0x2029) },
+        @{ Case = 'BOM'; Value = ([string][char]0xFEFF + 'openid') },
+        @{ Case = 'fullwidth ASCII lookalike'; Value = [string][char]0xFF21 },
+        @{ Case = 'valid supplementary pair'; Value = [char]::ConvertFromUtf32(0x1F600) },
+        @{ Case = 'unicode maximum'; Value = [char]::ConvertFromUtf32(0x10FFFF) }
+    ) {
+        $script:probeTokenOverrides.scope = $Value
+        Assert-ProbeTestFailure TokenResponse InvalidTokenResponse 3 ScopeSyntax
+        Should -Invoke Send-LabProbeRequest -Times 3 -Exactly
+    }
+    It 'rejects every ASCII forbidden code point inside a token: <CodePoint>' -ForEach @(
+        foreach ($codePoint in @((0..31) + @(34, 92, 127))) { @{ CodePoint = $codePoint } }
+    ) {
+        $script:probeTokenOverrides.scope = 'openid' + [char]$CodePoint + 'profile'
+        Assert-ProbeTestFailure TokenResponse InvalidTokenResponse 3 ScopeSyntax
+        Should -Invoke Send-LabProbeRequest -Times 3 -Exactly
+    }
+    It 'rejects present nonstring returned scope instead of coercing it: <Case>' -ForEach @(
+        @{ Case = 'null'; Value = $null },
+        @{ Case = 'true'; Value = $true },
+        @{ Case = 'false'; Value = $false },
+        @{ Case = 'zero'; Value = 0 },
+        @{ Case = 'integer'; Value = 42 },
+        @{ Case = 'fraction'; Value = 1.5 },
+        @{ Case = 'empty array'; Value = @() },
+        @{ Case = 'one-element array'; Value = @('openid') },
+        @{ Case = 'multiple-element array'; Value = @('openid', 'profile') },
+        @{ Case = 'empty object'; Value = @{} },
+        @{ Case = 'object'; Value = @{ scope = 'openid' } }
+    ) {
+        $script:probeTokenOverrides.scope = $Value
+        Assert-ProbeTestFailure TokenResponse InvalidTokenResponse 3 ScopeString
+        Should -Invoke Send-LabProbeRequest -Times 3 -Exactly
+    }
+    It 'rejects malformed UTF-16 returned scope after the parser seam: <Case>' -ForEach @(
+        @{ Case = 'lone high surrogate'; Units = @(0xD800) },
+        @{ Case = 'lone low surrogate'; Units = @(0xDC00) },
+        @{ Case = 'reversed pair'; Units = @(0xDC00, 0xD800) },
+        @{ Case = 'two high surrogates'; Units = @(0xD800, 0xDBFF) },
+        @{ Case = 'two low surrogates'; Units = @(0xDC00, 0xDFFF) },
+        @{ Case = 'high surrogate before ASCII'; Units = @(0xD800, 0x61) },
+        @{ Case = 'low surrogate after ASCII'; Units = @(0x61, 0xDFFF) }
+    ) {
+        # Serializers/parsers may reject or replace lone surrogates themselves.
+        # Inject exact UTF-16 units only after the real response parser, into
+        # both implementations. This proves the scope guard, not JSON decoding.
+        $script:probeMalformedScope = -join @($Units | ForEach-Object { [char]$_ })
+        Mock Read-LabProbeResponse {
+            param($Response, [hashtable]$Diagnostic)
+            $parsed = & $script:probeReadResponseFunction $Response -Diagnostic $Diagnostic
+            if ($parsed.Contains('access_token')) { $parsed.scope = $script:probeMalformedScope }
+            return $parsed
+        }
+        Mock Read-BaselineLabProbeResponse {
+            param($Response, [hashtable]$Diagnostic)
+            $parsed = & $script:probeBaselineReadResponseFunction $Response -Diagnostic $Diagnostic
+            if ($parsed.Contains('access_token')) { $parsed.scope = $script:probeMalformedScope }
+            return $parsed
+        }
+        Assert-ProbeTestFailure TokenResponse InvalidTokenResponse 3 ScopeSyntax
         Should -Invoke Send-LabProbeRequest -Times 3 -Exactly
     }
 
@@ -1075,17 +1305,17 @@ Describe 'Server-backed session readback with synthetic, offline evidence' {
             'callback-header' { $script:probeResponseOverrides.Authorization = @{ Locations = @('https://diagnostic-secret.invalid/?code=diagnostic-secret'); Body = 'diagnostic-secret-body' } }
             'malformed-callback' { $script:probeRedirectOverride = 'https://[diagnostic-secret' }
             'token-body' { $script:probeResponseOverrides.Token = @{ Body = '{"access_token":"diagnostic-secret","ACCESS_TOKEN":"diagnostic-secret"}' } }
-            'token-scope' { $script:probeTokenOverrides.scope = 'diagnostic-secret-scope' }
+            'token-scope' { $script:probeTokenOverrides.scope = "diagnostic-secret-scope`n" }
             'token-header' { $script:probeHeaderOverrides.alg = 'diagnostic-secret-algorithm' }
             'token-claims' { $script:probeClaimsOverrides.preferred_username = 'diagnostic-secret@example.invalid' }
             'userinfo-body' { $script:probeResponseOverrides.UserInfo = @{ Body = '["diagnostic-secret"]' } }
             'userinfo-subject' { $script:probeUserInfoOverrides.sub = 'diagnostic-secret-subject' }
         }
-        $predicate = @{ configuration = 'UpnFormat'; cookie = 'CookieAlphabet'; 'discovery-url' = 'IssuerMetadataMatch'; 'discovery-body' = 'ResponseJsonParse'; 'authorization-body' = 'AuthorizationStatus'; 'callback-header' = 'CallbackHost'; 'malformed-callback' = 'CallbackUriConstruction'; 'token-body' = 'ResponseJsonPropertyUnique'; 'token-scope' = 'ScopeAllowedGrammar'; 'token-header' = 'HeaderAlgorithmMatch'; 'token-claims' = 'UsernameMatch'; 'userinfo-body' = 'ResponseJsonRootObject'; 'userinfo-subject' = 'UserInfoSubjectMatch' }[$Case]
+        $predicate = @{ configuration = 'UpnFormat'; cookie = 'CookieAlphabet'; 'discovery-url' = 'IssuerMetadataMatch'; 'discovery-body' = 'ResponseJsonParse'; 'authorization-body' = 'AuthorizationStatus'; 'callback-header' = 'CallbackHost'; 'malformed-callback' = 'CallbackUriConstruction'; 'token-body' = 'ResponseJsonPropertyUnique'; 'token-scope' = 'ScopeSyntax'; 'token-header' = 'HeaderAlgorithmMatch'; 'token-claims' = 'UsernameMatch'; 'userinfo-body' = 'ResponseJsonRootObject'; 'userinfo-subject' = 'UserInfoSubjectMatch' }[$Case]
         Assert-ProbeTestFailure $Phase $Code $Requests $predicate
     }
 
-    It 'preserves baseline acceptance for case-insensitive bearer type and duplicate identity-only scopes' -ForEach @('profile', 'openid openid', 'profile profile openid') {
+    It 'preserves baseline acceptance for case-insensitive bearer type and duplicate identity-only scopes' -ForEach @('profile', 'openid openid', 'openid openid profile', 'profile profile openid') {
         $script:probeTokenOverrides = @{ token_type = 'bEaReR'; scope = $_ }
         (Invoke-ProbeTest).ServerBackedSessionReuse | Should -BeTrue
     }
@@ -1171,6 +1401,7 @@ Describe 'Server-backed session readback with synthetic, offline evidence' {
         @{ Case = 'id token type before refresh token'; Phase = 'TokenResponse'; Code = 'InvalidTokenResponse'; Requests = 3; Predicate = 'IdTokenString'; Setup = { $script:probeTokenOverrides = @{ id_token = $null; refresh_token = $true } } },
         @{ Case = 'refresh token before scope'; Phase = 'TokenResponse'; Code = 'InvalidTokenResponse'; Requests = 3; Predicate = 'RefreshTokenFalsey'; Setup = { $script:probeTokenOverrides = @{ refresh_token = $true; scope = $null } } },
         @{ Case = 'scope type before token encoding'; Phase = 'TokenResponse'; Code = 'InvalidTokenResponse'; Requests = 3; Predicate = 'ScopeString'; Setup = { $script:probeTokenOverrides.scope = @('openid'); $script:probeIdTokenMode = 'empty' } },
+        @{ Case = 'scope syntax before token encoding'; Phase = 'TokenResponse'; Code = 'InvalidTokenResponse'; Requests = 3; Predicate = 'ScopeSyntax'; Setup = { $script:probeTokenOverrides.scope = "openid`n"; $script:probeIdTokenMode = 'empty' } },
         @{ Case = 'header alphabet before length claims signature'; Phase = 'TokenEncoding'; Code = 'InvalidTokenEncoding'; Requests = 3; Predicate = 'HeaderAlphabet'; Setup = { $script:probeTokenOverrides.id_token = '!.!.!' } },
         @{ Case = 'header length before claims'; Phase = 'TokenEncoding'; Code = 'InvalidTokenEncoding'; Requests = 3; Predicate = 'HeaderLength'; Setup = { $script:probeTokenOverrides.id_token = 'a.!.!' } },
         @{ Case = 'header JSON before claims'; Phase = 'TokenEncoding'; Code = 'InvalidTokenEncoding'; Requests = 3; Predicate = 'HeaderJsonParse'; Setup = { $script:probeRawHeader = '{broken'; $script:probeRawClaims = '{broken' } },
@@ -1335,6 +1566,11 @@ Describe 'Native transport is inspected but never executed' {
 }
 
 Describe 'Static diagnostic operation and guard contracts' {
+    It 'pins the exact RFC 6749 scope syntax instead of a returned-name allowlist' {
+        $invoke = @($script:probeDefinitions | Where-Object Name -CEQ 'Invoke-LabSessionProbe')[0].Extent.Text
+        $invoke | Should -Match ([regex]::Escape('$tokens.scope -cnotmatch ''\A[\x21\x23-\x5B\x5D-\x7E]+(?: [\x21\x23-\x5B\x5D-\x7E]+)*\z'''))
+        $invoke | Should -Not -Match 'ScopeAllowedGrammar'
+    }
     It 'preserves the exact baseline form serializer source independently of normalized traces' {
         $baseline = @($script:probeBaselineDefinitions | Where-Object Name -CEQ 'ConvertTo-LabProbeForm')
         $candidate = @($script:probeDefinitions | Where-Object Name -CEQ 'ConvertTo-LabProbeForm')
