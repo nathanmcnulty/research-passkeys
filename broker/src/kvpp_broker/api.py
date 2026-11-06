@@ -8,7 +8,7 @@ import json
 import re
 
 from .auth import EntraTokenVerifier
-from .coordination import Coordinator
+from .coordination import Coordinator, DIGEST, MAX_COUNTER, OPAQUE, valid_rp
 from .errors import ClaimsChallenge, Conflict, CorruptState, GateClosed, InvalidRequest, NotFound, StorageUnavailable, Unauthenticated
 from .storage import strict_json
 
@@ -32,21 +32,21 @@ class BrokerApplication:
             if method == "POST" and path == "/v1/reservations":
                 body = self._body(environ, {"rpId"})
                 value = self.coordinator.reserve(caller, request_key, body["rpId"])
-                result = {"credentialId": value["credential_id"], "state": value["state"], "expiresAt": value["expires_at"]}
+                result = self._public(value, {"credentialId": "credential_id", "state": "state", "expiresAt": "expires_at"}, state="reserved")
                 status = 201
             elif match:
                 resource, identifier, action = match.groups()
                 if method == "GET" and resource == "credentials" and action is None:
                     value = self.coordinator.get_credential(caller, identifier)
-                    result = {"credentialId": value["credential_id"], "state": value["state"], "rpId": value["rp_id"], "counter": value["counter"]}
+                    result = self._public(value, {"credentialId": "credential_id", "state": "state", "rpId": "rp_id", "counter": "counter"})
                 elif method == "POST" and resource == "credentials" and action == "prepare":
                     body = self._body(environ, {"rpId", "clientDataHash"})
                     value = self.coordinator.prepare(caller, request_key, identifier, body["rpId"], body["clientDataHash"])
-                    result = {"operationId": value["operation_id"], "counter": value["counter"], "nonce": value["nonce"], "expiresAt": value["expires_at"]}
+                    result = self._public(value, {"operationId": "operation_id", "counter": "counter", "nonce": "nonce", "expiresAt": "expires_at"})
                 elif method == "POST" and resource == "reservations" and action == "abort":
                     self._body(environ, set())
                     value = self.coordinator.abort(caller, request_key, identifier)
-                    result = {"credentialId": value["credential_id"], "state": value["state"]}
+                    result = self._public(value, {"credentialId": "credential_id", "state": "state"}, state="aborted")
                 elif ((method == "DELETE" and resource == "credentials" and action is None) or
                         (method == "POST" and ((resource == "credentials" and action == "sign") or
                             (resource == "reservations" and action == "finalize")))):
@@ -79,6 +79,23 @@ class BrokerApplication:
             headers.append(("WWW-Authenticate", challenge or 'Bearer error="invalid_token"'))
         start_response(f"{status} {HTTPStatus(status).phrase}", headers)
         return [data]
+
+    @staticmethod
+    def _public(value, fields, *, state=None):
+        # Persisted idempotent results pass the same wire schema as fresh data.
+        # A corrupt result cannot smuggle an internal structure into a public ID.
+        validators = {
+            "credential_id": lambda item: isinstance(item, str) and OPAQUE.fullmatch(item),
+            "operation_id": lambda item: isinstance(item, str) and OPAQUE.fullmatch(item),
+            "nonce": lambda item: isinstance(item, str) and DIGEST.fullmatch(item),
+            "state": lambda item: isinstance(item, str) and item in ("reserved", "active", "disabled", "aborted", "deleted") and (state is None or item == state),
+            "rp_id": valid_rp,
+            "counter": lambda item: type(item) is int and 0 <= item <= MAX_COUNTER,
+            "expires_at": lambda item: type(item) is int and 0 <= item <= 2**53 - 1,
+        }
+        if not isinstance(value, dict) or any(name not in value or not validators[name](value[name]) for name in fields.values()):
+            raise CorruptState("Stored operation result does not match its public schema.")
+        return {public: value[internal] for public, internal in fields.items()}
 
     @staticmethod
     def _body(environ, fields):

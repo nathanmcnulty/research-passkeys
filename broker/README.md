@@ -106,6 +106,8 @@ Stored JSON rejects duplicate fields, non-finite values and oversized payloads.
 Record IDs must match their row keys; credential schema, state, RP, counter, key
 reference and lease types are validated before public projection or lifecycle
 changes. Corrupt data cannot become an arbitrary JSON object in a public field.
+Persisted idempotent responses also pass the wire schema before replay; cached
+results cannot bypass ID, scalar, counter, nonce or route-state validation.
 
 All rows stay in one Azure Table partition. Transactions are capped at 16 rows,
 with each canonical JSON payload capped at 16,000 ASCII characters. The service

@@ -5,7 +5,7 @@ import re
 import unittest
 
 from kvpp_broker.api import BrokerApplication
-from kvpp_broker.coordination import Coordinator
+from kvpp_broker.coordination import Coordinator, Transaction
 from kvpp_broker.errors import StorageUnavailable
 from kvpp_broker.storage import MemoryStore
 from auth_fixtures import payload, token, verifier
@@ -135,6 +135,34 @@ class BrokerApiTests(unittest.TestCase):
             self.assertEqual(headers["Pragma"], "no-cache")
             self.assertEqual(headers["X-Content-Type-Options"], "nosniff")
             self.assertNotIn("SYNTHETIC-PRIVATE-DETAIL", json.dumps(result))
+
+    def corrupt_cached_result(self, overrides):
+        tx = Transaction(self.store, caller().partition)
+        row = "request-" + "1" * 32
+        prior = tx.get(row)
+        tx.put(row, {**prior, "result": {**prior["result"], **overrides}})
+        tx.commit()
+
+    def test_corrupt_cached_reservation_cannot_expose_an_internal_structure(self):
+        self.assertEqual(call(self.app, "POST", "/v1/reservations", {"rpId": "example.test"})[0], 201)
+        original = self.store.read(caller().partition, "request-" + "1" * 32).value["result"]
+        for overrides in [{"credential_id": {"private": "SYNTHETIC-PRIVATE-DETAIL"}}, {"expires_at": True}, {"state": "active"}]:
+            self.corrupt_cached_result({**original, **overrides})
+            status, result, headers = call(self.app, "POST", "/v1/reservations", {"rpId": "example.test"})
+            self.assertEqual(status, 503)
+            self.assertEqual(headers["Cache-Control"], "no-store")
+            self.assertNotIn("SYNTHETIC-PRIVATE-DETAIL", json.dumps(result))
+
+    def test_corrupt_cached_preparation_cannot_expose_internal_values(self):
+        seed_active(self.store, caller())
+        path = f"/v1/credentials/{CREDENTIAL}/prepare"
+        body = {"rpId": "example.test", "clientDataHash": "a" * 64}
+        self.assertEqual(call(self.app, "POST", path, body)[0], 200)
+        self.corrupt_cached_result({"nonce": {"private": "SYNTHETIC-PRIVATE-DETAIL"}})
+        status, result, _ = call(self.app, "POST", path, body)
+        self.assertEqual(status, 503)
+        self.assertNotIn("SYNTHETIC-PRIVATE-DETAIL", json.dumps(result))
+        self.assertEqual(call(self.app, "GET", f"/v1/credentials/{CREDENTIAL}")[1]["counter"], 1)
 
 
 if __name__ == "__main__":
