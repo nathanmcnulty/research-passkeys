@@ -118,7 +118,8 @@ class AzureTableCoordinationTests(CoordinationCases, unittest.TestCase):
 
     def test_duplicate_non_finite_or_oversized_stored_json_fails_closed(self):
         for payload in ['{"schema":1,"kind":"owner","revision":1,"epoch":0,"epoch":1}',
-                '{"schema":1,"kind":"owner","revision":1,"epoch":NaN}', '{"noise":"' + "x" * 16001 + '"}']:
+                '{"schema":1,"kind":"owner","revision":1,"epoch":NaN}',
+                '{"schema":1,"kind":"owner","revision":1,"epoch":0,"noise":1e9999}', '{"noise":"' + "x" * 16001 + '"}']:
             self.store.client.upsert_entity({"PartitionKey": self.caller.partition, "RowKey": "owner", "Payload": payload}, mode="replace")
             with self.assertRaises(CorruptState):
                 self.api.reserve(self.caller, "1" * 32, "example.test")

@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import copy
 import json
+import math
 import threading
 from dataclasses import dataclass
 from typing import Protocol
@@ -28,7 +29,13 @@ def strict_json(data):
 
     def invalid_constant(value):
         raise ValueError("Non-finite JSON value")
-    return json.loads(data, object_pairs_hook=object_hook, parse_constant=invalid_constant)
+
+    def finite_float(value):
+        number = float(value)
+        if not math.isfinite(number):
+            raise ValueError("Non-finite JSON numeric overflow")
+        return number
+    return json.loads(data, object_pairs_hook=object_hook, parse_constant=invalid_constant, parse_float=finite_float)
 
 
 @dataclass(frozen=True)
