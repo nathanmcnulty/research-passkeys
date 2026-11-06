@@ -1,0 +1,12 @@
+﻿{
+  "credentialId": "<credential-id>",
+  "relyingParty": "login.microsoft.com",
+  "url": "https://login.microsoft.com",
+  "userHandle": "<user-handle>",
+  "username": "user@example.com",
+  "keyVault": {
+    "vaultName": "<key-vault-name>",
+    "keyName": "<key-name>",
+    "keyId": "https://<key-vault-name>.vault.azure.net/keys/<key-name>/<key-version>"
+  }
+}

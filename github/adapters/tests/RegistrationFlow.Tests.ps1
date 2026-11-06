@@ -1,0 +1,245 @@
+BeforeAll {
+    $oldCalls = $env:PASSKEY_TEST_CALLS
+    $oldMode = $env:PASSKEY_TEST_CLI_MODE
+    $root = Split-Path $PSScriptRoot -Parent
+    $registration = "$root/Register-GitHubPasskeyViaTAP.ps1"
+    $repo = Split-Path (Split-Path $root -Parent) -Parent
+    $manifest = Import-PowerShellDataFile "$repo/build/targets.psd1"
+    $registrationSources = ($manifest.Scripts | Where-Object Path -EQ 'github/adapters/Register-GitHubPasskeyViaTAP.ps1').Sources
+    . (Join-Path $PSScriptRoot 'fixtures/New-FakeGitHubCli.ps1')
+    $ghCalls = Join-Path $TestDrive 'gh-calls.txt'
+    $fakeGh = New-FakeGitHubCli -Directory (Join-Path $TestDrive 'native-gh')
+    $env:PASSKEY_TEST_CALLS = $ghCalls
+    $env:PASSKEY_TEST_CLI_MODE = 'record'
+    $global:PasskeyOfflineFixture = @{}
+}
+AfterAll {
+    $env:PASSKEY_TEST_CALLS = $oldCalls
+    $env:PASSKEY_TEST_CLI_MODE = $oldMode
+    Remove-Variable PasskeyOfflineFixture -Scope Global -ErrorAction SilentlyContinue
+}
+Describe 'Complete TAP registration transcript through <Surface>' -ForEach @(@{ Surface = 'Source' }, @{ Surface = 'Module' }, @{ Surface = 'Standalone' }) {
+    BeforeEach {
+        $mockScope = @{}
+        if ($Surface -eq 'Module') {
+            Import-Module "$repo/powershell/modules/Passkey/Passkey.psd1" -Force
+            $mockScope.ModuleName = 'Passkey'
+            $registrationCommand = 'Passkey\Register-GitHubPasskeyViaTAP'
+        } elseif ($Surface -eq 'Source') {
+            foreach ($source in $registrationSources) { . "$repo/$source" }
+            $registrationCommand = 'Register-GitHubPasskeyViaTAP'
+        } else { $registrationCommand = $registration }
+        Remove-Item $ghCalls -ErrorAction SilentlyContinue
+        $global:PasskeyOfflineFixture.Clear()
+        $global:PasskeyOfflineFixture.Mode = 'success'
+        $global:PasskeyOfflineFixture.TokenRequests = 0
+        $global:PasskeyOfflineFixture.SessionRequests = 0
+        $global:PasskeyOfflineFixture.ProbeRequests = 0
+        Mock Get-Command { [pscustomobject]@{ Source = $fakeGh } } -ParameterFilter { $Name -eq 'gh' } @mockScope
+        # All requests use the same raw transport. Synthetic JWT claims are consistency fixtures only.
+        Mock Invoke-WebRequest {
+            $content = ''; $status = 200; $responseHeaders = @{}
+            if ($Uri -match '/v2.0/.well-known/openid-configuration$') {
+                $MaximumRedirection | Should -Be 0
+                $ConnectionTimeoutSeconds | Should -Be 60
+                $OperationTimeoutSeconds | Should -Be 60
+                $content = '{"issuer":"https://login.microsoftonline.com/11111111-1111-1111-1111-111111111111/v2.0"}'
+            } elseif ($Uri -match '/authorize\?') {
+                $global:PasskeyOfflineFixture.State = [Web.HttpUtility]::ParseQueryString(([uri]$Uri).Query)['state']
+                $content = '$Config={"pgid":"ConvergedSignIn","sFT":"fixture-flow","sCtx":"fixture-context","canary":"fixture-canary","apiCanary":"fixture-api","sessionId":"fixture-session","urlPost":"/common/login"};'
+            } elseif ($Uri -match 'GetCredentialType') {
+                if ($global:PasskeyOfflineFixture.Mode -eq 'credentialtype-failure') { throw 'SYNTHETIC-AUXILIARY-FAILURE' }
+                $content = '{"FlowToken":"fixture-flow"}'
+            } elseif ($Uri -match '/common/login$') {
+                if ($global:PasskeyOfflineFixture.Mode -eq 'credentialtype-failure') {
+                    [Web.HttpUtility]::ParseQueryString([string]$Body)['flowToken'] | Should -Be fixture-flow
+                }
+                if ($global:PasskeyOfflineFixture.Mode -eq 'kmsi-config') {
+                    $content = '$Config={"pgid":"KmsiInterrupt","sCtx":"SYNTHETIC-CONTEXT","sFT":"SYNTHETIC-FLOW","canary":"SYNTHETIC-CANARY","correlationId":"SYNTHETIC-CORRELATION"};'
+                } elseif ($global:PasskeyOfflineFixture.Mode -eq 'kmsi-form') {
+                    $content = '<form method="post" action="/kmsi"><input type="hidden" name="ctx" value="SYNTHETIC-CONTEXT"><input type="hidden" name="flowToken" value="SYNTHETIC-FLOW"></form>'
+                } elseif ($global:PasskeyOfflineFixture.Mode -eq 'service-rejected') {
+                    $content = '$Config={"pgid":"ConvergedSignIn","iErrorCode":50126,"strServiceExceptionMessage":"AADSTS50126: SYNTHETIC-TAP raw-secret"};'
+                } elseif ($global:PasskeyOfflineFixture.Mode -eq 'consent') {
+                    $content = '$Config={"pgid":"Consent"};<form action="/consent"><input type="hidden" name="accept" value="yes"></form>'
+                } else {
+                    $state = if ($global:PasskeyOfflineFixture.Mode -eq 'badstate') { 'wrong-state' } else { $global:PasskeyOfflineFixture.State }
+                    $status = 302; $responseHeaders.Location = @("https://mysignins.microsoft.com/#code=SYNTHETIC-CODE&state=$state")
+                }
+            } elseif ($Uri -match '/kmsi$') {
+                $form = [Web.HttpUtility]::ParseQueryString([string]$Body)
+                $form['flowToken'] | Should -Be 'SYNTHETIC-FLOW'
+                $form['ctx'] | Should -Be 'SYNTHETIC-CONTEXT'
+                if ($global:PasskeyOfflineFixture.Mode -eq 'kmsi-form') { $form.AllKeys.Count | Should -Be 2 }
+                else {
+                    $form['LoginOptions'] | Should -Be '1'
+                    $form['type'] | Should -Be '28'
+                    $form.AllKeys.Count | Should -Be 7
+                }
+                $status = 302; $responseHeaders.Location = @("https://mysignins.microsoft.com/#code=SYNTHETIC-CODE&state=$($global:PasskeyOfflineFixture.State)")
+            } elseif ($Uri -match '/token$') {
+                $global:PasskeyOfflineFixture.TokenRequests++
+                $form = [Web.HttpUtility]::ParseQueryString([string]$Body)
+                $claimsRequest = $form['claims'] | ConvertFrom-Json
+                $claimsRequest.access_token.amr.values | Should -Contain ngcmfa
+                if ($global:PasskeyOfflineFixture.TokenRequests -eq 1) { $form['grant_type'] | Should -Be authorization_code }
+                else { $form['grant_type'] | Should -Be refresh_token }
+                $claims = @{ aud = '19db86c3-b2b9-44cc-b339-36da233a3be2'; appid = '19db86c3-b2b9-44cc-b339-36da233a3be2'; tid = '11111111-1111-1111-1111-111111111111'; upn = 'fixture@example.invalid'; exp = [DateTimeOffset]::UtcNow.AddHours(1).ToUnixTimeSeconds() }
+                if ($global:PasskeyOfflineFixture.Mode -eq 'badclient') { $claims.appid = 'wrong' }
+                if ($global:PasskeyOfflineFixture.Mode -eq 'badtenant') { $claims.tid = '22222222-2222-2222-2222-222222222222' }
+                if ($global:PasskeyOfflineFixture.Mode -eq 'baduser') { $claims.upn = 'other@example.invalid' }
+                $payload = [Convert]::ToBase64String([Text.Encoding]::UTF8.GetBytes(($claims | ConvertTo-Json -Compress))).TrimEnd('=').Replace('+','-').Replace('/','_')
+                $content = @{ access_token = "e30.$payload.synthetic"; refresh_token = 'SYNTHETIC-REFRESH-TOKEN' } | ConvertTo-Json -Compress
+                $Headers.Origin | Should -Be 'https://mysignins.microsoft.com'
+            } elseif ($Uri -match '/api/session/authorize$') {
+                $global:PasskeyOfflineFixture.SessionRequests++
+                $content = @{ isAuthorized = $true; sessionCtxV2 = 'SYNTHETIC-SESSION'; requireNgcMfaForSecurityInfo = ($global:PasskeyOfflineFixture.SessionRequests -eq 1) } | ConvertTo-Json -Compress
+            } elseif ($Uri -match '/authenticationmethods/new$') {
+                $data = @{ requestData = @{ canary = 'fixture-canary'; serverChallenge = 'AQIDBA'; userId = 'BQYHCA'; postBackUrl = 'https://mysignins.microsoft.com/api/post/newfido' }; provisionUrl = 'https://login.microsoft.com/tenant/fido/create' } | ConvertTo-Json -Depth 5 -Compress
+                $content = @{ ErrorCode = 0; Data = $data } | ConvertTo-Json -Compress
+            } elseif ($Uri -match '/fido/create\?') {
+                if ($global:PasskeyOfflineFixture.Mode -eq 'createfail') { $status = 400 }
+                $content = 'fixture-created'
+            } elseif ($Uri -match '/post/newfido\?') {
+                $fields = [Web.HttpUtility]::ParseQueryString([string]$Body)
+                $global:PasskeyOfflineFixture.CredentialId = $fields['credentialId']
+                $content = '<div id="context" data-content="{&quot;Canary&quot;:&quot;fixture-canary&quot;,&quot;PostInfo&quot;:&quot;fixture-post&quot;}"></div>'
+            } elseif ($Uri -match '/authenticationmethods(/availablemethods)?$') {
+                $content = '{}'
+            } elseif ($Uri -match '/authenticationmethods/verify$') {
+                $verification = ($Body | ConvertFrom-Json).VerificationData | ConvertFrom-Json
+                $id = $verification.CredentialId
+                $id | Should -BeExactly $global:PasskeyOfflineFixture.CredentialId
+                $probe = ($Body | ConvertFrom-Json).CredentialVerification
+                if ($probe) {
+                    $global:PasskeyOfflineFixture.ProbeRequests++
+                    @($verification.PSObject.Properties.Name) -join ',' | Should -Be CredentialId
+                }
+                $verificationState = if ($probe -and $global:PasskeyOfflineFixture.Mode -eq 'mismatch') { 1 } else { 2 }
+                $errorCode = if ($global:PasskeyOfflineFixture.Mode -eq 'protocolerror') { 1 } else { 0 }
+                $status = if ($global:PasskeyOfflineFixture.Mode -eq 'httperror') { 400 } else { 200 }
+                $content = @{ VerificationState = $verificationState; ErrorCode = $errorCode; DataUpdates = @{ FidoDevices = @{ CredentialId = 'opaque-service-method-id' } } } | ConvertTo-Json -Depth 6 -Compress
+            } else { throw "Unexpected mocked request path $(([uri]$Uri).AbsolutePath)." }
+            return @{ StatusCode = $status; Content = $content; Headers = $responseHeaders }
+        } @mockScope
+        Mock Invoke-RestMethod { throw 'All native registration requests must use the bounded raw transport.' } @mockScope
+        Mock Start-Sleep {} @mockScope
+        $recoveryPath = Join-Path $TestDrive "github-$Surface-$([guid]::NewGuid().ToString('N')).json"
+        $params = @{ TAP = (ConvertTo-SecureString 'SYNTHETIC-TAP' -AsPlainText -Force); UserPrincipalName = 'fixture@example.invalid'; TenantId = '11111111-1111-1111-1111-111111111111'; Repository = 'fixture-owner/fixture-repo'; RecoveryOutputPath = $recoveryPath; Confirm = $false }
+    }
+    It 'completes the synthetic ceremony and writes exactly four names without credentials in outputs' {
+        $warnings = @()
+        $result = & $registrationCommand @params -WarningVariable warnings
+        @($warnings).Count | Should -Be 2
+        $result.Success | Should -BeTrue
+        $result.RecoveryOutputPath | Should -BeExactly $recoveryPath
+        (Get-Content $recoveryPath -Raw | ConvertFrom-Json).credentialId | Should -BeExactly $result.CredentialId
+        $result | ConvertTo-Json -Depth 5 | Should -Not -Match 'SYNTHETIC|BEGIN PRIVATE|fixture@'
+        $calls = Get-Content $ghCalls
+        @($calls | Where-Object { $_ -match '^secret set ' }).Count | Should -Be 4
+        $calls[-1] | Should -Be 'secret set PASSKEY_PRIVATE_KEY --repo github.com/fixture-owner/fixture-repo --app actions'
+        $calls -join ' ' | Should -Not -Match 'SYNTHETIC|BEGIN PRIVATE|fixture@'
+        $global:PasskeyOfflineFixture.TokenRequests | Should -Be 2
+        $global:PasskeyOfflineFixture.ProbeRequests | Should -Be 1
+        Should -Invoke Invoke-RestMethod -Times 0 -Exactly @mockScope
+    }
+    It 'discovers the UPN tenant and exports only after bound verification' {
+        $params.Remove('TenantId')
+        $params.DisplayName = 'TokenForge 261011'
+        $result = & $registrationCommand @params
+        $result.EnrollmentStatus | Should -Be Verified
+        $result.ExportStatus | Should -Be Complete
+        Should -Invoke Invoke-WebRequest -Times 1 -Exactly -ParameterFilter { $Uri -eq 'https://login.microsoftonline.com/example.invalid/v2.0/.well-known/openid-configuration' } @mockScope
+    }
+    It 'retains the original flow token when auxiliary credential-type discovery fails' {
+        $global:PasskeyOfflineFixture.Mode = 'credentialtype-failure'
+        $result = & $registrationCommand @params
+        $result.EnrollmentStatus | Should -Be Verified
+        $result.ExportStatus | Should -Be Complete
+    }
+    It 'does no discovery under WhatIf when the tenant argument is omitted' {
+        $params.Remove('TenantId')
+        & $registrationCommand @params -WhatIf
+        Should -Invoke Invoke-WebRequest -Times 0 -Exactly @mockScope
+        Test-Path $ghCalls | Should -BeFalse
+    }
+    It 'rejects blank or oversized names before CLI authentication or HTTP' -ForEach @('   ', ('x' * 31)) {
+        $params.DisplayName = $_
+        { & $registrationCommand @params } | Should -Throw
+        Should -Invoke Invoke-WebRequest -Times 0 -Exactly @mockScope
+        Test-Path $ghCalls | Should -BeFalse
+    }
+    It 'reports preflight failure without claiming partial enrollment or exposing raw details' {
+        Mock Get-Command { $null } -ParameterFilter { $Name -eq 'gh' } @mockScope
+        $caught = $null
+        try { & $registrationCommand @params } catch { $caught = $_ }
+        $caught.TargetObject.Stage | Should -Be GitHubPreflight
+        $caught.TargetObject.Code | Should -Be PasskeyGitHubPreflightFailed
+        $caught.TargetObject.EnrollmentStatus | Should -Be NotStarted
+        $caught.TargetObject.ExportStatus | Should -Be NotStarted
+        $caught.TargetObject.FailureCategory | Should -Be CommandMissing
+        $caught.TargetObject.CliCheck | Should -Be RepositoryAccess
+        $caught.Exception.InnerException | Should -BeNullOrEmpty
+        $caught.Exception.Message | Should -Not -Match 'may exist|partially|SYNTHETIC|fixture@|BEGIN PRIVATE'
+        Should -Invoke Invoke-WebRequest -Times 0 -Exactly @mockScope
+    }
+    It 'completes the existing config-driven KMSI branch before verified export' {
+        $global:PasskeyOfflineFixture.Mode = 'kmsi-config'
+        $result = & $registrationCommand @params
+        $result.Success | Should -BeTrue
+        $result.EnrollmentStatus | Should -Be Verified
+        $result.ExportStatus | Should -Be Complete
+        @((Get-Content $ghCalls) | Where-Object { $_ -match '^secret set ' }).Count | Should -Be 4
+    }
+    It 'completes an original-compatible config-less authentication form before verified export' {
+        $global:PasskeyOfflineFixture.Mode = 'kmsi-form'
+        $result = & $registrationCommand @params
+        $result.Success | Should -BeTrue
+        $result.EnrollmentStatus | Should -Be Verified
+        $result.ExportStatus | Should -Be Complete
+        @((Get-Content $ghCalls) | Where-Object { $_ -match '^secret set ' }).Count | Should -Be 4
+    }
+    It 'preserves safe service details through the public error without enrollment or secret writes' {
+        $global:PasskeyOfflineFixture.Mode = 'service-rejected'
+        $caught = $null
+        try { & $registrationCommand @params } catch { $caught = $_ }
+        $caught.TargetObject.Stage | Should -Be TapAuthorization
+        $caught.TargetObject.FailureCategory | Should -Be ServiceRejected
+        $caught.TargetObject.HttpStatus | Should -Be 200
+        $caught.TargetObject.AadstsCode | Should -Be AADSTS50126
+        $caught.TargetObject.ServiceErrorCode | Should -Be 50126
+        $caught.TargetObject.ContinuationPage | Should -Be ConvergedSignIn
+        $caught.TargetObject.EnrollmentStatus | Should -Be NotStarted
+        $caught.TargetObject.ExportStatus | Should -Be NotStarted
+        ($caught | Out-String) | Should -Not -Match 'SYNTHETIC-TAP|raw-secret|fixture@|BEGIN PRIVATE'
+        $caught.Exception.InnerException | Should -BeNullOrEmpty
+        $global:PasskeyOfflineFixture.TokenRequests | Should -Be 0
+        @((Get-Content $ghCalls) | Where-Object { $_ -match '^secret set ' }).Count | Should -Be 0
+    }
+    It 'rejects invalid response without any secret write' -ForEach @('badstate','consent','badclient','badtenant','baduser','createfail','mismatch','protocolerror','httperror') {
+        $global:PasskeyOfflineFixture.Mode = $_
+        $caught = $null
+        try { & $registrationCommand @params } catch { $caught = $_ }
+        $caught | Should -Not -BeNullOrEmpty
+        $expectedEnrollment = if ($global:PasskeyOfflineFixture.Mode -in @('mismatch','protocolerror','httperror')) { 'Unconfirmed' } else { 'NotStarted' }
+        $caught.TargetObject.EnrollmentStatus | Should -Be $expectedEnrollment
+        $caught.TargetObject.ExportStatus | Should -Be NotStarted
+        $caught.TargetObject.Stage | Should -Not -BeNullOrEmpty
+        ($caught.TargetObject | ConvertTo-Json -Depth 5) | Should -Not -Match 'SYNTHETIC|fixture@|BEGIN PRIVATE'
+        $caught.Exception.InnerException | Should -BeNullOrEmpty
+        # Repository access uses the active credential without gating unrelated saved accounts.
+        $calls = @(Get-Content $ghCalls -ErrorAction Stop)
+        $calls.Count | Should -Be 1
+        $calls[0] | Should -Be 'api --hostname github.com --include --silent repos/fixture-owner/fixture-repo/actions/secrets?per_page=1'
+        @($calls | Where-Object { $_ -match '^secret set ' }).Count | Should -Be 0
+        if ($global:PasskeyOfflineFixture.Mode -in @('createfail','mismatch','protocolerror','httperror')) {
+            Test-Path $recoveryPath | Should -BeTrue
+            $saved = Get-Content $recoveryPath -Raw | ConvertFrom-Json
+            $saved.credentialId | Should -BeExactly $caught.TargetObject.CredentialId
+            $caught.TargetObject.RecoveryOutputPath | Should -BeExactly $recoveryPath
+        } else { Test-Path $recoveryPath | Should -BeFalse }
+        if ($global:PasskeyOfflineFixture.Mode -in @('protocolerror','httperror')) { $global:PasskeyOfflineFixture.ProbeRequests | Should -Be 0 }
+        if ($global:PasskeyOfflineFixture.Mode -eq 'mismatch') { $global:PasskeyOfflineFixture.ProbeRequests | Should -Be 5 }
+        if ($_ -in @('badstate','consent')) { $global:PasskeyOfflineFixture.TokenRequests | Should -Be 0 }
+    }
+}

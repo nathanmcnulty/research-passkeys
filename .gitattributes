@@ -1,1 +1,6 @@
 browser-extensions/vendor/** -text
+
+# PowerShell source and generated artifacts are byte-checked with LF line endings.
+*.ps1 text eol=lf
+*.psm1 text eol=lf
+*.psd1 text eol=lf

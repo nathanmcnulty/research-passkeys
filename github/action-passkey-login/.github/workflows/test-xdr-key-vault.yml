@@ -1,0 +1,94 @@
+﻿name: Test Passkey Login (Key Vault and XDR bootstrap only)
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  id-token: write
+
+env:
+  POWERSHELL_TELEMETRY_OPTOUT: '1'
+  DOTNET_CLI_TELEMETRY_OPTOUT: '1'
+
+jobs:
+  test-xdr-key-vault:
+    runs-on: windows-latest
+
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - name: Verify installed PowerShell 7.6
+        shell: pwsh
+        run: |
+          Write-Host "Installed PowerShell: $($PSVersionTable.PSVersion) ($([Environment]::ProcessPath))"
+          if ($PSVersionTable.PSVersion.Major -ne 7 -or $PSVersionTable.PSVersion.Minor -ne 6) {
+            throw "Expected installed PowerShell 7.6, got $($PSVersionTable.PSVersion)."
+          }
+          if ([Microsoft.PowerShell.Telemetry.ApplicationInsightsTelemetry]::CanSendTelemetry) {
+            throw 'Telemetry must be disabled before PowerShell starts.'
+          }
+
+      - name: Azure login via OIDC
+        uses: azure/login@a641126d1b8aa4d1fa005f4f92df94a3a4c4c906 # v3.1.0
+        with:
+          client-id: ${{ secrets.AZURE_CLIENT_ID }}
+          tenant-id: ${{ secrets.AZURE_TENANT_ID }}
+          allow-no-subscriptions: true
+
+      - name: Run local action with Key Vault signing
+        id: passkey
+        uses: ./
+        with:
+          credential-id: ${{ secrets.PASSKEY_CREDENTIAL_ID }}
+          user-handle: ${{ secrets.PASSKEY_USER_HANDLE }}
+          user-principal-name: ${{ secrets.PASSKEY_USER_PRINCIPAL_NAME }}
+          key-vault-name: ${{ secrets.PASSKEY_KEY_VAULT_NAME }}
+          key-vault-key-name: ${{ secrets.PASSKEY_KEY_VAULT_KEY_NAME }}
+          key-vault-tenant-id: ${{ secrets.AZURE_TENANT_ID }}
+
+      - name: Validate ESTSAUTH output
+        shell: pwsh
+        env:
+          ESTS_COOKIE: ${{ steps.passkey.outputs.auth-cookie }}
+          ESTS_COOKIE_NAME: ${{ steps.passkey.outputs.cookie-name }}
+          PASSKEY_AUTHENTICATED: ${{ steps.passkey.outputs.authenticated }}
+          PASSKEY_SIGNATURE_METHOD: ${{ steps.passkey.outputs.signature-method }}
+        run: |
+          if ($env:PASSKEY_AUTHENTICATED -ne 'true') {
+            throw 'Passkey authentication did not complete successfully.'
+          }
+
+          if ($env:PASSKEY_SIGNATURE_METHOD -ne 'Azure Key Vault') {
+            throw 'Expected the Key Vault validation workflow to use Azure Key Vault signing.'
+          }
+
+          if ([string]::IsNullOrWhiteSpace($env:ESTS_COOKIE)) {
+            throw 'The action did not return an auth-cookie output.'
+          }
+
+          if ($env:ESTS_COOKIE_NAME -ne 'ESTSAUTH') {
+            throw "Expected cookie-name output to be ESTSAUTH but received '$($env:ESTS_COOKIE_NAME)'."
+          }
+
+      - name: Exercise XDR portal bootstrap (not authenticated validation)
+        shell: pwsh
+        env:
+          ESTS_COOKIE: ${{ steps.passkey.outputs.auth-cookie }}
+          ESTS_COOKIE_NAME: ${{ steps.passkey.outputs.cookie-name }}
+          TENANT_ID: ${{ secrets.AZURE_TENANT_ID }}
+        run: |
+          $result = ./scripts/Test-XdrConnectionByEstsCookie.ps1 `
+            -EstsCookieValue $env:ESTS_COOKIE `
+            -EstsCookieName $env:ESTS_COOKIE_NAME `
+            -TenantId $env:TENANT_ID
+
+          if (-not $result.BootstrapCompleted -or $result.ValidationScope -ne 'PortalBootstrapOnly') {
+            throw 'Expected portal-bootstrap evidence.'
+          }
+          if ($result.Success -or $result.AuthenticationVerified) {
+            throw 'Portal bootstrap must not claim authenticated XDR validation.'
+          }
+
+          Write-Host 'XDR portal bootstrap completed. Authenticated XDR readback remains unverified.'
+          Write-Host "XDR cookies established: $($result.XdrCookieNames -join ', ')"

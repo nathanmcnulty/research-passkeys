@@ -1,0 +1,8 @@
+﻿{
+  "credentialId": "<credential-id>",
+  "privateKey": "-----BEGIN PRIVATE KEY-----\n<private-key>\n-----END PRIVATE KEY-----",
+  "relyingParty": "login.microsoft.com",
+  "url": "https://login.microsoft.com",
+  "userHandle": "<user-handle>",
+  "username": "user@example.com"
+}

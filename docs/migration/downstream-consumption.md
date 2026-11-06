@@ -92,3 +92,12 @@ For Azure-hosted orchestration layers, start from:
 - `templates\logic-app\passkey-function-http`
 
 These assets intentionally call the Function surfaces instead of re-embedding passkey protocol logic in each orchestration host.
+
+
+## Standalone PowerShell and GitHub distributions
+
+Research is the maintained source. Personal public URLs and the Action repository
+receive exact generated artifacts from the same reviewed source version and commit.
+The [build guide](../../powershell/BUILD.md) lists the explicit file mapping and checks.
+Original DOCX and unrelated public content are preserved. No automatic cross-repository
+writer, bot PR or synchronization service is installed.
