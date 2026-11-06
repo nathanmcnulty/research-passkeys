@@ -17,6 +17,20 @@ def canonical_json(value: object) -> str:
         raise InvalidRequest("The request must have a canonical JSON representation.") from exc
 
 
+def strict_json(data):
+    def object_hook(pairs):
+        value = {}
+        for key, item in pairs:
+            if key in value:
+                raise ValueError("Duplicate JSON field")
+            value[key] = item
+        return value
+
+    def invalid_constant(value):
+        raise ValueError("Non-finite JSON value")
+    return json.loads(data, object_pairs_hook=object_hook, parse_constant=invalid_constant)
+
+
 @dataclass(frozen=True)
 class Row:
     value: dict
@@ -41,7 +55,7 @@ def validate_commit(reads: dict[str, Row | None], writes: dict[str, dict]) -> No
         raise InvalidRequest("Blind writes are forbidden.")
     old = reads["owner"].value if reads["owner"] else {"revision": 0, "epoch": 0}
     new = writes["owner"]
-    if (new.get("schema") != 1 or new.get("kind") != "owner" or
+    if (type(new.get("schema")) is not int or new["schema"] != 1 or new.get("kind") != "owner" or
             type(new.get("revision")) is not int or type(new.get("epoch")) is not int or
             new["revision"] != old["revision"] + 1 or not old["epoch"] <= new["epoch"] <= old["epoch"] + 1):
         raise InvalidRequest("Owner revision must advance exactly once and its epoch cannot roll back.")
@@ -108,12 +122,15 @@ class AzureTableStore:
         except AzureError as exc:
             raise StorageUnavailable("Broker storage is unavailable.") from exc
         try:
-            value = json.loads(entity["Payload"])
+            payload = entity["Payload"]
+            if not isinstance(payload, str) or len(payload) > 16000:
+                raise ValueError()
+            value = strict_json(payload)
             etag = entity.metadata["etag"]
             if not isinstance(value, dict) or not etag or etag == "*":
                 raise ValueError()
             return Row(value, etag)
-        except (KeyError, TypeError, ValueError) as exc:
+        except (KeyError, TypeError, ValueError, RecursionError) as exc:
             raise CorruptState("Stored broker row is malformed.") from exc
 
     def commit(self, partition: str, reads: dict[str, Row | None], writes: dict[str, dict]) -> None:

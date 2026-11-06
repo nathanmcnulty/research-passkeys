@@ -7,9 +7,10 @@ from http import HTTPStatus
 import json
 import re
 
-from .auth import EntraTokenVerifier, strict_json
+from .auth import EntraTokenVerifier
 from .coordination import Coordinator
 from .errors import ClaimsChallenge, Conflict, CorruptState, GateClosed, InvalidRequest, NotFound, StorageUnavailable, Unauthenticated
+from .storage import strict_json
 
 RESOURCE = re.compile(r"/v1/(credentials|reservations)/([0-9a-f]{32})(?:/(prepare|abort|finalize|sign))?\Z")
 

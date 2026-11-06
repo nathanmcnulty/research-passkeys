@@ -16,6 +16,7 @@ import requests
 
 from .coordination import AuthenticatedCaller
 from .errors import ClaimsChallenge, InvalidRequest, Unauthenticated
+from .storage import strict_json
 
 BEARER = re.compile(r"(?i:Bearer) ([A-Za-z0-9_-]+\.[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+)\Z")
 
@@ -27,21 +28,6 @@ def canonical_guid(value):
         return str(UUID(value))
     except (ValueError, AttributeError) as exc:
         raise InvalidRequest("A configured identity must be a UUID.") from exc
-
-
-def strict_object(pairs):
-    result = {}
-    for key, value in pairs:
-        if key in result:
-            raise ValueError("Duplicate JSON field")
-        result[key] = value
-    return result
-
-
-def strict_json(data):
-    def invalid_constant(value):
-        raise ValueError("Non-finite JSON value")
-    return json.loads(data, object_pairs_hook=strict_object, parse_constant=invalid_constant)
 
 
 @dataclass(frozen=True)

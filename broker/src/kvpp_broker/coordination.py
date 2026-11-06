@@ -27,6 +27,11 @@ def digest(value: object) -> str:
     return hashlib.sha256(canonical_json(value).encode("ascii")).hexdigest()
 
 
+def valid_rp(value):
+    return (isinstance(value, str) and RP.fullmatch(value) is not None and
+        all(label and len(label) <= 63 and not label.startswith("-") and not label.endswith("-") for label in value.split(".")))
+
+
 @dataclass(frozen=True)
 class AuthenticatedCaller:
     """Trusted server authentication result, NOT deserialized from an API body.
@@ -65,7 +70,7 @@ class Transaction:
         self.root = self.get("owner")
         if self.root is None:
             self.root = {"schema": 1, "kind": "owner", "revision": 0, "epoch": 0}
-        if (self.root.get("schema") != 1 or self.root.get("kind") != "owner" or
+        if (type(self.root.get("schema")) is not int or self.root["schema"] != 1 or self.root.get("kind") != "owner" or
                 any(type(self.root.get(key)) is not int or self.root[key] < 0 for key in ("revision", "epoch"))):
             raise CorruptState("Owner guard is malformed.")
 
@@ -85,8 +90,26 @@ class Transaction:
         value = self.get(key)
         if value is None:
             raise NotFound("The resource was not found.")
-        if value.get("kind") != kind or value.get("schema") != 1:
+        if value.get("kind") != kind or type(value.get("schema")) is not int or value["schema"] != 1:
             raise CorruptState("Broker resource schema does not match its row.")
+        identity_field = {"credential": "credential_id", "operation": "operation_id", "cleanup": "cleanup_id"}.get(kind)
+        if identity_field:
+            identity = value.get(identity_field)
+            if not isinstance(identity, str) or not OPAQUE.fullmatch(identity) or key != f"{kind}-{identity}":
+                raise CorruptState("Broker resource identity does not match its row.")
+        if kind == "credential":
+            if (value.get("state") not in ("reserved", "active", "disabled", "aborted", "deleted") or
+                    not valid_rp(value.get("rp_id")) or type(value.get("counter")) is not int or not 0 <= value["counter"] <= MAX_COUNTER):
+                raise CorruptState("Credential metadata is malformed.")
+            key_reference = value.get("key_reference")
+            if value["state"] in ("reserved", "aborted"):
+                if key_reference is not None:
+                    raise CorruptState("Reservation unexpectedly retained a key identity.")
+            elif not isinstance(key_reference, str) or not 1 <= len(key_reference) <= 512:
+                raise CorruptState("Credential key identity is malformed.")
+            lease = value.get("lease")
+            if lease is not None and (not isinstance(lease, str) or not OPAQUE.fullmatch(lease)):
+                raise CorruptState("Credential operation lease is malformed.")
         return value
 
     def put(self, key: str, value: dict):
@@ -142,7 +165,7 @@ class Coordinator:
     def _apply(self, tx, caller, key, action, target, fingerprint, change, replay_result, now):
         prior = tx.get(f"request-{key}")
         if prior:
-            if prior.get("kind") != "request" or prior.get("schema") != 1:
+            if prior.get("kind") != "request" or type(prior.get("schema")) is not int or prior["schema"] != 1:
                 raise CorruptState("Idempotency state is malformed.")
             if prior["fingerprint"] != fingerprint:
                 raise Conflict("Request key was already used for another operation.")
@@ -161,7 +184,7 @@ class Coordinator:
         return dict(result)
 
     def reserve(self, caller: AuthenticatedCaller, request_key: str, rp_id: str) -> dict:
-        if not isinstance(rp_id, str) or not RP.fullmatch(rp_id) or any(not label or len(label) > 63 or label.startswith("-") or label.endswith("-") for label in rp_id.split(".")):
+        if not valid_rp(rp_id):
             raise InvalidRequest("A canonical RP ID is required.")
 
         def change(tx, now):

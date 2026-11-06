@@ -165,12 +165,38 @@ class CoordinationCases:
         self.seed()
         self.api.revoke(self.caller, "1" * 32)
         original = self.store.read(self.caller.partition, "owner")
-        for invalid in [{"epoch": 0}, {"revision": 0}, {"epoch": True}]:
+        for invalid in [{"epoch": 0}, {"revision": 0}, {"epoch": True}, {"schema": True}]:
             tx = Transaction(self.store, self.caller.partition)
             tx.root = {**tx.root, **invalid}
             with self.assertRaises(InvalidRequest):
                 tx.commit()
             self.assertEqual(original, self.store.read(self.caller.partition, "owner"))
+
+    def test_corrupt_record_identity_cannot_be_read_prepared_or_deleted(self):
+        self.seed()
+        row = "credential-" + CREDENTIAL
+        tx = Transaction(self.store, self.caller.partition)
+        tx.put(row, {**tx.get(row), "credential_id": "b" * 32})
+        tx.commit()
+        original = self.store.read(self.caller.partition, "owner")
+        for operation in [lambda: self.api.get_credential(self.caller, CREDENTIAL),
+                lambda: self.api.prepare(self.caller, "1" * 32, CREDENTIAL, "example.test", "a" * 64),
+                lambda: self.api.delete(self.caller, "2" * 32, CREDENTIAL)]:
+            with self.assertRaises(CorruptState):
+                operation()
+        self.assertEqual(original, self.store.read(self.caller.partition, "owner"))
+
+    def test_corrupt_public_fields_fail_before_projection(self):
+        self.seed()
+        row = "credential-" + CREDENTIAL
+        original = self.store.read(self.caller.partition, row).value
+        for overrides in [{"counter": {"private": "internal-value"}}, {"counter": True}, {"counter": MAX_COUNTER + 1},
+                {"rp_id": {"private": "internal-value"}}, {"state": "unexpected"}, {"key_reference": None}, {"schema": True}]:
+            tx = Transaction(self.store, self.caller.partition)
+            tx.put(row, {**original, **overrides})
+            tx.commit()
+            with self.assertRaises(CorruptState):
+                self.api.get_credential(self.caller, CREDENTIAL)
 
     def test_request_key_cannot_replay_across_allowed_applications(self):
         self.api.reserve(self.caller, "1" * 32, "example.test")
