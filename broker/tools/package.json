@@ -1,0 +1,8 @@
+{
+  "name": "kvpp-broker-local-validation",
+  "private": true,
+  "version": "0.1.0",
+  "devDependencies": {
+    "azurite": "3.37.0"
+  }
+}

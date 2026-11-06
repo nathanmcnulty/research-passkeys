@@ -91,7 +91,10 @@ function Stop-FakeGitHubCliChild {
         catch [ArgumentException] { $cleaned = $true; return } # The specifically tracked process has already exited.
         if ($process.HasExited) { $cleaned = $true; return }
         $start = $process.StartTime.ToUniversalTime()
-        if ($start -lt $EarliestStartUtc.AddSeconds(-1) -or $process.MainModule.FileName -ine $ExpectedExecutablePath -or
+        $expectedFile = [IO.FileInfo]::new($ExpectedExecutablePath)
+        $resolvedExpectedFile = $expectedFile.ResolveLinkTarget($true)
+        $expectedPath = if ($null -ne $resolvedExpectedFile) { $resolvedExpectedFile.FullName } else { $expectedFile.FullName }
+        if ($start -lt $EarliestStartUtc.AddSeconds(-1) -or $process.MainModule.FileName -ine $expectedPath -or
             ($identity.Count -gt 1 -and -not [string]::IsNullOrEmpty($identity[1]) -and $start.Ticks -ne [long]$identity[1])) {
             throw 'Refusing to terminate a process that does not match the synthetic fixture child.'
         }

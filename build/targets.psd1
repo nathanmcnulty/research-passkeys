@@ -336,5 +336,76 @@
                 'powershell/src/Public/Get-EntraPasskeyMetadata.ps1'
             )
         }
+        @{
+            Path = 'function-app/powershell/keyvault-passkey-http/src/shared/passkey-assets/scripts/entra/Register-EntraKeyVaultPasskey.ps1'
+            EntryPoint = 'powershell/entrypoints/entra/Register-EntraKeyVaultPasskey.ps1'
+            Sources = @(
+                'powershell/src/Common/Encoding.ps1'
+                'powershell/src/Common/Values.ps1'
+                'powershell/src/Common/Cbor.ps1'
+                'powershell/src/Common/Process.ps1'
+                'powershell/src/KeyVault/Reference.ps1'
+                'powershell/src/KeyVault/Token.ps1'
+                'powershell/src/KeyVault/ProvisioningKeys.ps1'
+                'powershell/src/Entra/SoftwareBrowserHeaders.ps1'
+                'powershell/src/Entra/SoftwareSession.ps1'
+                'powershell/src/Entra/SoftwareAuthorization.ps1'
+                'powershell/src/Entra/SoftwareAuthentication.ps1'
+                'powershell/src/Entra/KeyVaultRegistrationState.ps1'
+                'powershell/src/Entra/KeyVaultRegistrationRequests.ps1'
+                'powershell/src/Entra/KeyVaultRegistrationVerification.ps1'
+                'powershell/src/Entra/KeyVaultRegistrationAttestation.ps1'
+                'powershell/src/Entra/KeyVaultRegistrationOutput.ps1'
+                'powershell/src/Public/Register-EntraKeyVaultPasskeyViaTap.ps1'
+                'powershell/src/Public/Register-EntraKeyVaultPasskey.ps1'
+            )
+        }
+        @{
+            Path = 'function-app/powershell/keyvault-passkey-http/src/shared/passkey-assets/scripts/entra/reference/Invoke-EntraPasskeyLogin.ps1'
+            EntryPoint = 'powershell/entrypoints/Invoke-EntraPasskeyLogin.ps1'
+            Sources = @(
+                'powershell/src/Common/Encoding.ps1'
+                'powershell/src/Common/Values.ps1'
+                'powershell/src/Common/Process.ps1'
+                'powershell/src/Common/Cookies.ps1'
+                'powershell/src/Common/Credential.ps1'
+                'powershell/src/Local/PrivateKey.ps1'
+                'powershell/src/Local/Signing.ps1'
+                'powershell/src/KeyVault/Reference.ps1'
+                'powershell/src/KeyVault/Token.ps1'
+                'powershell/src/KeyVault/Signing.ps1'
+                'powershell/src/WebAuthn/AuthenticatorData.ps1'
+                'powershell/src/WebAuthn/Assertion.ps1'
+                'powershell/src/Entra/LoginRequest.ps1'
+                'powershell/src/Entra/LoginInput.ps1'
+                'powershell/src/Entra/LoginAssertion.ps1'
+                'powershell/src/Entra/LoginInterrupt.ps1'
+                'powershell/src/Entra/LoginResult.ps1'
+                'powershell/src/Public/Invoke-EntraPasskeyLogin.ps1'
+            )
+        }
+        @{
+            Path = 'function-app/powershell/keyvault-passkey-http/src/shared/passkey-assets/scripts/entra/reference/Register-EntraKeyVaultPasskeyViaEstsAuth.ps1'
+            EntryPoint = 'powershell/entrypoints/entra/Register-EntraKeyVaultPasskeyViaEstsAuth.ps1'
+            Sources = @(
+                'powershell/src/Common/Encoding.ps1'
+                'powershell/src/Common/Values.ps1'
+                'powershell/src/Common/Cbor.ps1'
+                'powershell/src/Common/Process.ps1'
+                'powershell/src/KeyVault/Reference.ps1'
+                'powershell/src/KeyVault/Token.ps1'
+                'powershell/src/KeyVault/ProvisioningKeys.ps1'
+                'powershell/src/Entra/SoftwareBrowserHeaders.ps1'
+                'powershell/src/Entra/SoftwareSession.ps1'
+                'powershell/src/Entra/SoftwareAuthorization.ps1'
+                'powershell/src/Entra/SoftwareAuthentication.ps1'
+                'powershell/src/Entra/KeyVaultRegistrationState.ps1'
+                'powershell/src/Entra/KeyVaultRegistrationRequests.ps1'
+                'powershell/src/Entra/KeyVaultRegistrationVerification.ps1'
+                'powershell/src/Entra/KeyVaultRegistrationAttestation.ps1'
+                'powershell/src/Entra/KeyVaultRegistrationOutput.ps1'
+                'powershell/src/Public/Register-EntraKeyVaultPasskeyViaEstsAuth.ps1'
+            )
+        }
     )
 }

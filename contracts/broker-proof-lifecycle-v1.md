@@ -2,6 +2,15 @@
 
 Status: design candidate, 2026-09-26. No current Function route implements this contract. In particular, this document does not authorize signing or a WebAuthn UV claim.
 
+Implementation checkpoint, 2026-11-06: the new [canonical Python package](../broker/README.md)
+implements non-signing owner-partition storage and a preliminary authenticated
+WSGI component, with real local Azure Table ETag/batch and signed HTTP-client
+validation. It verifies Entra admission and a configured authentication-context
+claim; missing context yields a step-up challenge. Existing Function routes
+remain separate and disabled where previously gated. This checkpoint does not
+close native/device proof, live CA/RP acceptance, signing, deployment or client-
+cutover acceptance gates.
+
 ## Implementation ownership and boundary
 
 The canonical broker implementation belongs in `research-passkeys`, in a new Python 3.11 package under `broker/` with its own authenticated API and tests. The existing Python and PowerShell Function samples remain research inputs, not production broker implementations; they contain registration/login and capture workflows with different trust assumptions. The Windows plugin in `key-vault-passkey-provider` is the first proposed native proof producer. Browser extension proof is a separate future integration. Direct Table/Key Vault client access remains a lab mode and must never be a fallback from a denied broker request.
