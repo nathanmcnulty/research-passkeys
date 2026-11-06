@@ -115,6 +115,13 @@ class AzureTableCoordinationTests(CoordinationCases, unittest.TestCase):
         with self.assertRaises(CorruptState):
             self.api.reserve(self.caller, "1" * 32, "example.test")
 
+    def test_missing_guard_does_not_reinitialize_a_retained_request(self):
+        self.api.reserve(self.caller, "1" * 32, "example.test")
+        self.store.client.delete_entity(partition_key=self.caller.partition, row_key="owner")
+        with self.assertRaises(CorruptState):
+            self.api.reserve(self.caller, "1" * 32, "example.test")
+        self.assertIsNone(self.store.read(self.caller.partition, "owner"))
+
 
 if __name__ == "__main__":
     unittest.main()

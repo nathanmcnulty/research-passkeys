@@ -48,6 +48,11 @@ being updated. A newly initialized owner or changed guard seen between GETs
 causes a complete snapshot retry, including before classifying an apparent
 state conflict/corruption. Only a definitively rejected 409/412 is retried. Other failures
 retain an unknown outcome; SDK mutation retries are disabled in the client factory.
+Connections have a five-second deadline and response reads a fifteen-second
+deadline. Raw loopback HTTP fixtures verify that a 500, a dropped acknowledgement
+and an elapsed response deadline each produce one POST, without an SDK resend.
+The storage boundary also enforces monotonic guard revisions/epochs, independently
+of lifecycle code.
 
 All rows stay in one Azure Table partition. Transactions are capped at 16 rows,
 with each canonical JSON payload capped at 16,000 ASCII characters. The service

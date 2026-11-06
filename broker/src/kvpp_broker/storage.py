@@ -39,6 +39,12 @@ def validate_commit(reads: dict[str, Row | None], writes: dict[str, dict]) -> No
         raise InvalidRequest("Every bounded transaction must condition and advance the owner guard.")
     if any(key not in reads for key in writes):
         raise InvalidRequest("Blind writes are forbidden.")
+    old = reads["owner"].value if reads["owner"] else {"revision": 0, "epoch": 0}
+    new = writes["owner"]
+    if (new.get("schema") != 1 or new.get("kind") != "owner" or
+            type(new.get("revision")) is not int or type(new.get("epoch")) is not int or
+            new["revision"] != old["revision"] + 1 or not old["epoch"] <= new["epoch"] <= old["epoch"] + 1):
+        raise InvalidRequest("Owner revision must advance exactly once and its epoch cannot roll back.")
     for value in writes.values():
         if len(canonical_json(value)) > 16000:
             raise InvalidRequest("Broker row exceeds its bounded storage budget.")
@@ -83,10 +89,11 @@ class AzureTableStore:
         from azure.data.tables import TableClient
 
         url = urlsplit(endpoint)
-        if (url.username or url.password or url.query or url.fragment or
+        if (not url.hostname or url.username or url.password or url.query or url.fragment or
                 (url.scheme != "https" and not (allow_local_emulator and url.scheme == "http" and url.hostname == "127.0.0.1"))):
             raise InvalidRequest("Table storage requires HTTPS; only the explicit loopback emulator may use HTTP.")
-        return cls(TableClient(endpoint, table_name, credential=credential, retry_total=0))
+        return cls(TableClient(endpoint, table_name, credential=credential, retry_total=0,
+            connection_timeout=5, read_timeout=15))
 
     def read(self, partition: str, row: str) -> Row | None:
         from azure.core.exceptions import AzureError, ResourceNotFoundError

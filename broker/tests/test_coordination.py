@@ -1,5 +1,4 @@
 import concurrent.futures
-import copy
 import threading
 import unittest
 
@@ -161,6 +160,27 @@ class CoordinationCases:
             stale.commit()
         self.assertIsNone(self.store.read(self.caller.partition, "request-" + "f" * 32))
         self.assertEqual(self.store.read(self.caller.partition, "owner").value["epoch"], 1)
+
+    def test_storage_boundary_rejects_guard_rollback(self):
+        self.seed()
+        self.api.revoke(self.caller, "1" * 32)
+        original = self.store.read(self.caller.partition, "owner")
+        for invalid in [{"epoch": 0}, {"revision": 0}, {"epoch": True}]:
+            tx = Transaction(self.store, self.caller.partition)
+            tx.root = {**tx.root, **invalid}
+            with self.assertRaises(InvalidRequest):
+                tx.commit()
+            self.assertEqual(original, self.store.read(self.caller.partition, "owner"))
+
+    def test_request_key_cannot_replay_across_allowed_applications(self):
+        self.api.reserve(self.caller, "1" * 32, "example.test")
+        api = Coordinator(self.store, frozenset([APP, OTHER_OWNER]), lambda: self.now)
+        other_app = AuthenticatedCaller(TENANT, OWNER, OTHER_OWNER, 10000)
+        with self.assertRaises(Conflict):
+            api.reserve(other_app, "1" * 32, "example.test")
+        api.reserve(other_app, "2" * 32, "example.test")
+        with self.assertRaises(Conflict):
+            api.reserve(self.caller, "2" * 32, "example.test")
 
     def test_parallel_delete_and_prepare_cannot_restore_a_tombstone(self):
         self.seed()
