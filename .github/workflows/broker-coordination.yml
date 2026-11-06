@@ -2,6 +2,7 @@ name: Broker Coordination
 
 on:
   push:
+    branches: [main]
     paths:
       - 'broker/**'
       - '.github/workflows/broker-coordination.yml'
@@ -13,6 +14,10 @@ on:
 
 permissions:
   contents: read
+
+concurrency:
+  group: broker-coordination-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
 
 jobs:
   coordination:
