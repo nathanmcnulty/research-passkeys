@@ -31,8 +31,9 @@ def digest(value: object) -> str:
 class AuthenticatedCaller:
     """Trusted server authentication result, NOT deserialized from an API body.
 
-    An eventual API must verify Entra signature/issuer/audience/app/CA before
-    constructing this context. This library is not itself an authentication API.
+    The preliminary WSGI boundary verifies tokens and configured authentication
+    context through auth.EntraTokenVerifier. Native/device/ceremony policy is a
+    separate gate and must never be inferred from this identity context.
     """
 
     tenant_id: str

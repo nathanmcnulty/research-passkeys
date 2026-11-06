@@ -1,1 +1,1 @@
-"""Canonical broker core. No HTTP routes, activation or signing are enabled."""
+"""Canonical coordination core and non-signing WSGI boundary; no deployment."""

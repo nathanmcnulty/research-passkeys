@@ -18,6 +18,14 @@ class Unauthenticated(BrokerError):
     code = "unauthenticated"
 
 
+class ClaimsChallenge(BrokerError):
+    code = "insufficient_claims"
+
+    def __init__(self, header: str):
+        super().__init__("Additional authentication is required.")
+        self.header = header
+
+
 class GateClosed(BrokerError):
     code = "proof_integration_required"
 

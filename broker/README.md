@@ -2,8 +2,9 @@
 
 This is the canonical Python broker package selected by
 [the proof/lifecycle contract](../contracts/broker-proof-lifecycle-v1.md).
-It implements the first non-signing persistence slice. It is not connected to
-the research Functions, the provider extension, or a deployed endpoint.
+It implements durable coordination and an authenticated preliminary WSGI API.
+It is not connected to the research Functions, the provider extension or a
+deployed endpoint. No production listener or deployment is included.
 
 Implemented:
 
@@ -23,19 +24,67 @@ Implemented:
   key. Unknown dispatched work remains retained for reconciliation.
 - Redacted mutation audit rows committed in the same transaction, with guard
   revision ordering. Idempotent replay does not duplicate the audit row.
+- Entra v2 delegated JWT verification and a required authentication-context claim,
+  with server-bound step-up challenges before storage access. The preliminary API
+  exposes reservation/read/abort/preparation only; protected actions remain gated.
 
 Activation and signing always raise `GateClosed`. Active records in tests are
 seeded directly by storage fixtures; there is no activation flag, proof boolean,
-test route, Key Vault signing client or production bypass. No HTTP API currently
-constructs `AuthenticatedCaller`: eventual Entra verification, CA/device/proof
-checks and RP acceptance integration remain required. Delegation is not enabled.
+test route, Key Vault signing client or production bypass. The API constructs
+`AuthenticatedCaller` only after verified token admission. Live tenant-policy,
+device/ceremony proof and RP acceptance evidence remain required. Delegation is
+not enabled.
 
-All lifecycle methods are internal state transitions. An eventual API must
-verify operation-specific proof before invoking protected transitions, including
-deletion. Cleanup claim/ticket methods are internal worker operations; they must
-not become owner-accessible generic deletion routes. Cleanup completion remains
+Lifecycle methods are internal state transitions. The API must verify operation-
+specific proof before invoking protected transitions, including deletion; those
+routes currently return 501. Cleanup claim/ticket methods have no public route
+and must not become generic deletion endpoints. Cleanup completion remains
 gated until an exact-key reconciliation adapter exists. This core never performs
 a Key Vault DELETE.
+
+## Preliminary API and authentication
+
+`BrokerApplication` is a WSGI component, not a deployed service. It accepts only
+Bearer access tokens for a configured public-cloud Entra tenant and dedicated v2
+API audience GUID. `EntraConfig` requires approved client IDs, an explicit
+delegated scope (default `Passkey.Access`) and a configured authentication-context
+ID (`c1`–`c99`). There is no context-policy bypass/default. The host supplies
+these values; request bodies and forwarded principal headers cannot set them.
+
+The verifier pins RS256 and tenant-specific HTTPS signing keys, verifies
+issuer/audience/time/version/tenant/object/client/scope, and requires the configured
+`acrs` value. It rejects application-only and sender-constrained tokens, duplicate
+JSON, weak/ambiguous keys, token-selected key URLs and non-UTF-8 encodings. Public
+keys cache for five minutes; unknown-key refresh is limited to one attempt per
+30 seconds and shared across threads. Metadata requests reject redirects and
+compression, cap the body at 128 KiB, use connection/read timeouts, and send no
+Bearer token, ambient `.netrc` credentials or proxy credentials.
+
+An otherwise valid token without the required context gets a no-store 401 with
+an `insufficient_claims` challenge bound to server configuration. MFA/UP/UV
+booleans and `xms_cc` capability do not substitute for `acrs`. An identical
+idempotent retry still passes current token/context checks before any cached
+result is returned. This validates the signed claim, not whether a tenant's
+configured CA policy is correct or enforced live; that remains a deployment gate.
+See [Entra access-token claims](https://learn.microsoft.com/en-us/entra/identity-platform/access-token-claims-reference),
+[claims challenges](https://learn.microsoft.com/en-us/entra/identity-platform/claims-challenge),
+and [confirmation-key semantics](https://www.rfc-editor.org/rfc/rfc7800).
+
+| Method/path | Behavior |
+| --- | --- |
+| `POST /v1/reservations` | `{rpId}` and a 32-character hex `Idempotency-Key`; reserves an opaque credential handle |
+| `GET /v1/credentials/{id}` | Owner-bound public projection; no key coordinates or claim secrets |
+| `POST /v1/reservations/{id}/abort` | Empty JSON object and request key; aborts a non-active reservation |
+| `POST /v1/credentials/{id}/prepare` | `{rpId,clientDataHash}` and request key; reserves a counter/nonce for an already active credential |
+| Delete, finalize and sign paths | 501 until trusted operation-proof/RP integration exists |
+| Cleanup claim/ticket paths | Not exposed |
+
+All responses/errors are no-store. JSON bodies are UTF-8, reject duplicate or
+unknown fields and are bounded to 8 KiB. Errors do not echo tokens, claims, raw
+exceptions or private key coordinates. No credential can become active through
+this API. A preparation is not a signature or current ceremony authorization.
+The host still needs HTTPS, request deadlines, quotas/rate limits, reviewed CA
+policy, production audit handling and authorized live validation before exposure.
 
 ## Transaction design
 

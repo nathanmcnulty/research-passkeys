@@ -7,7 +7,7 @@ name = "kvpp-broker"
 version = "0.1.0"
 description = "Non-signing owner-partition coordination core for the passkey broker"
 requires-python = ">=3.11"
-dependencies = ["azure-data-tables==12.7.0"]
+dependencies = ["azure-data-tables==12.7.0", "PyJWT[crypto]==2.15.1", "cryptography==50.0.2", "requests==2.34.2"]
 
 [tool.setuptools.packages.find]
 where = ["src"]
