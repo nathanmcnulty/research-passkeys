@@ -23,10 +23,29 @@ def main():
     with tempfile.TemporaryDirectory(prefix="kvpp-broker-azurite-") as directory:
         with open(Path(directory) / "emulator.log", "w+", encoding="utf-8") as log:
             env = {**os.environ, "AZURITE_ACCOUNTS": "brokerlocal:Yg=="}
-            process = subprocess.Popen(["node", str(script), "--tableHost", "127.0.0.1", "--tablePort", str(port),
-                "--location", directory, "--disableTelemetry", "--silent"], env=env, stdout=log, stderr=subprocess.STDOUT,
-                creationflags=subprocess.CREATE_NO_WINDOW if os.name == "nt" else 0)
-            try:
+            process = None
+            def stop():
+                if process is None or process.poll() is not None:
+                    return
+                process.stdin.write("shutdown\n")
+                process.stdin.flush()
+                try:
+                    process.wait(timeout=15)
+                except subprocess.TimeoutExpired:
+                    process.kill()
+                    process.wait(timeout=10)
+                    raise RuntimeError("Local emulator did not flush and stop normally.")
+                finally:
+                    process.stdin.close()
+                if process.returncode:
+                    raise RuntimeError("Local emulator exited abnormally.")
+
+            def start():
+                nonlocal process
+                process = subprocess.Popen(["node", str(root / "tools/azurite-runner.cjs"), str(script), "--tableHost", "127.0.0.1", "--tablePort", str(port),
+                    "--location", directory, "--disableTelemetry", "--silent"], env=env, stdout=log, stderr=subprocess.STDOUT,
+                    stdin=subprocess.PIPE, text=True,
+                    creationflags=subprocess.CREATE_NO_WINDOW if os.name == "nt" else 0)
                 deadline = time.monotonic() + 20
                 while True:
                     if process.poll() is not None or time.monotonic() > deadline:
@@ -37,15 +56,22 @@ def main():
                             break
                     except OSError:
                         time.sleep(0.1)
-                env = {**os.environ, "KVPP_TABLE_EMULATOR_ENDPOINT": f"http://127.0.0.1:{port}/brokerlocal"}
-                return subprocess.call([sys.executable, "-m", "unittest", "discover", "-s", str(root / "tests"), "-v"], env=env)
+
+            try:
+                start()
+                test_env = {**os.environ, "KVPP_TABLE_EMULATOR_ENDPOINT": f"http://127.0.0.1:{port}/brokerlocal"}
+                result = subprocess.call([sys.executable, "-m", "unittest", "discover", "-s", str(root / "tests"), "-v"], env=test_env)
+                if result:
+                    return result
+                probe = str(root / "tools/restart_probe.py")
+                fixture = str(Path(directory) / "restart-fixture.json")
+                subprocess.run([sys.executable, probe, "prepare", fixture], env=test_env, check=True)
+                stop()
+                start()
+                subprocess.run([sys.executable, probe, "verify", fixture], env=test_env, check=True)
+                return 0
             finally:
-                process.terminate()
-                try:
-                    process.wait(timeout=10)
-                except subprocess.TimeoutExpired:
-                    process.kill()
-                    process.wait(timeout=10)
+                stop()
 
 
 if __name__ == "__main__":

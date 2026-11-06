@@ -4,7 +4,7 @@ import threading
 import unittest
 
 from kvpp_broker.coordination import AuthenticatedCaller, Coordinator, Transaction, MAX_COUNTER
-from kvpp_broker.errors import Conflict, CorruptState, GateClosed, InvalidRequest, NotFound, StorageUnavailable, Unauthenticated
+from kvpp_broker.errors import CompareFailed, Conflict, CorruptState, GateClosed, InvalidRequest, NotFound, StorageUnavailable, Unauthenticated
 from kvpp_broker.storage import MemoryStore
 
 TENANT = "11111111-1111-4111-8111-111111111111"
@@ -44,6 +44,11 @@ class CoordinationCases:
         first = self.api.reserve(self.caller, "1" * 32, "example.test")
         self.assertEqual(first, Coordinator(self.store, frozenset([APP]), lambda: self.now).reserve(self.caller, "1" * 32, "example.test"))
         self.assertEqual(self.store.read(self.caller.partition, "owner").value["revision"], 1)
+        audit = self.store.read(self.caller.partition, "audit-" + "1" * 32).value
+        self.assertEqual(audit["action"], "reserve")
+        self.assertEqual(audit["revision"], 1)
+        self.assertNotIn("rp_id", audit)
+        self.assertNotIn("result", audit)
 
     def test_conflicting_payload_and_action_do_not_mutate(self):
         self.api.reserve(self.caller, "1" * 32, "example.test")
@@ -130,6 +135,10 @@ class CoordinationCases:
         self.assertEqual(self.store.read(self.caller.partition, f"operation-{op['operation_id']}").value["epoch"], 1)
         self.api.revoke(self.caller, "3" * 32)
         self.assertEqual(self.store.read(self.caller.partition, "owner").value["epoch"], 2)
+        next_op = self.api.prepare(self.caller, "4" * 32, CREDENTIAL, "example.test", "b" * 64)
+        self.assertEqual(next_op["counter"], 2)
+        self.assertEqual(self.store.read(self.caller.partition, f"operation-{op['operation_id']}").value["state"], "revoked")
+        self.assertEqual(self.store.read(self.caller.partition, f"operation-{next_op['operation_id']}").value["epoch"], 2)
 
     def test_malformed_inputs_do_not_create_storage(self):
         for rp in ["Example.test", "example.test/keys", "example..test", "-bad.test", "x" * 64 + ".test"]:
@@ -138,10 +147,110 @@ class CoordinationCases:
         self.assertIsNone(self.store.read(self.caller.partition, "owner"))
 
     def test_activation_and_signing_gates_have_no_storage_side_effect(self):
-        for method in [self.api.finalize_registration, self.api.sign_assertion]:
+        for method in [self.api.finalize_registration, self.api.sign_assertion, self.api.complete_cleanup]:
             with self.assertRaises(GateClosed):
                 method(userPresent=True, userVerified=True, pinVerified=True)
         self.assertIsNone(self.store.read(self.caller.partition, "owner"))
+
+    def test_stale_transaction_rolls_back_every_row(self):
+        self.seed()
+        stale = Transaction(self.store, self.caller.partition)
+        stale.put("request-" + "f" * 32, {"kind": "fixture", "schema": 1})
+        self.api.revoke(self.caller, "1" * 32)
+        with self.assertRaises(CompareFailed):
+            stale.commit()
+        self.assertIsNone(self.store.read(self.caller.partition, "request-" + "f" * 32))
+        self.assertEqual(self.store.read(self.caller.partition, "owner").value["epoch"], 1)
+
+    def test_parallel_delete_and_prepare_cannot_restore_a_tombstone(self):
+        self.seed()
+        barrier = threading.Barrier(2)
+        def prepare():
+            barrier.wait(timeout=10)
+            try:
+                return self.api.prepare(self.caller, "1" * 32, CREDENTIAL, "example.test", "a" * 64)
+            except Conflict:
+                return None
+        def delete():
+            barrier.wait(timeout=10)
+            return self.api.delete(self.caller, "2" * 32, CREDENTIAL)
+        with concurrent.futures.ThreadPoolExecutor(2) as workers:
+            preparation, deletion = workers.submit(prepare), workers.submit(delete)
+            operation, tombstone = preparation.result(), deletion.result()
+        credential = self.api.get_credential(self.caller, CREDENTIAL)
+        self.assertEqual(credential["state"], "deleted")
+        self.assertEqual(credential["counter"], 1 if operation else 0)
+        if operation:
+            self.assertEqual(self.store.read(self.caller.partition, f"operation-{operation['operation_id']}").value["state"], "cancelled")
+        with self.assertRaises(Conflict):
+            self.api.prepare(self.caller, "3" * 32, CREDENTIAL, "example.test", "b" * 64)
+        self.assertEqual(self.api.delete(self.caller, "4" * 32, CREDENTIAL)["cleanup_id"], tombstone["cleanup_id"])
+
+    def test_competing_deletions_allocate_one_cleanup_target(self):
+        self.seed()
+        with concurrent.futures.ThreadPoolExecutor(2) as workers:
+            results = list(workers.map(lambda key: self.api.delete(self.caller, key * 32, CREDENTIAL), ["1", "2"]))
+        self.assertEqual(results[0]["cleanup_id"], results[1]["cleanup_id"])
+
+    def test_expired_worker_loses_claim_before_dispatch(self):
+        self.seed()
+        cleanup_id = self.api.delete(self.caller, "1" * 32, CREDENTIAL)["cleanup_id"]
+        first = self.api.claim_cleanup(self.caller, "2" * 32, cleanup_id, "a" * 32)
+        self.now = first["claim_until"]
+        second = self.api.claim_cleanup(self.caller, "3" * 32, cleanup_id, "b" * 32)
+        self.assertEqual(second["generation"], first["generation"] + 1)
+        with self.assertRaises(Conflict):
+            self.api.begin_cleanup(self.caller, "4" * 32, cleanup_id, "a" * 32, first["claim_token"])
+        ticket = self.api.begin_cleanup(self.caller, "5" * 32, cleanup_id, "b" * 32, second["claim_token"])
+        self.assertEqual(ticket["key_reference"], "private-key-generation-one")
+
+    def test_dispatch_ticket_cannot_be_replayed_or_reclaimed(self):
+        self.seed()
+        cleanup_id = self.api.delete(self.caller, "1" * 32, CREDENTIAL)["cleanup_id"]
+        claim = self.api.claim_cleanup(self.caller, "2" * 32, cleanup_id, "a" * 32)
+        ticket = self.api.begin_cleanup(self.caller, "3" * 32, cleanup_id, "a" * 32, claim["claim_token"])
+        for request in ["3", "4"]:
+            with self.assertRaises(Conflict):
+                self.api.begin_cleanup(self.caller, request * 32, cleanup_id, "a" * 32, claim["claim_token"])
+        self.api.mark_cleanup_unknown(self.caller, "5" * 32, cleanup_id, ticket["dispatch_id"])
+        self.now += 1000
+        with self.assertRaises(Conflict):
+            self.api.claim_cleanup(self.caller, "6" * 32, cleanup_id, "b" * 32)
+        self.assertEqual(self.api.get_credential(self.caller, CREDENTIAL)["state"], "deleted")
+        self.assertEqual(self.store.read(self.caller.partition, f"cleanup-{cleanup_id}").value["state"], "unknown")
+
+    def test_wrong_cleanup_target_generation_cannot_dispatch(self):
+        self.seed()
+        cleanup_id = self.api.delete(self.caller, "1" * 32, CREDENTIAL)["cleanup_id"]
+        claim = self.api.claim_cleanup(self.caller, "2" * 32, cleanup_id, "a" * 32)
+        tx = Transaction(self.store, self.caller.partition)
+        row = "credential-" + CREDENTIAL
+        tx.put(row, {**tx.require(row, "credential"), "key_reference": "replacement-key-generation"})
+        tx.commit()
+        with self.assertRaises(Conflict):
+            self.api.begin_cleanup(self.caller, "3" * 32, cleanup_id, "a" * 32, claim["claim_token"])
+        self.assertEqual(self.store.read(self.caller.partition, f"cleanup-{cleanup_id}").value["state"], "claimed")
+
+    def test_unknown_signing_blocks_cleanup_after_delete(self):
+        self.seed()
+        op = self.api.prepare(self.caller, "1" * 32, CREDENTIAL, "example.test", "a" * 64)
+        tx = Transaction(self.store, self.caller.partition)
+        row = f"operation-{op['operation_id']}"
+        tx.put(row, {**tx.require(row, "operation"), "state": "unknown"})
+        tx.commit()
+        cleanup_id = self.api.delete(self.caller, "2" * 32, CREDENTIAL)["cleanup_id"]
+        self.assertEqual(self.store.read(self.caller.partition, f"cleanup-{cleanup_id}").value["state"], "blocked")
+        with self.assertRaises(Conflict):
+            self.api.claim_cleanup(self.caller, "3" * 32, cleanup_id, "a" * 32)
+
+    def test_another_owner_cannot_claim_cleanup(self):
+        self.seed()
+        cleanup_id = self.api.delete(self.caller, "1" * 32, CREDENTIAL)["cleanup_id"]
+        with self.assertRaises(NotFound):
+            self.api.claim_cleanup(caller(OTHER_OWNER), "2" * 32, cleanup_id, "a" * 32)
+        public = self.api.get_credential(self.caller, CREDENTIAL)
+        self.assertNotIn("key_reference", public)
+        self.assertNotIn("claim_token", public)
 
 
 class MemoryCoordinationTests(CoordinationCases, unittest.TestCase):
@@ -149,6 +258,37 @@ class MemoryCoordinationTests(CoordinationCases, unittest.TestCase):
 
 
 class UnknownCommitTests(unittest.TestCase):
+    def test_mixed_revision_reads_are_not_false_corruption(self):
+        class ConcurrentRevocation(MemoryStore):
+            change = False
+            def read(self, partition, row):
+                if self.change and row == "credential-" + CREDENTIAL:
+                    self.change = False
+                    api = Coordinator(self, frozenset([APP]), lambda: 1000)
+                    api.revoke(caller(), "a" * 32)
+                    api.prepare(caller(), "b" * 32, CREDENTIAL, "example.test", "b" * 64)
+                return super().read(partition, row)
+        store = ConcurrentRevocation()
+        seed_active(store, caller())
+        store.change = True
+        with self.assertRaises(Conflict):
+            Coordinator(store, frozenset([APP]), lambda: 1000).prepare(caller(), "1" * 32, CREDENTIAL, "example.test", "a" * 64)
+        self.assertEqual(store.read(caller().partition, "credential-" + CREDENTIAL).value["counter"], 1)
+
+    def test_concurrent_owner_initialization_retries_the_entire_snapshot(self):
+        class ConcurrentInitialization(MemoryStore):
+            initialize = True
+            def read(self, partition, row):
+                if row == "request-" + "1" * 32 and self.initialize:
+                    self.initialize = False
+                    Coordinator(self, frozenset([APP]), lambda: 1000).reserve(caller(), "1" * 32, "example.test")
+                return super().read(partition, row)
+        store = ConcurrentInitialization()
+        api = Coordinator(store, frozenset([APP]), lambda: 1000)
+        result = api.reserve(caller(), "1" * 32, "example.test")
+        self.assertEqual(api.get_credential(caller(), result["credential_id"])["state"], "reserved")
+        self.assertEqual(store.read(caller().partition, "owner").value["revision"], 1)
+
     def test_lost_commit_acknowledgement_is_not_retried_internally(self):
         class LostAck(MemoryStore):
             fail = True
@@ -167,6 +307,26 @@ class UnknownCommitTests(unittest.TestCase):
         first = api.reserve(caller(), "1" * 32, "example.test")
         self.assertEqual(store.calls, 1)
         self.assertEqual(api.get_credential(caller(), first["credential_id"])["state"], "reserved")
+
+    def test_lost_dispatch_acknowledgement_never_reissues_ticket(self):
+        class LostAck(MemoryStore):
+            fail = False
+            def commit(self, *args):
+                super().commit(*args)
+                if self.fail:
+                    self.fail = False
+                    raise StorageUnavailable("lost acknowledgement")
+        store = LostAck()
+        api = Coordinator(store, frozenset([APP]), lambda: 1000)
+        seed_active(store, caller())
+        cleanup_id = api.delete(caller(), "1" * 32, CREDENTIAL)["cleanup_id"]
+        claim = api.claim_cleanup(caller(), "2" * 32, cleanup_id, "a" * 32)
+        store.fail = True
+        with self.assertRaises(StorageUnavailable):
+            api.begin_cleanup(caller(), "3" * 32, cleanup_id, "a" * 32, claim["claim_token"])
+        with self.assertRaises(Conflict):
+            api.begin_cleanup(caller(), "3" * 32, cleanup_id, "a" * 32, claim["claim_token"])
+        self.assertEqual(store.read(caller().partition, f"cleanup-{cleanup_id}").value["state"], "dispatched")
 
 
 if __name__ == "__main__":

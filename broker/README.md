@@ -17,12 +17,25 @@ Implemented:
   workers race on durable ETags. Expired preparations consume their counter;
   an unknown signing outcome never becomes permission to sign again.
 - Owner revocation epochs and retained aborted registrations.
+- Atomic deletion tombstones and pinned cleanup targets. Expired worker claims
+  can be reassigned only before dispatch. A stale worker cannot acquire a dispatch
+  ticket; a committed ticket cannot be replayed, even with the identical request
+  key. Unknown dispatched work remains retained for reconciliation.
+- Redacted mutation audit rows committed in the same transaction, with guard
+  revision ordering. Idempotent replay does not duplicate the audit row.
 
 Activation and signing always raise `GateClosed`. Active records in tests are
 seeded directly by storage fixtures; there is no activation flag, proof boolean,
 test route, Key Vault signing client or production bypass. No HTTP API currently
 constructs `AuthenticatedCaller`: eventual Entra verification, CA/device/proof
 checks and RP acceptance integration remain required. Delegation is not enabled.
+
+All lifecycle methods are internal state transitions. An eventual API must
+verify operation-specific proof before invoking protected transitions, including
+deletion. Cleanup claim/ticket methods are internal worker operations; they must
+not become owner-accessible generic deletion routes. Cleanup completion remains
+gated until an exact-key reconciliation adapter exists. This core never performs
+a Key Vault DELETE.
 
 ## Transaction design
 
@@ -31,7 +44,9 @@ revision and authorization epoch. Read it **before** reading dependent rows.
 Every mutation atomically compares and advances that guard, with conditional
 creates/updates for the changed credential, operation and request rows. Thus a
 competing mutation invalidates the entire decision, including rows read without
-being updated. Only a definitively rejected 409/412 is retried. Other failures
+being updated. A newly initialized owner or changed guard seen between GETs
+causes a complete snapshot retry, including before classifying an apparent
+state conflict/corruption. Only a definitively rejected 409/412 is retried. Other failures
 retain an unknown outcome; SDK mutation retries are disabled in the client factory.
 
 All rows stay in one Azure Table partition. Transactions are capped at 16 rows,
@@ -40,6 +55,20 @@ must be the sole writer; direct client Table/Key Vault access is incompatible wi
 this authority boundary. No negative rows, idempotency records or guards are
 automatically pruned. Retention/quota/backup rollback and multi-region failover
 policy are deployment gates. The current memory adapter is strictly a test fixture.
+
+An idempotency key is scoped to an owner partition and bound to action, target,
+canonical payload and allowed application. Different owners have independent
+namespaces; neither can retrieve the other's result. An identical retry can
+return an earlier reservation/preparation result after it expires or is revoked;
+that result is historical data, never current signing authority. Every later
+transition must check current lifecycle, epoch and expiry.
+
+Dispatch tickets trade availability for safety: after commit, lease expiry cannot
+issue another ticket. Lost acknowledgement or a crash before dispatch can leave
+work unknown indefinitely. A future trusted adapter must reconcile it; it cannot
+assume a lease fences an already running Key Vault request, or that a caller's
+boolean proves deletion. Key names/generations must remain exclusive and must
+not be reused while any dispatch could be in flight.
 
 The Azure Table adapter uses the documented [entity group transaction](https://learn.microsoft.com/en-us/rest/api/storageservices/performing-entity-group-transactions)
 and [Python SDK conditional transaction](https://learn.microsoft.com/en-us/python/api/azure-data-tables/azure.data.tables.tableclient?view=azure-python)
@@ -64,6 +93,12 @@ a public fixture account. It runs the same cases against the memory model and
 real emulator ETag/batch requests. No ambient Azure configuration, token, live
 storage account or vault is used. HTTP is allowed only through the explicit
 loopback emulator option; configured storage endpoints otherwise require HTTPS.
+
+The suite also starts independent Python broker processes to race reservations,
+counter allocation and cleanup claims. A two-phase probe restarts both the broker
+process and disk-backed emulator, preserving a counter, tombstone, idempotent
+result and unknown dispatch. The emulator stops through its flush handler;
+this proves normal process restart, not abrupt machine/power-loss durability.
 
 `python -m unittest discover -s broker/tests -v` runs unit cases and explicitly
 skips emulator cases when the harness is absent. Such skips are not an integration
