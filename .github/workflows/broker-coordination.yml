@@ -6,10 +6,18 @@ on:
     paths:
       - 'broker/**'
       - '.github/workflows/broker-coordination.yml'
+      - 'function-app/**'
+      - 'powershell/**'
+      - 'python/libraries/passkey/**'
+      - '.gitattributes'
   pull_request:
     paths:
       - 'broker/**'
       - '.github/workflows/broker-coordination.yml'
+      - 'function-app/**'
+      - 'powershell/**'
+      - 'python/libraries/passkey/**'
+      - '.gitattributes'
   workflow_dispatch:
 
 permissions:
