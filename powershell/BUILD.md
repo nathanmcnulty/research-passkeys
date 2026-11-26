@@ -28,6 +28,8 @@ change caller defaults or leave credentials in global variables.
 The public commands are:
 
 - `Invoke-EntraPasskeyLogin`: local P-256 or versioned Key Vault signing
+- `Get-EntraPasskeyAccessToken`: passkey authentication followed by OAuth2 PKCE access-token exchange
+- `Get-EntraPasskeyAccessTokenViaDeviceCode`: passkey authentication completing an Entra device code flow to acquire an access token
 - `Register-EntraSoftwarePasskey`: Graph application-permission registration
 - `Register-EntraSoftwarePasskeyViaTap` / `ViaEstsAuth`: native session registration
 - `Register-EntraKeyVaultPasskey`, `ViaTap` / `ViaEstsAuth`: Key Vault native registration
