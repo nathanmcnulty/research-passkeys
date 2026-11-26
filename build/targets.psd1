@@ -62,6 +62,9 @@
         'powershell/src/Entra/UtilityMetadataCatalog.ps1'
         'powershell/src/Entra/UtilityMetadataGraph.ps1'
         'powershell/src/Public/Get-EntraPasskeyMetadata.ps1'
+        'powershell/src/Entra/LoginToken.ps1'
+        'powershell/src/Public/Get-EntraPasskeyAccessToken.ps1'
+        'powershell/src/Public/Get-EntraPasskeyAccessTokenViaDeviceCode.ps1'
     )
     Exports = @(
         'Invoke-EntraPasskeyLogin'
@@ -76,6 +79,8 @@
         'Register-EntraKeyVaultPasskeyViaEstsAuth'
         'Get-EntraEstsCookieViaTap'
         'Get-EntraPasskeyMetadata'
+        'Get-EntraPasskeyAccessToken'
+        'Get-EntraPasskeyAccessTokenViaDeviceCode'
     )
     Scripts = @(
         @{
@@ -334,6 +339,58 @@
                 'powershell/src/Entra/UtilityMetadataCatalog.ps1'
                 'powershell/src/Entra/UtilityMetadataGraph.ps1'
                 'powershell/src/Public/Get-EntraPasskeyMetadata.ps1'
+            )
+        }
+        @{
+            Path = 'powershell/scripts/entra/reference/Get-EntraPasskeyAccessToken.ps1'
+            EntryPoint = 'powershell/entrypoints/Get-EntraPasskeyAccessToken.ps1'
+            Sources = @(
+                'powershell/src/Common/Encoding.ps1'
+                'powershell/src/Common/Values.ps1'
+                'powershell/src/Common/Process.ps1'
+                'powershell/src/Common/Cookies.ps1'
+                'powershell/src/Common/Credential.ps1'
+                'powershell/src/Local/PrivateKey.ps1'
+                'powershell/src/Local/Signing.ps1'
+                'powershell/src/KeyVault/Reference.ps1'
+                'powershell/src/KeyVault/Token.ps1'
+                'powershell/src/KeyVault/Signing.ps1'
+                'powershell/src/WebAuthn/AuthenticatorData.ps1'
+                'powershell/src/WebAuthn/Assertion.ps1'
+                'powershell/src/Entra/LoginRequest.ps1'
+                'powershell/src/Entra/LoginInput.ps1'
+                'powershell/src/Entra/LoginAssertion.ps1'
+                'powershell/src/Entra/LoginInterrupt.ps1'
+                'powershell/src/Entra/LoginResult.ps1'
+                'powershell/src/Public/Invoke-EntraPasskeyLogin.ps1'
+                'powershell/src/Entra/LoginToken.ps1'
+                'powershell/src/Public/Get-EntraPasskeyAccessToken.ps1'
+            )
+        }
+        @{
+            Path = 'powershell/scripts/entra/reference/Get-EntraPasskeyAccessTokenViaDeviceCode.ps1'
+            EntryPoint = 'powershell/entrypoints/Get-EntraPasskeyAccessTokenViaDeviceCode.ps1'
+            Sources = @(
+                'powershell/src/Common/Encoding.ps1'
+                'powershell/src/Common/Values.ps1'
+                'powershell/src/Common/Process.ps1'
+                'powershell/src/Common/Cookies.ps1'
+                'powershell/src/Common/Credential.ps1'
+                'powershell/src/Local/PrivateKey.ps1'
+                'powershell/src/Local/Signing.ps1'
+                'powershell/src/KeyVault/Reference.ps1'
+                'powershell/src/KeyVault/Token.ps1'
+                'powershell/src/KeyVault/Signing.ps1'
+                'powershell/src/WebAuthn/AuthenticatorData.ps1'
+                'powershell/src/WebAuthn/Assertion.ps1'
+                'powershell/src/Entra/LoginRequest.ps1'
+                'powershell/src/Entra/LoginInput.ps1'
+                'powershell/src/Entra/LoginAssertion.ps1'
+                'powershell/src/Entra/LoginInterrupt.ps1'
+                'powershell/src/Entra/LoginResult.ps1'
+                'powershell/src/Public/Invoke-EntraPasskeyLogin.ps1'
+                'powershell/src/Entra/LoginToken.ps1'
+                'powershell/src/Public/Get-EntraPasskeyAccessTokenViaDeviceCode.ps1'
             )
         }
     )
