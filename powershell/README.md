@@ -17,6 +17,20 @@ Current shape:
 - `scripts/okta/`: Okta MyAccount and IDX registration/login proof-of-concept scripts
 - `samples/entra/device-code-bootstrap/`: historical, unsupported delegated-auth sample; do not run it for current testing
 
+## Azure resource-role PIM automation
+
+`Get-AzureResourcePimEligibility`, `Get-AzureResourcePimPolicy`, `Request-AzureResourcePimActivation`,
+and `Get-AzureResourcePimRequestStatus` automate Azure Resource Manager Authorization (`2020-10-01`)
+PIM discovery, exact-scope policy checks, `SelfActivate` validation/submission, and request status
+readback using one ARM token (`https://management.azure.com/.default`) per operation via
+`Get-EntraPasskeyAccessTokenViaDeviceCode` (passing exact ARM Conditional Access claims challenges when
+returned). Tokens remain in process memory only and are never returned in output or written to files.
+`Request-AzureResourcePimActivation` validates before submitting, checks token authentication age
+(`-MaxAuthenticationContextTokenAgeSeconds`, default `300` seconds) when policy enables a Conditional
+Access authentication context so tokens older than 5 minutes are refreshed before activation, preserves
+eligibility ABAC conditions, refuses unapproved scopes by default (`-AllowUnapprovedActivation` required
+otherwise), never approves requests, and never uses `AdminAssign`.
+
 Real fixes intentionally carried forward into the curated script include:
 
 - automatic handling of the **Keep me signed in** interrupt
