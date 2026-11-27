@@ -30,6 +30,10 @@ The public commands are:
 - `Invoke-EntraPasskeyLogin`: local P-256 or versioned Key Vault signing
 - `Get-EntraPasskeyAccessToken`: passkey authentication followed by OAuth2 PKCE access-token exchange
 - `Get-EntraPasskeyAccessTokenViaDeviceCode`: passkey authentication completing an Entra device code flow to acquire an access token
+- `Get-AzureResourcePimEligibility`: discovers and validates eligible Azure resource roles and schedule IDs via ARM Authorization APIs (`2020-10-01`)
+- `Get-AzureResourcePimPolicy`: checks effective Azure resource-role PIM activation policy at an exact requested ARM scope
+- `Request-AzureResourcePimActivation`: validates and submits an ARM PIM `SelfActivate` request with caller-selected scope, duration, and justification (refuses unapproved scopes by default, checks token authentication age against a 5-minute default window for required authentication contexts, and supports `-ValidateOnly` and `-WhatIf`)
+- `Get-AzureResourcePimRequestStatus`: reads back Azure resource-role PIM request status and active assignment instances without credentials
 - `Register-EntraSoftwarePasskey`: Graph application-permission registration
 - `Register-EntraSoftwarePasskeyViaTap` / `ViaEstsAuth`: native session registration
 - `Register-EntraKeyVaultPasskey`, `ViaTap` / `ViaEstsAuth`: Key Vault native registration
@@ -89,6 +93,7 @@ network, enrollment, file or secret writes.
 - `Common`, `WebAuthn`: encoding, value/cookie boundaries and assertion construction
 - `Local`, `KeyVault`: separate signing and provisioning responsibilities
 - `Entra`: explicit registration/login request and state transitions
+- `Azure`: Azure Resource Manager Authorization PIM transport, scope/policy validation, and request mapping
 - `GitHub`: bounded CLI and secret transport
 - `Public`: thin command orchestration with explicit inputs and returned context
 
